@@ -6,7 +6,7 @@ Ein MCP-Server (Model Context Protocol), der Claude erlaubt, Instagram-Feed-Post
 
 Das Projekt ist ein MCP-Server, der Claude vier Werkzeuge (Tools) für Instagram-Marketing an die Hand gibt: Bilder per KI generieren (fal.ai, Modell "Flux Schnell"), eigene Bilder hochladen, Captions verfassen und beides gemeinsam als Feed-Post auf einem Instagram Business/Creator-Konto veröffentlichen — über die offizielle Instagram Graph API. Claude steuert den kompletten Ablauf: Themenwahl, Bildprompt, Captiontext und den eigentlichen Publish-Call. Das macht automatisiertes, KI-gestütztes Instagram-Posting per Chat oder per zeitgesteuerter Claude-Routine möglich, ohne dass ein Mensch die einzelnen API-Schritte manuell ausführen muss.
 
-## 2. Architektur
+# 2. Architektur
 
 ```
 Claude (claude.ai Routine oder manueller Chat)
