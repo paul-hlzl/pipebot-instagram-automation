@@ -149,8 +149,41 @@ Beispielaufruf (JSON-RPC-Params):
 }
 ```
 
+### `generate_post_image`
+Generiert ein Bild per fal.ai (Flux Schnell), **ohne** es zu veröffentlichen. Gibt die Bild-URL zum Review zurück, bevor überhaupt gepostet wird — gedacht für den zweistufigen Ablauf `generate_post_image` → visuelle Prüfung → `publish_generated_post` (siehe Empfehlung unten).
+
+| Parameter | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging — wird nicht an das Bildmodell geschickt |
+| `visual_scene` | string | ja | Rein visuelle Szenenbeschreibung, von Claude aus `topic` abgeleitet — keine Wörter/Zahlen, die als Text im Bild erscheinen sollen |
+
+Beispielaufruf:
+```json
+{
+  "topic": "24/7 Kundenservice mit KI-Chatbots",
+  "visual_scene": "a friendly glowing robot assistant with a clock/infinity symbol motif suggesting round-the-clock availability"
+}
+```
+→ liefert `{ imageUrl, promptUsed, topic }`.
+
+### `publish_generated_post`
+Veröffentlicht einen Post mit einer bereits vorliegenden (idealerweise bereits geprüften) Bild-URL — z. B. dem Ergebnis von `generate_post_image`.
+
+| Parameter | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `imageUrl` | string | ja | Bild-URL, typischerweise aus `generate_post_image`; muss öffentlich erreichbar sein |
+| `caption` | string | ja | Caption, max. 2200 Zeichen |
+
+Beispielaufruf:
+```json
+{
+  "imageUrl": "https://fal.media/files/.../beispiel.png",
+  "caption": "Unser KI-Chatbot ist rund um die Uhr für dich da. 🤖"
+}
+```
+
 ### `generate_and_publish_post`
-Komfort-Variante: generiert das Bild direkt per fal.ai (Flux Schnell) und veröffentlicht es anschließend. Nutzt kein R2, da fal.ai bereits eine öffentliche Bild-URL liefert.
+Komfort-Variante **ohne** Review-Schritt: generiert das Bild direkt per fal.ai (Flux Schnell) und veröffentlicht es sofort im selben Aufruf. Intern identisch zu `generate_post_image` gefolgt von `publish_generated_post`. Nutzt kein R2, da fal.ai bereits eine öffentliche Bild-URL liefert.
 
 | Parameter | Typ | Pflicht | Beschreibung |
 |---|---|---|---|
@@ -167,6 +200,8 @@ Beispielaufruf:
 }
 ```
 
+> **Empfehlung für automatisierte Routinen:** `generate_and_publish_post` postet ungeprüft — Bildmodelle wie Flux Schnell können gelegentlich lesbaren, aber falschen oder verstümmelten Text ins Bild rendern (z. B. "A1" statt "AI"). Für unbeaufsichtigte Routinen daher immer den zweistufigen Weg nutzen: `generate_post_image` → Bild-URL visuell prüfen → bei Bedarf bis zu 2× neu generieren (mit noch schärferer "rein visuell, kein Text"-Anweisung) → erst dann `publish_generated_post`. Ein Beispiel-Routine-Prompt für genau diesen Ablauf steht unten in Abschnitt 7.
+
 ### `check_publishing_limit`
 Fragt das aktuelle Instagram-Publishing-Kontingent für das konfigurierte Konto ab. Keine Parameter.
 
@@ -178,15 +213,31 @@ Erneuert den Long-Lived Instagram-Access-Token (muss mindestens 24 Stunden alt s
 
 Beispielaufruf: `{}`
 
-> **Hinweis:** Es gibt aktuell **keine** separaten Tools, um nur ein Bild zu generieren oder nur einen bereits vorhandenen Post zu veröffentlichen (z. B. `generate_post_image` oder `publish_generated_post`) — Generieren und Veröffentlichen sind in `generate_and_publish_post` fest zusammengefasst. Falls getrennte Schritte gewünscht sind (z. B. um das Bild vor dem Posten manuell zu prüfen), müsste das als neues Tool ergänzt werden.
-
 ## 7. Einbindung als Custom Connector bei claude.ai
 
 1. Auf [claude.ai/customize/connectors](https://claude.ai/customize/connectors) (bzw. Einstellungen → Connectors) **"Custom Connector hinzufügen"** wählen.
 2. **URL:** `https://mcp.pipebot.at/mcp`
 3. **Authentifizierung:** Header-basiert, `Authorization: Bearer <MCP_AUTH_TOKEN>` (den Wert aus der `.env` des Servers eintragen).
-4. Nach dem Verbinden erscheinen die vier Tools in der Tool-Liste. Für **Cloud-Routinen** (zeitgesteuerte, unbeaufsichtigte Ausführung) müssen die gewünschten Tools auf **"Immer erlauben"** gestellt werden (statt "Bei jeder Nutzung fragen"), da während eines automatisierten Routine-Laufs niemand eine Rückfrage bestätigen kann. Das lässt sich pro Tool in den Connector-/Tool-Einstellungen umstellen.
+4. Nach dem Verbinden erscheinen die fünf Tools in der Tool-Liste. Für **Cloud-Routinen** (zeitgesteuerte, unbeaufsichtigte Ausführung) müssen die gewünschten Tools auf **"Immer erlauben"** gestellt werden (statt "Bei jeder Nutzung fragen"), da während eines automatisierten Routine-Laufs niemand eine Rückfrage bestätigen kann. Das lässt sich pro Tool in den Connector-/Tool-Einstellungen umstellen.
 5. Ein lokal auf `localhost` laufender Server ist für claude.ai **nicht** erreichbar — deshalb der öffentliche Domain+HTTPS-Aufbau aus Abschnitt 2/5 (siehe auch Abschnitt 9).
+
+**Routine-Prompt mit Bild-Review (empfohlen statt `generate_and_publish_post`):**
+
+Der Ablauf mit Qualitätsprüfung gehört in den Prompt-Text der Routine selbst (nicht in den Server-Code), z. B. so:
+
+```
+1. Rufe `generate_post_image` mit topic und einer rein visuellen visual_scene auf.
+2. Sieh dir das zurückgegebene Bild über die imageUrl an.
+3. Prüfe: Enthält das Bild lesbaren, aber falschen oder verstümmelten Text?
+   Wirkt es unprofessionell, verzerrt, mit kaputten Buchstaben?
+4. Falls ja: Rufe `generate_post_image` erneut auf (max. 2 weitere Versuche),
+   formuliere die visual_scene dabei noch schärfer als "rein visuell, absolut
+   kein Text, keine Buchstaben, keine Zahlen".
+5. Erst wenn ein sauberes Bild vorliegt: Rufe `publish_generated_post` mit
+   dieser imageUrl und der Caption auf.
+```
+
+Dieser Prompt-Text muss manuell in die Routinen-Konfiguration unter [claude.ai/customize](https://claude.ai/customize) (bzw. im jeweiligen Routine-Editor) eingetragen werden — er ist nicht Teil dieses Repos.
 
 ## 8. Environment-Variablen (Referenz)
 
@@ -210,5 +261,5 @@ Alle Variablen aus `.env.example` — **ohne echte Werte**, nur zur Orientierung
 ## 9. Bekannte Probleme / Learnings
 
 - **CRLF-Zeilenenden in `.env` können den `Authorization`-Header brechen.** Wenn die `.env`-Datei mit Windows-Zeilenenden (`\r\n`) gespeichert wird, kann ein aus der Datei extrahierter Wert (z. B. beim manuellen Kopieren des Tokens) ein unsichtbares `\r` mitschleppen. Landet das im `Authorization`-Header, lehnt Node's HTTP-Parser den Request bereits auf Protokollebene mit einem rohen `400 Bad Request` ab — noch bevor die eigene Anwendungslogik überhaupt läuft. **Lösung:** `.env` konsequent mit LF-Zeilenenden speichern (`sed -i 's/\r$//' .env`), gerade wenn sie unter Windows bearbeitet wurde.
-- **Flux Schnell kann ungewollt Text/Zahlen ins Bild schreiben.** Das Bildmodell hat keinen Negative-Prompt-Parameter; die Textfreiheit wird ausschließlich über explizite Anweisungen im Prompt erzwungen (siehe `IMAGE_STYLE_PREFIX` in `src/fal.ts`). Themen, Statistiken oder Prozentzahlen dürfen **nie** wörtlich in den Bildprompt übernommen werden, sondern müssen in rein visuelle Symbolik übersetzt werden (siehe Beispiel bei `generate_and_publish_post`). Trotzdem empfiehlt sich ein Review-Schritt vor dem tatsächlichen Publish, da Bildmodelle gelegentlich dennoch Text halluzinieren.
+- **Flux Schnell kann ungewollt Text/Zahlen ins Bild schreiben.** Das Bildmodell hat keinen Negative-Prompt-Parameter; die Textfreiheit wird ausschließlich über explizite Anweisungen im Prompt erzwungen (siehe `IMAGE_STYLE_PREFIX` in `src/fal.ts`). Themen, Statistiken oder Prozentzahlen dürfen **nie** wörtlich in den Bildprompt übernommen werden, sondern müssen in rein visuelle Symbolik übersetzt werden. Trotzdem kann das Modell gelegentlich Text halluzinieren (z. B. "A1" statt "AI") — deshalb gibt es seit Kurzem `generate_post_image` und `publish_generated_post` als getrennte Tools: Bild generieren, Ergebnis visuell prüfen (ggf. bis zu 2× neu generieren), erst dann veröffentlichen. `generate_and_publish_post` bleibt als schnelle Komfort-Variante ohne diesen Review-Schritt bestehen, sollte aber nicht in unbeaufsichtigten Routinen verwendet werden (siehe Abschnitt 6/7).
 - **Cloud-Routinen brauchen einen öffentlich erreichbaren MCP-Server.** Claude-Routinen bei claude.ai laufen serverseitig in der Cloud und können keinen `stdio`-MCP-Server oder einen nur lokal (`localhost`) erreichbaren HTTP-Server ansprechen. Für Automatisierung ist daher zwingend ein öffentlich per HTTPS erreichbarer Server nötig (siehe Hosting-Aufbau in Abschnitt 2) — rein lokale Setups funktionieren nur für manuelle Nutzung über Claude Code oder den Desktop-Client mit lokalem MCP-Server.
