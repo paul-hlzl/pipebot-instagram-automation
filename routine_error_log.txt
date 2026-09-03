@@ -1,1 +1,2 @@
 timestamp	status	details
+2026-09-03T12:05:18Z	FAILED_CRITICAL	Post succeeded (postId 17956922028235118) but git push and GitHub MCP write tools (push_files, create_or_update_file) all returned 403 "Resource not accessible by integration" - Claude GitHub App has no write access to paul-hlzl/pipebot-instagram-automation. Confirmed persistent via retry, not transient. PushNotification sent. Backfilled manually from local session.
