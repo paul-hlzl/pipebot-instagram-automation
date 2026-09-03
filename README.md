@@ -128,6 +128,15 @@ certbot --nginx -d mcp.pipebot.at
 
 Voraussetzung: Ein A-Record der Domain muss bereits auf die öffentliche IP des Servers zeigen, sonst schlägt die HTTP-01-Challenge fehl. Certbot richtet automatisch einen systemd-Timer (`certbot.timer`) ein, der Zertifikate rechtzeitig vor Ablauf erneuert — kein manueller Eingriff nötig.
 
+## Bild-Design-Standards
+
+Verbindliche Vorgabe für alle generierten Post-Bilder (Details siehe `styleguide.md`):
+
+- **Hintergrund:** Schwarzer Grund mit subtiler, eleganter Textur (z.B. feines Linen-Pattern oder dezente geometrische Muster) — minimalistisch, aber nicht langweilig, bleibt clean & professionell.
+- **Text:** Weiße, elegante Serif-Schrift, zentriert, als dominantes Element im Bild.
+- **Branding:** "Pipeline" (bzw. "pipebot") unten, klein, weiß.
+- **Keine sonstigen Grafiken:** keine Icons, keine Illustrationen, keine Fotoelemente — nur Typografie auf strukturiertem, dunklem Grund.
+
 ## 6. MCP-Tools (Referenz)
 
 Der Server registriert vier Tools (siehe `src/index.ts`):

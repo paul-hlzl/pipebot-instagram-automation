@@ -1,7 +1,7 @@
 # Pipebot Instagram Styleguide
 
 ## BILDSTIL (EXAKT wie cloudstrata Screenshot)
-- **Hintergrund:** Dunkelgrau/Schwarz (fast reines Schwarz, #0a0a0a oder ähnlich)
+- **Hintergrund:** Schwarzer Grund mit subtiler, eleganter Textur (z.B. feines Linen-Pattern oder dezente geometrische Muster). Minimalistisch, aber nicht langweilig. Bleibt clean & professionell.
 - **Text:** Weiße, klassische Serif-Schrift (elegant, nicht modern)
 - **Text-Größe:** Großer, dominanter Headline (3-5 Wörter max)
 - **Text-Positionierung:** Oben/Mitte, centered
