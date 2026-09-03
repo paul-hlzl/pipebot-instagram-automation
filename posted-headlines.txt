@@ -1,3 +1,4 @@
 2026-09-03T11:00:00Z	Deploy AI in Minutes	manual
 2026-09-03T11:35:00Z	Scale Smarter With AI	manual
 2026-09-03T11:44:00Z	Scale Smarter With AI (texture/Pipeline variant)	manual
+2026-09-03T12:04:25Z	Automate Workflows With Claude	auto
