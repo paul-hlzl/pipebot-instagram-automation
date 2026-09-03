@@ -134,7 +134,7 @@ Verbindliche Vorgabe für alle generierten Post-Bilder (Details siehe `styleguid
 
 - **Hintergrund:** Schwarzer Grund mit subtiler, eleganter Textur (z.B. feines Linen-Pattern oder dezente geometrische Muster) — minimalistisch, aber nicht langweilig, bleibt clean & professionell.
 - **Text:** Weiße, elegante Serif-Schrift, zentriert, als dominantes Element im Bild.
-- **Branding:** "Pipeline" (bzw. "pipebot") unten, klein, weiß.
+- **Branding:** "Pipeline AI" unten, klein, weiß (Markenname: Pipeline AI Solutions).
 - **Keine sonstigen Grafiken:** keine Icons, keine Illustrationen, keine Fotoelemente — nur Typografie auf strukturiertem, dunklem Grund.
 
 ## 6. MCP-Tools (Referenz)
@@ -170,7 +170,7 @@ Beispielaufruf:
 ```json
 {
   "topic": "Deploy AI in Minutes",
-  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"pipebot\" text in the bottom right corner."
+  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"Pipeline AI\" text in the bottom right corner."
 }
 ```
 → liefert `{ imageUrl, promptUsed, topic }`.
@@ -204,7 +204,7 @@ Beispielaufruf:
 ```json
 {
   "topic": "Deploy AI in Minutes",
-  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"pipebot\" text in the bottom right corner.",
+  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"Pipeline AI\" text in the bottom right corner.",
   "caption": "Unser KI-Chatbot ist rund um die Uhr für dich da. 🤖"
 }
 ```
@@ -238,10 +238,10 @@ Der Ablauf mit Qualitätsprüfung gehört in den Prompt-Text der Routine selbst 
 1. Lies styleguide.md für Bildstil, Textvorgaben und Caption-Regeln.
 2. Leite aus dem Thema eine kurze Headline (3-5 Wörter) ab und rufe
    `generate_post_image` mit topic und einer visual_scene auf, die den
-   Headline-Text und das "pipebot"-Branding gemäß Styleguide beschreibt.
+   Headline-Text und das "Pipeline AI"-Branding gemäß Styleguide beschreibt.
 3. Sieh dir das zurückgegebene Bild über die imageUrl an.
 4. Prüfe gegen die Qualitätscheckliste aus dem Styleguide: Headline korrekt
-   & lesbar? Zentriert? Hintergrund dunkel genug? "pipebot" sichtbar? Keine
+   & lesbar? Zentriert? Hintergrund dunkel genug? "Pipeline AI" sichtbar? Keine
    Zusatzgrafiken? Schrift elegant/serif?
 5. Falls ein Punkt fehlschlägt: Rufe `generate_post_image` erneut auf (max.
    2 weitere Versuche) mit angepasstem Prompt.
