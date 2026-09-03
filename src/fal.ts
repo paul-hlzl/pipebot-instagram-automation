@@ -2,12 +2,19 @@ import axios from "axios";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
+import { addPipelineWatermark } from "./watermark.js";
+import { uploadImageBase64 } from "./r2.js";
 
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
 
-/** Fixed visual style: minimalist black/white typographic look with a subtle textured background. The headline text belongs in visual_scene. */
+/**
+ * Fixed visual style: minimalist typographic look with a subtle textured background.
+ * The headline text belongs in visual_scene. The "Pipeline" watermark is NOT part of this
+ * prompt — it's composited in code afterward (addPipelineWatermark) because text-to-image
+ * models render rotated text and precise opacity unreliably.
+ */
 export const IMAGE_STYLE_PREFIX =
-  "minimalist Instagram graphic, Black background with subtle elegant texture (fine linen or minimal geometric pattern). Professional, clean, AI-generated aesthetic. Elegant white classic serif typography as the dominant visual element, social media post format, square, no icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements";
+  "minimalist Instagram graphic, dark navy-black background (near #0a0e1a) with subtle elegant texture (fine linen or minimal geometric pattern). Professional, clean, AI-generated aesthetic. Elegant white classic serif typography as the dominant visual element, social media post format, square, no icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no extra text/numbers/dates/labels anywhere in the image besides the one headline";
 
 interface FalImage {
   url?: string;
@@ -51,24 +58,32 @@ async function requestFalImage(prompt: string): Promise<string> {
 }
 
 /**
- * Generates an image and also downloads it server-side (base64), so MCP clients that run
- * in a network-restricted sandbox (e.g. cloud routines behind an egress proxy) can view the
- * image via the MCP tool result itself, without needing direct access to the fal.media domain.
+ * Generates an image, composites the "Pipeline" watermark onto it in code, and uploads the
+ * result to R2 (the returned imageUrl points at the watermarked version, not the raw fal.ai
+ * output). Also returns the watermarked image as base64 so MCP clients that run in a
+ * network-restricted sandbox (e.g. cloud routines behind an egress proxy) can view the final
+ * image via the MCP tool result itself, without needing direct access to fal.media or R2.
  */
 export async function generateImageUrl(
   visualScene: string,
 ): Promise<{ prompt: string; imageUrl: string; imageBase64: string; mimeType: string }> {
   const prompt = buildImagePrompt(visualScene);
 
-  const imageUrl = await withRetry(() => requestFalImage(prompt), 3, "fal.ai generate");
+  const rawImageUrl = await withRetry(() => requestFalImage(prompt), 3, "fal.ai generate");
 
-  const { data, headers } = await withRetry(
-    () => axios.get<ArrayBuffer>(imageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
+  const { data } = await withRetry(
+    () => axios.get<ArrayBuffer>(rawImageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
     3,
     "fal.ai image download",
   );
-  const mimeType = (headers["content-type"] as string | undefined)?.split(";")[0] ?? "image/jpeg";
-  const imageBase64 = Buffer.from(data).toString("base64");
 
-  return { prompt, imageUrl, imageBase64, mimeType };
+  const watermarked = await addPipelineWatermark(Buffer.from(data));
+  const imageBase64 = watermarked.toString("base64");
+  const imageUrl = await withRetry(
+    () => uploadImageBase64(`data:image/jpeg;base64,${imageBase64}`),
+    3,
+    "R2 upload of watermarked image",
+  );
+
+  return { prompt, imageUrl, imageBase64, mimeType: "image/jpeg" };
 }

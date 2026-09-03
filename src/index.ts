@@ -75,18 +75,20 @@ function createServer(): McpServer {
     .string()
     .min(1)
     .describe(
-      "Must include the exact headline text to render on the image, plus layout notes. This design puts a short " +
-        "headline (3-5 words) as the dominant visual element on a minimalist black background — do not avoid text. " +
-        'Example: \'centered white elegant serif text reading: "Deploy AI in Minutes". Small "pipebot" text in the ' +
-        "bottom right corner.'",
+      "Must include the exact headline text to render on the image, positioned left-of-center, plus any layout " +
+        "notes. This design puts a short headline (3-5 words) as the dominant visual element on a dark navy " +
+        "textured background — do not avoid text. Do NOT describe a 'Pipeline' watermark/branding text yourself — " +
+        "that is composited automatically by the server after generation, not part of the AI prompt. " +
+        'Example: \'white elegant serif text positioned left-of-center reading: "Deploy AI in Minutes"\'.',
     );
 
   const HEADLINE_IMAGE_GUIDANCE =
     "You MUST translate `topic` into `visual_scene` yourself before calling: derive a short (3-5 word) headline from " +
-    "the topic and describe it as centered white serif text on the image, plus the small pipebot branding text. " +
-    "Example: topic Deploy AI in Minutes -> visual_scene: centered white elegant serif text reading: Deploy AI in " +
-    "Minutes. Small pipebot text in the bottom right corner. " +
-    "The server prepends a fixed minimalist black-background/serif-typography style prefix; it does not send the raw " +
+    "the topic and describe it as white serif text positioned left-of-center on the image. Do NOT mention a " +
+    "'Pipeline' watermark or any branding text in visual_scene — the server composites that automatically after " +
+    "generation. Example: topic Deploy AI in Minutes -> visual_scene: white elegant serif text positioned " +
+    "left-of-center reading: Deploy AI in Minutes. " +
+    "The server prepends a fixed dark-navy-background/serif-typography style prefix; it does not send the raw " +
     "topic to fal.ai. Flux schnell can occasionally garble or misspell rendered text — always review the image before " +
     "publishing and regenerate if the text is wrong, distorted, or illegible.";
 
