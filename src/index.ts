@@ -95,7 +95,9 @@ function createServer(): McpServer {
     {
       description:
         "Generate a single Instagram-ready image with fal.ai FLUX schnell WITHOUT publishing it. " +
-        "Returns the image URL so it can be reviewed before posting. " +
+        "Returns the image URL AND the image itself as inline content, so it can be reviewed before posting " +
+        "even from a network-restricted sandbox that cannot reach the fal.media host directly (e.g. a cloud " +
+        "routine behind an egress proxy) — no separate fetch of the URL is needed to view it. " +
         "Use this instead of `generate_and_publish_post` whenever the image should be checked first " +
         "(e.g. in unattended/automated routines) — image models occasionally render garbled or wrong text into the image. " +
         HEADLINE_IMAGE_GUIDANCE,
@@ -107,11 +109,19 @@ function createServer(): McpServer {
     async ({ topic, visual_scene }) => {
       try {
         const generated = await generateImageUrl(visual_scene);
-        return textResult({
-          imageUrl: generated.imageUrl,
-          promptUsed: generated.prompt,
-          topic,
-        });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ imageUrl: generated.imageUrl, promptUsed: generated.prompt, topic }, null, 2),
+            },
+            {
+              type: "image" as const,
+              data: generated.imageBase64,
+              mimeType: generated.mimeType,
+            },
+          ],
+        };
       } catch (error) {
         console.error("generate_post_image:", toToolMessage(error));
         return errorResult(error);

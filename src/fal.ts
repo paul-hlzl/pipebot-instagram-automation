@@ -1,6 +1,7 @@
 import axios from "axios";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
+import { withRetry } from "./retry.js";
 
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
 
@@ -24,12 +25,8 @@ export function buildImagePrompt(visualScene: string): string {
   return `${IMAGE_STYLE_PREFIX}, ${trimmed}`;
 }
 
-export async function generateImageUrl(
-  visualScene: string,
-): Promise<{ prompt: string; imageUrl: string }> {
-  const prompt = buildImagePrompt(visualScene);
+async function requestFalImage(prompt: string): Promise<string> {
   const { falApiKey } = getConfig();
-
   const { data } = await axios.post<FalResponse>(
     FAL_ENDPOINT,
     {
@@ -48,11 +45,30 @@ export async function generateImageUrl(
 
   const imageUrl = data.images?.[0]?.url?.trim();
   if (!imageUrl) {
-    throw new ToolError(
-      "fal.ai hat kein Bild geliefert (keine images[0].url). " +
-        "Kein Fallback-Bild — bitte Prompt prüfen oder später erneut versuchen.",
-    );
+    throw new ToolError("fal.ai hat kein Bild geliefert (keine images[0].url).");
   }
+  return imageUrl;
+}
 
-  return { prompt, imageUrl };
+/**
+ * Generates an image and also downloads it server-side (base64), so MCP clients that run
+ * in a network-restricted sandbox (e.g. cloud routines behind an egress proxy) can view the
+ * image via the MCP tool result itself, without needing direct access to the fal.media domain.
+ */
+export async function generateImageUrl(
+  visualScene: string,
+): Promise<{ prompt: string; imageUrl: string; imageBase64: string; mimeType: string }> {
+  const prompt = buildImagePrompt(visualScene);
+
+  const imageUrl = await withRetry(() => requestFalImage(prompt), 3, "fal.ai generate");
+
+  const { data, headers } = await withRetry(
+    () => axios.get<ArrayBuffer>(imageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
+    3,
+    "fal.ai image download",
+  );
+  const mimeType = (headers["content-type"] as string | undefined)?.split(";")[0] ?? "image/jpeg";
+  const imageBase64 = Buffer.from(data).toString("base64");
+
+  return { prompt, imageUrl, imageBase64, mimeType };
 }

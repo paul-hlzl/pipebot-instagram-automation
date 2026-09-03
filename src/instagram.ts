@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance } from "axios";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
+import { withRetry } from "./retry.js";
 
 const GRAPH_BASE = "https://graph.instagram.com/v21.0";
 const POLL_INTERVAL_MS = 4000;
@@ -203,10 +204,17 @@ export async function publishImageToInstagram(
   caption: string,
 ): Promise<PublishResult> {
   await assertPublishingQuota();
-  const containerId = await createMediaContainer(imageUrl, caption);
-  await waitForContainer(containerId);
-  const postId = await publishContainer(containerId);
-  return { postId, containerId, hostedImageUrl: imageUrl };
+
+  return withRetry(
+    async () => {
+      const containerId = await createMediaContainer(imageUrl, caption);
+      await waitForContainer(containerId);
+      const postId = await publishContainer(containerId);
+      return { postId, containerId, hostedImageUrl: imageUrl };
+    },
+    2,
+    "Instagram publish",
+  );
 }
 
 export async function refreshAccessToken(): Promise<{
