@@ -26,8 +26,8 @@ MCP-Server (dieses Projekt, Node.js/Express, von pm2 am Leben gehalten)
 ```
 
 **Datenfluss beim typischen Ablauf (`generate_and_publish_post`):**
-1. Claude übersetzt ein Thema in eine rein visuelle Szenenbeschreibung (`visual_scene`) und formuliert eine Caption.
-2. Der MCP-Server hängt einen festen, textfreien Stil-Prefix an den Prompt und ruft fal.ai (Flux Schnell) auf → erhält eine Bild-URL.
+1. Claude leitet aus einem Thema eine kurze Headline ab und formuliert `visual_scene` (Headline-Text plus Layout, gemäß `styleguide.md`) sowie eine Caption.
+2. Der MCP-Server hängt einen festen, minimalistischen Schwarz/Weiß-Stil-Prefix an den Prompt (Text ist ausdrücklich Teil des Designs) und ruft fal.ai (Flux Schnell) auf → erhält eine Bild-URL.
 3. Der Server legt bei Instagram einen Media-Container mit dieser Bild-URL und der Caption an, pollt den Status bis `FINISHED` und veröffentlicht den Post.
 4. Das Ergebnis (Post-ID, Bild-URL, tatsächlich genutzter Prompt) geht zurück an Claude.
 
@@ -155,13 +155,13 @@ Generiert ein Bild per fal.ai (Flux Schnell), **ohne** es zu veröffentlichen. G
 | Parameter | Typ | Pflicht | Beschreibung |
 |---|---|---|---|
 | `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging — wird nicht an das Bildmodell geschickt |
-| `visual_scene` | string | ja | Rein visuelle Szenenbeschreibung, von Claude aus `topic` abgeleitet — keine Wörter/Zahlen, die als Text im Bild erscheinen sollen |
+| `visual_scene` | string | ja | Muss den exakten Headline-Text enthalten, der im Bild erscheinen soll, plus Layout-Hinweise (siehe `styleguide.md`) |
 
 Beispielaufruf:
 ```json
 {
-  "topic": "24/7 Kundenservice mit KI-Chatbots",
-  "visual_scene": "a friendly glowing robot assistant with a clock/infinity symbol motif suggesting round-the-clock availability"
+  "topic": "Deploy AI in Minutes",
+  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"pipebot\" text in the bottom right corner."
 }
 ```
 → liefert `{ imageUrl, promptUsed, topic }`.
@@ -188,19 +188,19 @@ Komfort-Variante **ohne** Review-Schritt: generiert das Bild direkt per fal.ai (
 | Parameter | Typ | Pflicht | Beschreibung |
 |---|---|---|---|
 | `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging — wird nicht an das Bildmodell geschickt |
-| `visual_scene` | string | ja | Rein visuelle Szenenbeschreibung, von Claude aus `topic` abgeleitet — keine Wörter/Zahlen, die als Text im Bild erscheinen sollen |
+| `visual_scene` | string | ja | Muss den exakten Headline-Text enthalten, der im Bild erscheinen soll, plus Layout-Hinweise (siehe `styleguide.md`) |
 | `caption` | string | ja | Caption, max. 2200 Zeichen |
 
 Beispielaufruf:
 ```json
 {
-  "topic": "24/7 Kundenservice mit KI-Chatbots",
-  "visual_scene": "a friendly glowing robot assistant with a clock/infinity symbol motif suggesting round-the-clock availability",
+  "topic": "Deploy AI in Minutes",
+  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"pipebot\" text in the bottom right corner.",
   "caption": "Unser KI-Chatbot ist rund um die Uhr für dich da. 🤖"
 }
 ```
 
-> **Empfehlung für automatisierte Routinen:** `generate_and_publish_post` postet ungeprüft — Bildmodelle wie Flux Schnell können gelegentlich lesbaren, aber falschen oder verstümmelten Text ins Bild rendern (z. B. "A1" statt "AI"). Für unbeaufsichtigte Routinen daher immer den zweistufigen Weg nutzen: `generate_post_image` → Bild-URL visuell prüfen → bei Bedarf bis zu 2× neu generieren (mit noch schärferer "rein visuell, kein Text"-Anweisung) → erst dann `publish_generated_post`. Ein Beispiel-Routine-Prompt für genau diesen Ablauf steht unten in Abschnitt 7.
+> **Empfehlung für automatisierte Routinen:** `generate_and_publish_post` postet ungeprüft — Bildmodelle wie Flux Schnell können gelegentlich lesbaren, aber falschen oder verstümmelten Text ins Bild rendern (z. B. "A1" statt "AI"), und der Styleguide setzt gerade auf eine große, lesbare Headline im Bild. Für unbeaufsichtigte Routinen daher immer den zweistufigen Weg nutzen: `generate_post_image` → Bild-URL visuell prüfen (steht die Headline korrekt & lesbar da?) → bei Bedarf bis zu 2× neu generieren → erst dann `publish_generated_post`. Ein Beispiel-Routine-Prompt für genau diesen Ablauf steht unten in Abschnitt 7.
 
 ### `check_publishing_limit`
 Fragt das aktuelle Instagram-Publishing-Kontingent für das konfigurierte Konto ab. Keine Parameter.
@@ -226,15 +226,18 @@ Beispielaufruf: `{}`
 Der Ablauf mit Qualitätsprüfung gehört in den Prompt-Text der Routine selbst (nicht in den Server-Code), z. B. so:
 
 ```
-1. Rufe `generate_post_image` mit topic und einer rein visuellen visual_scene auf.
-2. Sieh dir das zurückgegebene Bild über die imageUrl an.
-3. Prüfe: Enthält das Bild lesbaren, aber falschen oder verstümmelten Text?
-   Wirkt es unprofessionell, verzerrt, mit kaputten Buchstaben?
-4. Falls ja: Rufe `generate_post_image` erneut auf (max. 2 weitere Versuche),
-   formuliere die visual_scene dabei noch schärfer als "rein visuell, absolut
-   kein Text, keine Buchstaben, keine Zahlen".
-5. Erst wenn ein sauberes Bild vorliegt: Rufe `publish_generated_post` mit
-   dieser imageUrl und der Caption auf.
+1. Lies styleguide.md für Bildstil, Textvorgaben und Caption-Regeln.
+2. Leite aus dem Thema eine kurze Headline (3-5 Wörter) ab und rufe
+   `generate_post_image` mit topic und einer visual_scene auf, die den
+   Headline-Text und das "pipebot"-Branding gemäß Styleguide beschreibt.
+3. Sieh dir das zurückgegebene Bild über die imageUrl an.
+4. Prüfe gegen die Qualitätscheckliste aus dem Styleguide: Headline korrekt
+   & lesbar? Zentriert? Hintergrund dunkel genug? "pipebot" sichtbar? Keine
+   Zusatzgrafiken? Schrift elegant/serif?
+5. Falls ein Punkt fehlschlägt: Rufe `generate_post_image` erneut auf (max.
+   2 weitere Versuche) mit angepasstem Prompt.
+6. Erst wenn das Bild die Checkliste besteht: Rufe `publish_generated_post`
+   mit dieser imageUrl und der Caption auf.
 ```
 
 Dieser Prompt-Text muss manuell in die Routinen-Konfiguration unter [claude.ai/customize](https://claude.ai/customize) (bzw. im jeweiligen Routine-Editor) eingetragen werden — er ist nicht Teil dieses Repos.
@@ -261,5 +264,5 @@ Alle Variablen aus `.env.example` — **ohne echte Werte**, nur zur Orientierung
 ## 9. Bekannte Probleme / Learnings
 
 - **CRLF-Zeilenenden in `.env` können den `Authorization`-Header brechen.** Wenn die `.env`-Datei mit Windows-Zeilenenden (`\r\n`) gespeichert wird, kann ein aus der Datei extrahierter Wert (z. B. beim manuellen Kopieren des Tokens) ein unsichtbares `\r` mitschleppen. Landet das im `Authorization`-Header, lehnt Node's HTTP-Parser den Request bereits auf Protokollebene mit einem rohen `400 Bad Request` ab — noch bevor die eigene Anwendungslogik überhaupt läuft. **Lösung:** `.env` konsequent mit LF-Zeilenenden speichern (`sed -i 's/\r$//' .env`), gerade wenn sie unter Windows bearbeitet wurde.
-- **Flux Schnell kann ungewollt Text/Zahlen ins Bild schreiben.** Das Bildmodell hat keinen Negative-Prompt-Parameter; die Textfreiheit wird ausschließlich über explizite Anweisungen im Prompt erzwungen (siehe `IMAGE_STYLE_PREFIX` in `src/fal.ts`). Themen, Statistiken oder Prozentzahlen dürfen **nie** wörtlich in den Bildprompt übernommen werden, sondern müssen in rein visuelle Symbolik übersetzt werden. Trotzdem kann das Modell gelegentlich Text halluzinieren (z. B. "A1" statt "AI") — deshalb gibt es seit Kurzem `generate_post_image` und `publish_generated_post` als getrennte Tools: Bild generieren, Ergebnis visuell prüfen (ggf. bis zu 2× neu generieren), erst dann veröffentlichen. `generate_and_publish_post` bleibt als schnelle Komfort-Variante ohne diesen Review-Schritt bestehen, sollte aber nicht in unbeaufsichtigten Routinen verwendet werden (siehe Abschnitt 6/7).
+- **Flux Schnell kann Text im Bild gelegentlich verstümmeln.** Seit dem Styleguide-Update ist Text (die Headline) explizit gewollter Teil des Bildmotivs (siehe `IMAGE_STYLE_PREFIX` in `src/fal.ts` — minimalistischer Schwarz/Weiß-Stil mit Serif-Typografie statt der früheren, textfreien Tech-Grafik-Optik). Das Bildmodell hat aber weiterhin keinen Negative-Prompt-Parameter und kann Buchstaben gelegentlich falsch rendern (z. B. "A1" statt "AI") — deshalb bleibt der zweistufige Ablauf wichtig: `generate_post_image` → Bild visuell gegen die Styleguide-Checkliste prüfen (ggf. bis zu 2× neu generieren) → erst dann `publish_generated_post`. `generate_and_publish_post` bleibt als schnelle Komfort-Variante ohne diesen Review-Schritt bestehen, sollte aber nicht in unbeaufsichtigten Routinen verwendet werden (siehe Abschnitt 6/7).
 - **Cloud-Routinen brauchen einen öffentlich erreichbaren MCP-Server.** Claude-Routinen bei claude.ai laufen serverseitig in der Cloud und können keinen `stdio`-MCP-Server oder einen nur lokal (`localhost`) erreichbaren HTTP-Server ansprechen. Für Automatisierung ist daher zwingend ein öffentlich per HTTPS erreichbarer Server nötig (siehe Hosting-Aufbau in Abschnitt 2) — rein lokale Setups funktionieren nur für manuelle Nutzung über Claude Code oder den Desktop-Client mit lokalem MCP-Server.

@@ -75,16 +75,20 @@ function createServer(): McpServer {
     .string()
     .min(1)
     .describe(
-      "Purely visual scene derived from topic. No words, letters, numbers, or claims that should be rendered as text. " +
-        'Example: "a friendly glowing robot assistant with a clock/infinity symbol motif suggesting round-the-clock availability".',
+      "Must include the exact headline text to render on the image, plus layout notes. This design puts a short " +
+        "headline (3-5 words) as the dominant visual element on a minimalist black background — do not avoid text. " +
+        'Example: \'centered white elegant serif text reading: "Deploy AI in Minutes". Small "pipebot" text in the ' +
+        "bottom right corner.'",
     );
 
-  const NO_TEXT_PROMPT_GUIDANCE =
-    "You MUST translate `topic` into `visual_scene` yourself before calling: a purely visual scene description. " +
-    "NEVER copy words, numbers, statistics, times, percentages, or claims from the topic into the image prompt as if they should appear as text. " +
-    'Example: topic "24/7 Kundenservice mit KI-Chatbots" → visual_scene "a friendly glowing robot assistant with a clock/infinity symbol motif suggesting round-the-clock availability". ' +
-    'NOT "text saying 24/7 Kundenservice". Numbers, clocks, percents, claims: always as symbol/scene, never as lettering. ' +
-    "The server prepends a fixed no-text tech-art style prefix; it does not send the raw topic to fal.ai.";
+  const HEADLINE_IMAGE_GUIDANCE =
+    "You MUST translate `topic` into `visual_scene` yourself before calling: derive a short (3-5 word) headline from " +
+    "the topic and describe it as centered white serif text on the image, plus the small pipebot branding text. " +
+    "Example: topic Deploy AI in Minutes -> visual_scene: centered white elegant serif text reading: Deploy AI in " +
+    "Minutes. Small pipebot text in the bottom right corner. " +
+    "The server prepends a fixed minimalist black-background/serif-typography style prefix; it does not send the raw " +
+    "topic to fal.ai. Flux schnell can occasionally garble or misspell rendered text — always review the image before " +
+    "publishing and regenerate if the text is wrong, distorted, or illegible.";
 
   server.registerTool(
     "generate_post_image",
@@ -94,7 +98,7 @@ function createServer(): McpServer {
         "Returns the image URL so it can be reviewed before posting. " +
         "Use this instead of `generate_and_publish_post` whenever the image should be checked first " +
         "(e.g. in unattended/automated routines) — image models occasionally render garbled or wrong text into the image. " +
-        NO_TEXT_PROMPT_GUIDANCE,
+        HEADLINE_IMAGE_GUIDANCE,
       inputSchema: {
         topic: topicSchema,
         visual_scene: visualSceneSchema,
@@ -150,7 +154,7 @@ function createServer(): McpServer {
         "followed by `publish_generated_post`. " +
         "For unattended/automated routines, prefer calling `generate_post_image` and `publish_generated_post` " +
         "separately with a visual review step in between — this tool skips that safeguard. " +
-        NO_TEXT_PROMPT_GUIDANCE +
+        HEADLINE_IMAGE_GUIDANCE +
         " Does not use R2.",
       inputSchema: {
         topic: topicSchema,

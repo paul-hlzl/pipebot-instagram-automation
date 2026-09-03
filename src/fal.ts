@@ -4,9 +4,9 @@ import { ToolError } from "./errors.js";
 
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
 
-/** Fixed visual style. Repeated no-text constraints — Flux schnell has no negative_prompt. */
+/** Fixed visual style: minimalist black/white typographic look. The headline text belongs in visual_scene. */
 export const IMAGE_STYLE_PREFIX =
-  "modern abstract technology illustration, AI and chatbot theme, glowing neural network patterns, circuit board details, robotic elements, dark background with vibrant blue and purple accent colors, clean professional digital art style, social media post format, purely visual and symbolic, absolutely no text, no words, no letters, no numbers, no typography, no writing of any kind, no captions embedded in image, image must contain zero readable characters";
+  "minimalist Instagram graphic, near-pure black background (#0a0a0a), elegant white classic serif typography as the single dominant visual element, professional and refined, clean high-end AI-generated aesthetic, social media post format, square, no icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no additional decorative graphics, nothing but typography on a solid dark background";
 
 interface FalImage {
   url?: string;
