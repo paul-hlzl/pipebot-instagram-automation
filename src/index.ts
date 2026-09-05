@@ -5,7 +5,12 @@ import { getConfig } from "./config.js";
 import { generateImageUrl } from "./fal.js";
 import { ensureAuthToken, writeAccessToken } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
-import { getPublishingLimit, publishImageToInstagram, refreshAccessToken } from "./instagram.js";
+import {
+  getPublishingLimit,
+  publishImageToInstagram,
+  publishStoryToInstagram,
+  refreshAccessToken,
+} from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 
@@ -187,6 +192,111 @@ function createServer(): McpServer {
         });
       } catch (error) {
         console.error("generate_and_publish_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  const STORY_FORMAT_NOTE =
+    "Generates a 9:16 portrait image (not the 1:1 feed square) — same background/headline/watermark " +
+    "pipeline as the feed tools, just re-composited for the taller canvas (see styleguide.md's " +
+    "'INSTAGRAM STORIES' section). Instagram Stories do not support captions, alt text, tags, or " +
+    "location via the Graph API, so there is no caption parameter here — the headline on the image " +
+    "carries the message.";
+
+  server.registerTool(
+    "generate_story_image",
+    {
+      description:
+        "Generate a 9:16 Instagram Story-ready image with fal.ai FLUX schnell WITHOUT publishing it. " +
+        STORY_FORMAT_NOTE +
+        " Returns the image URL AND the image itself as inline content for review, same as " +
+        "`generate_post_image`. Use this instead of `generate_and_publish_story` whenever the image " +
+        "should be checked first (e.g. in unattended/automated routines). " +
+        HEADLINE_IMAGE_GUIDANCE,
+      inputSchema: {
+        topic: topicSchema,
+        headline: headlineSchema,
+      },
+    },
+    async ({ topic, headline }) => {
+      try {
+        const generated = await generateImageUrl(headline, "story");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ imageUrl: generated.imageUrl, promptUsed: generated.prompt, topic }, null, 2),
+            },
+            {
+              type: "image" as const,
+              data: generated.imageBase64,
+              mimeType: generated.mimeType,
+            },
+          ],
+        };
+      } catch (error) {
+        console.error("generate_story_image:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "publish_generated_story",
+    {
+      description:
+        "Publish an Instagram Story using an already-generated image URL. Use after " +
+        "`generate_story_image`, once the image has been visually reviewed and the background looks " +
+        "clean (no garbled/wrong text is possible — the headline is code-rendered — but check for " +
+        "background artifacts, same as the feed review step). Shares the same 24h publishing quota as " +
+        "feed posts (`check_publishing_limit`) — there is no separate Stories-only quota.",
+      inputSchema: {
+        imageUrl: z
+          .string()
+          .min(1)
+          .describe("Image URL, typically from `generate_story_image`. Must be publicly reachable."),
+      },
+    },
+    async ({ imageUrl }) => {
+      try {
+        const result = await publishStoryToInstagram(imageUrl);
+        return textResult(result);
+      } catch (error) {
+        console.error("publish_generated_story:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "generate_and_publish_story",
+    {
+      description:
+        "Convenience tool: generates a 9:16 Story image with fal.ai FLUX schnell AND immediately " +
+        "publishes it as an Instagram Story, with no review step in between. Internally does the same " +
+        "as calling `generate_story_image` followed by `publish_generated_story`. " +
+        STORY_FORMAT_NOTE +
+        " " +
+        HEADLINE_IMAGE_GUIDANCE +
+        " Does not use R2.",
+      inputSchema: {
+        topic: topicSchema,
+        headline: headlineSchema,
+      },
+    },
+    async ({ topic, headline }) => {
+      try {
+        const generated = await generateImageUrl(headline, "story");
+        const published = await publishStoryToInstagram(generated.imageUrl);
+        return textResult({
+          postId: published.postId,
+          topic,
+          imageUrl: generated.imageUrl,
+          prompt: generated.prompt,
+        });
+      } catch (error) {
+        console.error("generate_and_publish_story:", toToolMessage(error));
         return errorResult(error);
       }
     },

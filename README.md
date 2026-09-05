@@ -4,7 +4,7 @@ Ein MCP-Server (Model Context Protocol), der Claude erlaubt, Instagram-Feed-Post
 
 ## 1. Projektübersicht
 
-Das Projekt ist ein MCP-Server, der Claude sechs Werkzeuge (Tools) für Instagram-Marketing an die Hand gibt: Bilder per KI generieren (fal.ai, Modell "Flux Schnell"), eigene Bilder hochladen, Captions verfassen, beides gemeinsam als Feed-Post auf einem Instagram Business/Creator-Konto veröffentlichen, das Publishing-Kontingent abfragen und den Access Token erneuern — über die offizielle Instagram Graph API. Claude steuert den kompletten Ablauf: Themenwahl, Bildprompt, Captiontext und den eigentlichen Publish-Call. Das macht automatisiertes, KI-gestütztes Instagram-Posting per Chat oder per zeitgesteuerter Claude-Routine möglich, ohne dass ein Mensch die einzelnen API-Schritte manuell ausführen muss.
+Das Projekt ist ein MCP-Server, der Claude neun Werkzeuge (Tools) für Instagram-Marketing an die Hand gibt: Bilder per KI generieren (fal.ai, Modell "Flux Schnell"), eigene Bilder hochladen, Captions verfassen, beides gemeinsam als Feed-Post ODER als Instagram Story auf einem Instagram Business/Creator-Konto veröffentlichen, das Publishing-Kontingent abfragen und den Access Token erneuern — über die offizielle Instagram Graph API. Claude steuert den kompletten Ablauf: Themenwahl, Bildprompt, Captiontext und den eigentlichen Publish-Call. Das macht automatisiertes, KI-gestütztes Instagram-Posting per Chat oder per zeitgesteuerter Claude-Routine möglich, ohne dass ein Mensch die einzelnen API-Schritte manuell ausführen muss.
 
 # 2. Architektur
 
@@ -32,6 +32,8 @@ MCP-Server (dieses Projekt, Node.js/Express, von pm2 am Leben gehalten)
 4. Das Ergebnis (Post-ID, Bild-URL, tatsächlich genutzter Prompt) geht zurück an Claude.
 
 Bei `upload_and_publish_post` mit `image_base64` wird das Bild stattdessen zuerst nach Cloudflare R2 hochgeladen (Instagram braucht eine öffentlich erreichbare Bild-URL), danach läuft derselbe Publish-Ablauf.
+
+**Zusätzlich seit 2026-09-05: Instagram Stories.** Derselbe Ablauf existiert im 9:16-Hochformat für Stories (`generate_story_image` / `publish_generated_story` / `generate_and_publish_story`, siehe Abschnitt 6) — eigener Media-Container-Typ (`media_type=STORIES`) über dieselbe Graph-API-Endpoint, ohne Caption (von der API für Stories nicht unterstützt) und im selben rollierenden 100-Posts/24h-Kontingent wie Feed-Posts. Details zu Format und Positionierung siehe `styleguide.md`, Abschnitt „INSTAGRAM STORIES".
 
 **Hosting-Aufbau:**
 - **Server:** Hetzner VPS (Ubuntu/Linux), Node.js
@@ -139,7 +141,7 @@ Verbindliche Vorgabe für alle generierten Post-Bilder (Details und Beispiel-Pro
 
 ## 6. MCP-Tools (Referenz)
 
-Der Server registriert sechs Tools (siehe `src/index.ts`):
+Der Server registriert neun Tools (siehe `src/index.ts`): sechs für den Feed, drei für Stories.
 
 ### `upload_and_publish_post`
 Veröffentlicht einen einzelnen Instagram-Feed-Post. Nimmt entweder eine bereits öffentlich erreichbare Bild-URL oder ein Base64-kodiertes Bild (wird zuerst nach Cloudflare R2 hochgeladen).
@@ -211,8 +213,57 @@ Beispielaufruf:
 
 > **Empfehlung für automatisierte Routinen:** Seit Layout v3 (2026-09-05) ist die Headline selbst code-gerendert und damit immer korrekt — das ursprüngliche Risiko für `generate_and_publish_post` (Bildmodell verstümmelt Text) besteht für die Headline nicht mehr. Ein Review-Schritt bleibt trotzdem sinnvoll, weil das fal.ai-Bildmodell den (jetzt textfreien) Hintergrund gelegentlich mit Artefakten liefern kann. Für unbeaufsichtigte Routinen daher weiterhin den zweistufigen Weg nutzen: `generate_post_image` → Hintergrund visuell prüfen → bei Bedarf bis zu 2× neu generieren → erst dann `publish_generated_post`. Ein Beispiel-Routine-Prompt für genau diesen Ablauf steht unten in Abschnitt 7.
 
+### `generate_story_image`
+Generiert ein 9:16-Story-Bild per fal.ai (Flux Schnell), **ohne** es zu veröffentlichen — das Story-Pendant zu `generate_post_image`. Gleicher Hintergrund-Prompt, aber Hochformat statt Quadrat, und Headline/Wasserzeichen-Positionierung an das Story-Sicherheitsraster angepasst (siehe `styleguide.md`, Abschnitt „INSTAGRAM STORIES").
+
+| Parameter | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging — wird nicht an das Bildmodell geschickt |
+| `headline` | string | ja | Der kurze (2-4 Wörter) Headline-Text, wortwörtlich, code-gerendert (siehe `generate_post_image`) |
+
+Beispielaufruf:
+```json
+{
+  "topic": "Deploy AI in Minutes",
+  "headline": "Deploy AI Fast"
+}
+```
+→ liefert `{ imageUrl, promptUsed, topic }`.
+
+### `publish_generated_story`
+Veröffentlicht eine Instagram Story mit einer bereits vorliegenden (idealerweise bereits geprüften) Bild-URL — z. B. dem Ergebnis von `generate_story_image`. **Kein `caption`-Parameter**, da die Instagram Graph API für Stories keine Caption unterstützt. Teilt sich das 24h-Publishing-Kontingent mit Feed-Posts (kein separates Story-Kontingent).
+
+| Parameter | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `imageUrl` | string | ja | Bild-URL, typischerweise aus `generate_story_image`; muss öffentlich erreichbar sein |
+
+Beispielaufruf:
+```json
+{
+  "imageUrl": "https://fal.media/files/.../beispiel.png"
+}
+```
+
+### `generate_and_publish_story`
+Komfort-Variante **ohne** Review-Schritt: generiert das Story-Bild direkt per fal.ai und veröffentlicht es sofort im selben Aufruf. Intern identisch zu `generate_story_image` gefolgt von `publish_generated_story`.
+
+| Parameter | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging |
+| `headline` | string | ja | Der kurze (2-4 Wörter) Headline-Text, wortwörtlich — code-gerendert |
+
+Beispielaufruf:
+```json
+{
+  "topic": "Deploy AI in Minutes",
+  "headline": "Deploy AI Fast"
+}
+```
+
+> **Empfehlung für automatisierte Routinen:** Wie beim Feed-Post gilt: für unbeaufsichtigte Läufe den zweistufigen Weg nutzen (`generate_story_image` → Hintergrund visuell prüfen → bei Bedarf bis zu 2× neu generieren → erst dann `publish_generated_story`), damit ein fehlerhafter Hintergrund abgefangen werden kann, bevor er live geht.
+
 ### `check_publishing_limit`
-Fragt das aktuelle Instagram-Publishing-Kontingent für das konfigurierte Konto ab. Keine Parameter.
+Fragt das aktuelle Instagram-Publishing-Kontingent für das konfigurierte Konto ab (gilt für Feed-Posts UND Stories gemeinsam — es gibt kein separates Story-Kontingent). Keine Parameter.
 
 Beispielaufruf: `{}`
 → liefert u. a. `quota_usage`, `quota_total`, `quota_duration`, `remaining`.
@@ -227,7 +278,7 @@ Beispielaufruf: `{}`
 1. Auf [claude.ai/customize/connectors](https://claude.ai/customize/connectors) (bzw. Einstellungen → Connectors) **"Custom Connector hinzufügen"** wählen.
 2. **URL:** `https://mcp.pipebot.at/mcp`
 3. **Authentifizierung:** Header-basiert, `Authorization: Bearer <MCP_AUTH_TOKEN>` (den Wert aus der `.env` des Servers eintragen).
-4. Nach dem Verbinden erscheinen die sechs Tools in der Tool-Liste. Für **Cloud-Routinen** (zeitgesteuerte, unbeaufsichtigte Ausführung) müssen die gewünschten Tools auf **"Immer erlauben"** gestellt werden (statt "Bei jeder Nutzung fragen"), da während eines automatisierten Routine-Laufs niemand eine Rückfrage bestätigen kann. Das lässt sich pro Tool in den Connector-/Tool-Einstellungen umstellen.
+4. Nach dem Verbinden erscheinen die neun Tools in der Tool-Liste. Für **Cloud-Routinen** (zeitgesteuerte, unbeaufsichtigte Ausführung) müssen die gewünschten Tools auf **"Immer erlauben"** gestellt werden (statt "Bei jeder Nutzung fragen"), da während eines automatisierten Routine-Laufs niemand eine Rückfrage bestätigen kann. Das lässt sich pro Tool in den Connector-/Tool-Einstellungen umstellen.
 5. Ein lokal auf `localhost` laufender Server ist für claude.ai **nicht** erreichbar — deshalb der öffentliche Domain+HTTPS-Aufbau aus Abschnitt 2/5 (siehe auch Abschnitt 9).
 
 **Routine-Prompt mit Bild-Review (empfohlen statt `generate_and_publish_post`):**

@@ -1,5 +1,32 @@
 import sharp from "sharp";
 
+export type PostFormat = "feed" | "story";
+
+interface SafeZone {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Headline safe zone as a fraction of image width/height, per format.
+ * - feed: horizontal-only margin against Instagram's square-grid-view crop (see
+ *   GRID-SICHERHEITSZONE in styleguide.md) - the full vertical range is safe since
+ *   square feed posts are never cropped top/bottom.
+ * - story: Stories overlay UI chrome at both the top (profile photo/username/progress
+ *   bar) and bottom (reply field / CTA bar) of a 1080x1920 canvas - roughly the top and
+ *   bottom ~20% per Meta's Stories safe-zone guidance. No grid-crop risk horizontally
+ *   (Stories are never tiled into the profile grid), so a smaller side margin than the
+ *   feed's grid-crop zone is fine.
+ */
+function getHeadlineSafeZone(format: PostFormat): SafeZone {
+  if (format === "story") {
+    return { left: 0.1, right: 0.9, top: 0.2, bottom: 0.8 };
+  }
+  return { left: 0.18, right: 0.82, top: 0, bottom: 1 };
+}
+
 function escapeXml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -26,8 +53,15 @@ function wrapHeadline(headline: string): string[] {
  * punctuation, or hallucinated unrelated text). Rendering the headline deterministically here
  * guarantees exact, correctly-styled text every time; see styleguide.md's "BILDGENERIERUNG"
  * section for the specification this implements (font, size, color, position).
+ *
+ * `format` selects the safe zone: "feed" (default, square post, grid-crop-safe horizontal
+ * margin) or "story" (9:16, vertical margin clear of the Stories UI chrome instead).
  */
-export async function addHeadlineText(imageBuffer: Buffer, headline: string): Promise<Buffer> {
+export async function addHeadlineText(
+  imageBuffer: Buffer,
+  headline: string,
+  format: PostFormat = "feed",
+): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
   const height = meta.height ?? 1024;
@@ -35,27 +69,39 @@ export async function addHeadlineText(imageBuffer: Buffer, headline: string): Pr
   const lines = wrapHeadline(headline);
   const longestLine = Math.max(...lines.map((line) => line.length));
 
-  // Instagram's profile GRID view crops a square post further in (roughly a centered
-  // 3:4-ish window per available reporting, though the exact ratio isn't consistently
-  // documented) - confirmed in practice on 2026-09-05: a headline starting at 10% from
-  // the left edge had its first letter cut off in the grid thumbnail, while the full
-  // feed post (after tapping) was fine. Keeping text within a generous 18%-82% "safe
-  // zone" (64% usable width) clears that crop with real margin, not just the bare
-  // minimum, in case the actual crop ratio is even more aggressive than reported.
-  const safeZoneLeft = width * 0.18;
-  const safeZoneRight = width * 0.82;
+  const zone = getHeadlineSafeZone(format);
+  const safeZoneLeft = width * zone.left;
+  const safeZoneRight = width * zone.right;
   const maxTextWidth = safeZoneRight - safeZoneLeft;
+  const safeTop = height * zone.top;
+  const safeBottom = height * zone.bottom;
+  const maxTextHeight = safeBottom - safeTop;
+
   const avgGlyphWidthFactor = 0.56; // approximate average glyph width for this serif at 1x font-size
   let fontSize = Math.floor(maxTextWidth / (longestLine * avgGlyphWidthFactor));
   fontSize = Math.max(Math.round(height * 0.06), Math.min(fontSize, Math.round(height * 0.12)));
 
   const lineHeight = fontSize * 1.15;
+  let totalTextHeight = lineHeight * lines.length;
+  // Belt-and-suspenders for the story format's tighter vertical band (60% of height,
+  // vs. the feed's unconstrained full height): shrink further if the text block would
+  // still overflow the safe zone (e.g. very long single-line headline).
+  if (totalTextHeight > maxTextHeight) {
+    const scale = maxTextHeight / totalTextHeight;
+    fontSize = Math.max(Math.round(height * 0.04), Math.floor(fontSize * scale));
+    totalTextHeight = fontSize * 1.15 * lines.length;
+  }
+  const scaledLineHeight = fontSize * 1.15;
+
   const startX = Math.round(safeZoneLeft);
-  const totalTextHeight = lineHeight * lines.length;
-  const firstBaselineY = height / 2 - totalTextHeight / 2 + fontSize * 0.8;
+  const verticalCenter = (safeTop + safeBottom) / 2;
+  const firstBaselineY = verticalCenter - totalTextHeight / 2 + fontSize * 0.8;
 
   const tspans = lines
-    .map((line, i) => `<tspan x="${startX}" y="${Math.round(firstBaselineY + i * lineHeight)}">${escapeXml(line)}</tspan>`)
+    .map(
+      (line, i) =>
+        `<tspan x="${startX}" y="${Math.round(firstBaselineY + i * scaledLineHeight)}">${escapeXml(line)}</tspan>`,
+    )
     .join("");
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -73,14 +119,18 @@ export async function addHeadlineText(imageBuffer: Buffer, headline: string): Pr
  * of the image. Done in code rather than via the image-generation prompt because
  * text-to-image models render rotated text and precise opacity unreliably
  * (mirrored/garbled letterforms, hallucinated extra text nearby).
+ *
+ * Both `fontSize` and `cy` are computed as fractions of height/width, so the watermark
+ * stays proportionally centered and correctly sized on the 9:16 story canvas as well as
+ * the square feed canvas without needing separate story-specific logic.
  */
-export async function addPipelineWatermark(imageBuffer: Buffer): Promise<Buffer> {
+export async function addPipelineWatermark(imageBuffer: Buffer, format: PostFormat = "feed"): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
   const height = meta.height ?? 1024;
 
   const fontSize = Math.round(height * 0.11);
-  const marginRight = Math.round(width * 0.07);
+  const marginRight = Math.round(width * (format === "story" ? 0.1 : 0.07));
   const cx = width - marginRight;
   const cy = height / 2;
 

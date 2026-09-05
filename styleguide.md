@@ -63,3 +63,50 @@ Scale AI Systems"
 ## POSTING-ZEITPLAN
 - **Täglich um 15:00 UTC**
 - Variable Themen OR Rotations-Plan (TBD)
+
+## INSTAGRAM STORIES (zusätzlich zum Feed-Post, seit 2026-09-05)
+
+Zusätzlich zum quadratischen Feed-Post kann derselbe Content auch als Instagram Story
+veröffentlicht werden — eigener Media-Container-Typ (`media_type=STORIES`) über dieselbe
+Graph-API-Endpoint (`POST /{ig-user-id}/media`, dann `media_publish` wie beim Feed-Post,
+siehe `publishStoryToInstagram` in `src/instagram.ts`).
+
+**Bildformat:** 9:16 Hochformat (Ziel 1080x1920) statt quadratisch. fal.ai liefert dafür
+`image_size=portrait_16_9` (das nächstliegende unterstützte Preset — fal dokumentiert die
+exakten Pixelmaße dieses Presets nicht, ist aber irrelevant, da `addHeadlineText` und
+`addPipelineWatermark` die tatsächliche Bildgröße aus den Metadaten lesen und Position/
+Schriftgröße relativ dazu berechnen, siehe `src/watermark.ts`). Derselbe textfreie
+Hintergrund-Prompt (`IMAGE_STYLE_PREFIX`) wird für beide Formate verwendet.
+
+**Positionierung (Layout-Anpassung ggü. Feed):**
+- Horizontal: Sicherheitszone **10%-90%** der Bildbreite (statt 18%-82% beim Feed) — die
+  18%-Marge beim Feed existiert speziell wegen des Grid-Kachel-Crops im Profil, den es bei
+  Stories nicht gibt (Stories werden nie ins Grid eingebettet).
+- Vertikal: Sicherheitszone **20%-80%** der Bildhöhe, um die Story-UI-Overlays am oberen
+  Rand (Profilbild/Username/Fortschrittsbalken) und unteren Rand (Antwortfeld/CTA-Leiste)
+  nicht zu verdecken. Beim Feed ist die volle Bildhöhe sicher (kein UI-Overlay), daher dort
+  keine vertikale Einschränkung.
+- Wasserzeichen: gleiche Logik wie beim Feed (rechter Bildrand, 90° gedreht), mit etwas
+  größerem `marginRight` (10% statt 7% der Breite) als zusätzlicher Puffer zur rechten
+  Tap-Zone, über die man in Stories zur nächsten Story weiterwischt.
+
+**Caption/Hashtags:** Von der Instagram Graph API für Stories **nicht unterstützt** — ein
+Story-Container akzeptiert keinen `caption`-Parameter (auch kein `alt_text`, `tags` oder
+`location`). Die Botschaft steckt ausschließlich in der aufs Bild gerenderten Headline; es
+gibt keinen Text-Sticker-Weg über die API (interaktive Sticker wie Umfragen, Fragen,
+Countdown oder Link-Sticker sind laut Meta-Dokumentation ausschließlich über die
+Instagram-App selbst setzbar, nicht über die Graph API).
+
+**Rate-Limit:** Stories zählen in dasselbe rollierende 100-Posts/24h-Kontingent wie
+Feed-Posts, Reels und Karussells — es gibt **kein separates Story-Kontingent**.
+`check_publishing_limit` deckt beide ab; ein Story-Post reduziert das für den Feed-Post
+verbleibende Kontingent (und umgekehrt).
+
+**Qualitätsprüfung:** Identisch zum Feed — nur der Hintergrund wird geprüft (Navy/Textur,
+keine Artefakte), die Headline ist auch hier code-generiert und garantiert korrekt. Bei
+Fehlschlag nach 3 Versuchen: `STORY_SKIPPED_REVIEW_FAILED` im Routine-Log (siehe
+`README.md` Abschnitt zur Routine) — kein kritischer Fehler, der Feed-Post bleibt davon
+unberührt, da die Story ein "Nice to have" zusätzlich zum Feed-Post ist, nicht umgekehrt.
+
+**MCP-Tools:** `generate_story_image`, `publish_generated_story`,
+`generate_and_publish_story` — analog zu den drei Feed-Tools, siehe `README.md`.

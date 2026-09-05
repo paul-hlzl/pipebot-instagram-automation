@@ -142,6 +142,34 @@ async function createMediaContainer(imageUrl: string, caption: string): Promise<
   return data.id;
 }
 
+/**
+ * Stories use the same /media container endpoint as feed posts, just with
+ * media_type=STORIES and no caption param - the Graph API does not support a caption,
+ * alt_text, tags, or location on a Stories container (confirmed against Meta's Content
+ * Publishing docs, 2026-09). The container/poll/publish machinery below (waitForContainer,
+ * publishContainer) is shared as-is: status polling and media_publish behave identically
+ * regardless of media_type.
+ */
+async function createStoryMediaContainer(imageUrl: string): Promise<string> {
+  const igUserId = await resolveIgUserId();
+  const { data } = await client().post<GraphIdResponse>(
+    `${GRAPH_BASE}/${igUserId}/media`,
+    null,
+    {
+      params: {
+        ...tokenParams(),
+        media_type: "STORIES",
+        image_url: imageUrl,
+      },
+    },
+  );
+
+  if (!data.id) {
+    throw new ToolError("Instagram hat keinen Story-Container angelegt (keine ID in der Antwort).");
+  }
+  return data.id;
+}
+
 async function getContainerStatus(containerId: string): Promise<string> {
   const { data } = await client().get<GraphStatusResponse>(`${GRAPH_BASE}/${containerId}`, {
     params: {
@@ -225,6 +253,31 @@ export async function publishImageToInstagram(
   writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption });
 
   return duplicateWarning ? { ...result, warning: duplicateWarning } : result;
+}
+
+/**
+ * Publishes a single Instagram Story. Shares the same publishing-limit quota as feed
+ * posts (Meta's content_publishing_limit endpoint counts all media types - Reels, images,
+ * carousels, and stories - toward the same rolling 100/24h cap; there is no separate
+ * Stories-only quota), so `assertPublishingQuota` is reused as-is. Unlike feed posts,
+ * Stories are intentionally NOT written to last_post.json / checked by
+ * `checkRecentDuplicate` - that heuristic keys off caption text, which Stories don't have,
+ * and Stories are expected to closely follow (and duplicate the visual of) the feed post
+ * they accompany, so the "did we just post this?" warning would just be noise here.
+ */
+export async function publishStoryToInstagram(imageUrl: string): Promise<PublishResult> {
+  await assertPublishingQuota();
+
+  return withRetry(
+    async () => {
+      const containerId = await createStoryMediaContainer(imageUrl);
+      await waitForContainer(containerId);
+      const postId = await publishContainer(containerId);
+      return { postId, containerId, hostedImageUrl: imageUrl };
+    },
+    2,
+    "Instagram story publish",
+  );
 }
 
 export async function refreshAccessToken(): Promise<{

@@ -2,10 +2,22 @@ import axios from "axios";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
-import { addHeadlineText, addPipelineWatermark } from "./watermark.js";
+import { addHeadlineText, addPipelineWatermark, type PostFormat } from "./watermark.js";
 import { uploadImageBase64 } from "./r2.js";
 
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
+
+/**
+ * fal.ai `image_size` per format. "square_hd" for the feed (1:1). For stories, fal's
+ * documented enum values don't include an exact 1080x1920 - "portrait_16_9" is the closest
+ * supported preset. This is fine: addHeadlineText/addPipelineWatermark read the actual
+ * width/height back from the generated image (sharp metadata) rather than assuming a fixed
+ * canvas, so positioning/sizing still comes out correct whatever fal actually returns.
+ */
+const FAL_IMAGE_SIZE: Record<PostFormat, string> = {
+  feed: "square_hd",
+  story: "portrait_16_9",
+};
 
 /**
  * Fixed background prompt — deliberately contains NO mention of text, headlines, or
@@ -28,13 +40,13 @@ interface FalResponse {
   images?: FalImage[];
 }
 
-async function requestFalImage(prompt: string): Promise<string> {
+async function requestFalImage(prompt: string, format: PostFormat): Promise<string> {
   const { falApiKey } = getConfig();
   const { data } = await axios.post<FalResponse>(
     FAL_ENDPOINT,
     {
       prompt,
-      image_size: "square_hd",
+      image_size: FAL_IMAGE_SIZE[format],
       num_images: 1,
     },
     {
@@ -63,6 +75,7 @@ async function requestFalImage(prompt: string): Promise<string> {
  */
 export async function generateImageUrl(
   headline: string,
+  format: PostFormat = "feed",
 ): Promise<{ prompt: string; imageUrl: string; imageBase64: string; mimeType: string }> {
   const trimmedHeadline = headline.trim();
   if (!trimmedHeadline) {
@@ -70,7 +83,7 @@ export async function generateImageUrl(
   }
 
   const prompt = IMAGE_STYLE_PREFIX;
-  const rawImageUrl = await withRetry(() => requestFalImage(prompt), 3, "fal.ai generate");
+  const rawImageUrl = await withRetry(() => requestFalImage(prompt, format), 3, "fal.ai generate");
 
   const { data } = await withRetry(
     () => axios.get<ArrayBuffer>(rawImageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
@@ -78,8 +91,8 @@ export async function generateImageUrl(
     "fal.ai image download",
   );
 
-  const withHeadline = await addHeadlineText(Buffer.from(data), trimmedHeadline);
-  const finished = await addPipelineWatermark(withHeadline);
+  const withHeadline = await addHeadlineText(Buffer.from(data), trimmedHeadline, format);
+  const finished = await addPipelineWatermark(withHeadline, format);
   const imageBase64 = finished.toString("base64");
   const imageUrl = await withRetry(
     () => uploadImageBase64(`data:image/jpeg;base64,${imageBase64}`),
