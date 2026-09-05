@@ -252,7 +252,10 @@ async function main(): Promise<void> {
   }
 
   const app = createHttpApp(createServer);
-  app.listen(port, () => {
+  // Bind to loopback only - Nginx (proxy_pass http://127.0.0.1:3000) is the only
+  // intended entry point. Express/Node default to 0.0.0.0 (all interfaces) if no
+  // host is given, which would expose this port directly to the internet.
+  app.listen(port, "127.0.0.1", () => {
     console.error(`Instagram MCP server listening on port ${port}`);
     console.error(`MCP endpoint: http://localhost:${port}/mcp (Authorization: Bearer <MCP_AUTH_TOKEN> required)`);
     console.error(`Health check: http://localhost:${port}/health (no auth required)`);
