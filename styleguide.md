@@ -27,17 +27,20 @@ Scale AI Systems"
 - **Keine Hashtags im Bild selbst** (die gehen in Caption)
 
 ## BILDGENERIERUNG (für fal.ai Flux Schnell)
-Prompt-Template:
-"Dark navy-black background (near #0a0e1a), subtle elegant texture, white elegant serif text positioned left-of-center reading: '[HEADLINE]'. Large vertical watermark text reading 'Pipeline' along the right edge, rotated 90 degrees (readable bottom-to-top), low opacity (~15-20%), subtle and translucent. Professional, clean. AI-generated look. No other branding text anywhere else in the image."
+**Wichtig:** Das "Pipeline"-Wasserzeichen wird NICHT mehr von der KI gezeichnet — Text-zu-Bild-Modelle rendern gedrehten Text und exakte Deckkraft-Werte unzuverlässig (getestet: gespiegelte Buchstaben, halluzinierter Text-Müll). Das Wasserzeichen wird stattdessen **automatisch per Code** (`src/watermark.ts`, sharp/SVG) nach der Bildgenerierung aufgelegt — exakte Position, Rotation (90°, von unten nach oben lesbar) und Deckkraft (~18%), garantiert korrekt.
+
+Prompt-Template (nur Headline, KEIN Wasserzeichen-Text anfordern):
+"Dark navy-black background (near #0a0e1a), subtle elegant texture, white elegant serif text positioned left-of-center reading: '[HEADLINE]'. Professional, clean. AI-generated look. No other text/numbers/labels anywhere else in the image."
 
 ## QUALITÄTSPRÜFUNG BEFORE POSTING
 ✅ Text lesbar, links/mittig positioniert (nicht zentriert über volle Breite)?
 ✅ Hintergrund dunkles Navy/Blau-Schwarz (nicht reines Schwarz), mit sichtbarer, subtiler Textur?
-✅ "Pipeline"-Wasserzeichen rechts sichtbar: groß, vertikal, 90° gedreht, dezent/transparent (~15-20% Deckkraft)?
-✅ Kein zusätzliches kleines Branding unten (Wasserzeichen reicht)?
+✅ Keine zusätzlichen/halluzinierten Text-Elemente außer der Headline (das Wasserzeichen kommt separat per Code dazu, danach prüfen — siehe unten)?
 ✅ Keine zusätzlichen Grafiken/Icons?
 ✅ Schrift elegant (Serif)?
-→ Falls NEIN zu etwas — insbesondere wenn das Wasserzeichen nicht wirklich gedreht/vertikal oder nicht lesbar ist: Neugeneration mit angepasstem Prompt. Text-zu-Bild-Modelle rendern gedrehten Text und exakte Deckkraft-Werte unzuverlässig — genau hinsehen, nicht durchwinken.
+→ Falls NEIN zu etwas: Neugeneration mit angepasstem Prompt.
+
+**Zusätzlich nach dem automatischen Wasserzeichen-Overlay prüfen:** "Pipeline"-Schriftzug rechts sichtbar, korrekt orientiert (nicht gespiegelt), vertikal lesbar von unten nach oben, dezent/transparent?
 
 ## CAPTION (Instagram Post-Text)
 - Kurzer, lockerer Text zu Headline
