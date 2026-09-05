@@ -35,10 +35,14 @@ Scale AI Systems"
 
 **Code-Rendering-Spezifikation (`addHeadlineText` in `src/watermark.ts`, läuft VOR dem Wasserzeichen-Overlay):**
 - Schrift: `Liberation Serif, serif`, Farbe `#ffffff` (weiß), einheitlicher Schnitt (kein Bold/Italic-Mix möglich, da programmatisch)
-- Position: links, x-Start bei 10% der Bildbreite; vertikal um die Bildmitte zentriert
+- Position: links, x-Start bei **18%** der Bildbreite (siehe „GRID-SICHERHEITSZONE" unten — nicht mehr 10%); vertikal um die Bildmitte zentriert
 - Zeilenumbruch: ≤2 Wörter → 1 Zeile; 3-4 Wörter → automatisch 2 Zeilen (je die Hälfte der Wörter)
-- Schriftgröße: automatisch an die längste Zeile angepasst (Ziel: ~78% der Bildbreite ausgefüllt), Bandbreite 6-12% der Bildhöhe
+- Schriftgröße: automatisch an die längste Zeile angepasst (Ziel: Text bleibt innerhalb der 18%-82%-Sicherheitszone, ~64% der Bildbreite), Bandbreite 6-12% der Bildhöhe
 - Reihenfolge: Hintergrund generieren → Headline auflegen → Wasserzeichen auflegen → JPEG-Export
+
+**GRID-SICHERHEITSZONE (Stand 2026-09-05, real beobachtetes Problem):** Instagram beschneidet quadratische Posts in der Profil-Grid-Kachelansicht sichtbar enger als das volle 1:1-Bild — real beobachtet: bei x-Start=10% der Bildbreite wurde der erste Buchstabe der Headline ("S" von "Scale Without Limits") im Grid abgeschnitten, im normalen Feed-Post (nach Antippen) aber korrekt vollständig angezeigt. Das exakte Crop-Verhältnis ist nicht zuverlässig offiziell dokumentiert (Quellen widersprechen sich, teils wird ein zentrierter ~3:4-Ausschnitt berichtet, was bei einem 1024px breiten Bild ~128px/12,5% Beschnitt auf jeder Seite bedeuten würde). Da keine exakte Zahl verlässlich ist, wurde ein großzügiger Sicherheitsabstand gewählt: Headline-Text bleibt jetzt strikt innerhalb von **18%-82% der Bildbreite** (statt vorher 10%-88%) — das hält auch bei einem eventuell noch aggressiveren Crop als den berichteten ~12,5% sicher Abstand. Getestet: In einer simulierten 3:4-Grid-Crop-Vorschau (zentrierter 768px-Ausschnitt aus 1024px) ist die Headline jetzt vollständig sichtbar mit echtem Rand auf beiden Seiten.
+
+⚠️ **Bekanntes, noch NICHT behobenes Folgeproblem:** Das "Pipeline"-Wasserzeichen (x-Zentrum bei `Bildbreite - 7%` ≈ 95% der Breite, siehe `addPipelineWatermark`) liegt außerhalb dieser Sicherheitszone und fällt in der simulierten Grid-Vorschau komplett weg (nicht mehr sichtbar). Das war zum Zeitpunkt dieses Fixes noch nicht behoben — nur die Headline-Positionierung war beauftragt. Falls das Wasserzeichen auch im Grid sichtbar bleiben soll, muss `addPipelineWatermark`'s `marginRight` ebenfalls nach innen verschoben werden.
 
 (Historie der gescheiterten Prompt-Iterationen — 16,7% dann 0/12 — bleibt zur Nachvollziehbarkeit im Git-Log dieser Datei erhalten, nicht mehr hier ausgeführt, da inzwischen strukturell obsolet.)
 

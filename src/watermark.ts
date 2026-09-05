@@ -35,14 +35,22 @@ export async function addHeadlineText(imageBuffer: Buffer, headline: string): Pr
   const lines = wrapHeadline(headline);
   const longestLine = Math.max(...lines.map((line) => line.length));
 
-  // Fit the widest line within ~78% of the canvas width, scaling font size to length.
-  const maxTextWidth = width * 0.78;
+  // Instagram's profile GRID view crops a square post further in (roughly a centered
+  // 3:4-ish window per available reporting, though the exact ratio isn't consistently
+  // documented) - confirmed in practice on 2026-09-05: a headline starting at 10% from
+  // the left edge had its first letter cut off in the grid thumbnail, while the full
+  // feed post (after tapping) was fine. Keeping text within a generous 18%-82% "safe
+  // zone" (64% usable width) clears that crop with real margin, not just the bare
+  // minimum, in case the actual crop ratio is even more aggressive than reported.
+  const safeZoneLeft = width * 0.18;
+  const safeZoneRight = width * 0.82;
+  const maxTextWidth = safeZoneRight - safeZoneLeft;
   const avgGlyphWidthFactor = 0.56; // approximate average glyph width for this serif at 1x font-size
   let fontSize = Math.floor(maxTextWidth / (longestLine * avgGlyphWidthFactor));
   fontSize = Math.max(Math.round(height * 0.06), Math.min(fontSize, Math.round(height * 0.12)));
 
   const lineHeight = fontSize * 1.15;
-  const startX = Math.round(width * 0.1);
+  const startX = Math.round(safeZoneLeft);
   const totalTextHeight = lineHeight * lines.length;
   const firstBaselineY = height / 2 - totalTextHeight / 2 + fontSize * 0.8;
 
