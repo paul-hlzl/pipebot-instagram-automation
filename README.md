@@ -4,7 +4,7 @@ Ein MCP-Server (Model Context Protocol), der Claude erlaubt, Instagram-Feed-Post
 
 ## 1. Projektübersicht
 
-Das Projekt ist ein MCP-Server, der Claude vier Werkzeuge (Tools) für Instagram-Marketing an die Hand gibt: Bilder per KI generieren (fal.ai, Modell "Flux Schnell"), eigene Bilder hochladen, Captions verfassen und beides gemeinsam als Feed-Post auf einem Instagram Business/Creator-Konto veröffentlichen — über die offizielle Instagram Graph API. Claude steuert den kompletten Ablauf: Themenwahl, Bildprompt, Captiontext und den eigentlichen Publish-Call. Das macht automatisiertes, KI-gestütztes Instagram-Posting per Chat oder per zeitgesteuerter Claude-Routine möglich, ohne dass ein Mensch die einzelnen API-Schritte manuell ausführen muss.
+Das Projekt ist ein MCP-Server, der Claude sechs Werkzeuge (Tools) für Instagram-Marketing an die Hand gibt: Bilder per KI generieren (fal.ai, Modell "Flux Schnell"), eigene Bilder hochladen, Captions verfassen, beides gemeinsam als Feed-Post auf einem Instagram Business/Creator-Konto veröffentlichen, das Publishing-Kontingent abfragen und den Access Token erneuern — über die offizielle Instagram Graph API. Claude steuert den kompletten Ablauf: Themenwahl, Bildprompt, Captiontext und den eigentlichen Publish-Call. Das macht automatisiertes, KI-gestütztes Instagram-Posting per Chat oder per zeitgesteuerter Claude-Routine möglich, ohne dass ein Mensch die einzelnen API-Schritte manuell ausführen muss.
 
 # 2. Architektur
 
@@ -130,16 +130,16 @@ Voraussetzung: Ein A-Record der Domain muss bereits auf die öffentliche IP des 
 
 ## Bild-Design-Standards
 
-Verbindliche Vorgabe für alle generierten Post-Bilder (Details siehe `styleguide.md`):
+Verbindliche Vorgabe für alle generierten Post-Bilder (Details und Beispiel-Prompt siehe `styleguide.md` — dort steht der aktuelle Stand, dieser Abschnitt ist nur eine Kurzfassung):
 
-- **Hintergrund:** Schwarzer Grund mit subtiler, eleganter Textur (z.B. feines Linen-Pattern oder dezente geometrische Muster) — minimalistisch, aber nicht langweilig, bleibt clean & professionell.
-- **Text:** Weiße, elegante Serif-Schrift, zentriert, als dominantes Element im Bild.
-- **Branding:** "Pipeline AI" unten, klein, weiß (Markenname: Pipeline AI Solutions).
+- **Hintergrund:** Dunkles Blau-Schwarz (z.B. `#0a0e1a`), nicht reines Schwarz, mit subtiler Textur — minimalistisch, aber nicht langweilig, bleibt clean & professionell.
+- **Text:** Weiße, elegante Serif-Schrift, links/mittig positioniert (nicht zentriert über die volle Breite), als dominantes Element im Bild.
+- **Branding:** "Pipeline" als großes, vertikales Wasserzeichen am rechten Bildrand (90° gedreht, ~15-20% Deckkraft), **automatisch per Code aufgelegt** (`src/watermark.ts`) — nicht Teil des KI-Bildprompts. `visual_scene` darf daher kein Wasserzeichen/Branding-Text beschreiben (siehe Tool-Beispiele unten).
 - **Keine sonstigen Grafiken:** keine Icons, keine Illustrationen, keine Fotoelemente — nur Typografie auf strukturiertem, dunklem Grund.
 
 ## 6. MCP-Tools (Referenz)
 
-Der Server registriert vier Tools (siehe `src/index.ts`):
+Der Server registriert sechs Tools (siehe `src/index.ts`):
 
 ### `upload_and_publish_post`
 Veröffentlicht einen einzelnen Instagram-Feed-Post. Nimmt entweder eine bereits öffentlich erreichbare Bild-URL oder ein Base64-kodiertes Bild (wird zuerst nach Cloudflare R2 hochgeladen).
@@ -170,7 +170,7 @@ Beispielaufruf:
 ```json
 {
   "topic": "Deploy AI in Minutes",
-  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"Pipeline AI\" text in the bottom right corner."
+  "visual_scene": "white elegant serif text positioned left-of-center reading: \"Deploy AI in Minutes\""
 }
 ```
 → liefert `{ imageUrl, promptUsed, topic }`.
@@ -204,7 +204,7 @@ Beispielaufruf:
 ```json
 {
   "topic": "Deploy AI in Minutes",
-  "visual_scene": "centered white elegant serif text reading: \"Deploy AI in Minutes\". Small \"Pipeline AI\" text in the bottom right corner.",
+  "visual_scene": "white elegant serif text positioned left-of-center reading: \"Deploy AI in Minutes\"",
   "caption": "Unser KI-Chatbot ist rund um die Uhr für dich da. 🤖"
 }
 ```
@@ -227,7 +227,7 @@ Beispielaufruf: `{}`
 1. Auf [claude.ai/customize/connectors](https://claude.ai/customize/connectors) (bzw. Einstellungen → Connectors) **"Custom Connector hinzufügen"** wählen.
 2. **URL:** `https://mcp.pipebot.at/mcp`
 3. **Authentifizierung:** Header-basiert, `Authorization: Bearer <MCP_AUTH_TOKEN>` (den Wert aus der `.env` des Servers eintragen).
-4. Nach dem Verbinden erscheinen die fünf Tools in der Tool-Liste. Für **Cloud-Routinen** (zeitgesteuerte, unbeaufsichtigte Ausführung) müssen die gewünschten Tools auf **"Immer erlauben"** gestellt werden (statt "Bei jeder Nutzung fragen"), da während eines automatisierten Routine-Laufs niemand eine Rückfrage bestätigen kann. Das lässt sich pro Tool in den Connector-/Tool-Einstellungen umstellen.
+4. Nach dem Verbinden erscheinen die sechs Tools in der Tool-Liste. Für **Cloud-Routinen** (zeitgesteuerte, unbeaufsichtigte Ausführung) müssen die gewünschten Tools auf **"Immer erlauben"** gestellt werden (statt "Bei jeder Nutzung fragen"), da während eines automatisierten Routine-Laufs niemand eine Rückfrage bestätigen kann. Das lässt sich pro Tool in den Connector-/Tool-Einstellungen umstellen.
 5. Ein lokal auf `localhost` laufender Server ist für claude.ai **nicht** erreichbar — deshalb der öffentliche Domain+HTTPS-Aufbau aus Abschnitt 2/5 (siehe auch Abschnitt 9).
 
 **Routine-Prompt mit Bild-Review (empfohlen statt `generate_and_publish_post`):**
@@ -237,11 +237,14 @@ Der Ablauf mit Qualitätsprüfung gehört in den Prompt-Text der Routine selbst 
 ```
 1. Lies styleguide.md für Bildstil, Textvorgaben und Caption-Regeln.
 2. Leite aus dem Thema eine kurze Headline (3-5 Wörter) ab und rufe
-   `generate_post_image` mit topic und einer visual_scene auf, die den
-   Headline-Text und das "Pipeline AI"-Branding gemäß Styleguide beschreibt.
-3. Sieh dir das zurückgegebene Bild über die imageUrl an.
+   `generate_post_image` mit topic und einer visual_scene auf, die NUR den
+   Headline-Text und das Layout beschreibt — KEIN Wasserzeichen/Branding-Text,
+   das wird automatisch per Code aufgelegt (siehe Bild-Design-Standards).
+3. Sieh dir das zurückgegebene Bild (inline im Tool-Ergebnis, bereits inkl.
+   Wasserzeichen) an.
 4. Prüfe gegen die Qualitätscheckliste aus dem Styleguide: Headline korrekt
-   & lesbar? Zentriert? Hintergrund dunkel genug? "Pipeline AI" sichtbar? Keine
+   & lesbar? Links/mittig positioniert? Hintergrund dunkles Navy mit Textur?
+   "Pipeline"-Wasserzeichen rechts sichtbar, korrekt orientiert? Keine
    Zusatzgrafiken? Schrift elegant/serif?
 5. Falls ein Punkt fehlschlägt: Rufe `generate_post_image` erneut auf (max.
    2 weitere Versuche) mit angepasstem Prompt.
