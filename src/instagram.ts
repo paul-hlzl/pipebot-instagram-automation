@@ -2,6 +2,7 @@ import axios, { type AxiosInstance } from "axios";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
+import { checkRecentDuplicate, writeLastPost } from "./dedupe.js";
 
 const GRAPH_BASE = "https://graph.instagram.com/v21.0";
 const POLL_INTERVAL_MS = 4000;
@@ -18,6 +19,7 @@ export interface PublishResult {
   postId: string;
   containerId: string;
   hostedImageUrl: string;
+  warning?: string;
 }
 
 interface GraphLimitResponse {
@@ -203,9 +205,13 @@ export async function publishImageToInstagram(
   imageUrl: string,
   caption: string,
 ): Promise<PublishResult> {
+  // Soft duplicate check: never blocks, only surfaces a warning in the result
+  // so the caller (Claude) can decide whether a repeat publish is intentional.
+  const duplicateWarning = checkRecentDuplicate();
+
   await assertPublishingQuota();
 
-  return withRetry(
+  const result = await withRetry(
     async () => {
       const containerId = await createMediaContainer(imageUrl, caption);
       await waitForContainer(containerId);
@@ -215,6 +221,10 @@ export async function publishImageToInstagram(
     2,
     "Instagram publish",
   );
+
+  writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption });
+
+  return duplicateWarning ? { ...result, warning: duplicateWarning } : result;
 }
 
 export async function refreshAccessToken(): Promise<{

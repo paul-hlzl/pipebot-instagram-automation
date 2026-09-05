@@ -183,6 +183,7 @@ function createServer(): McpServer {
           topic,
           imageUrl: generated.imageUrl,
           prompt: generated.prompt,
+          warning: published.warning,
         });
       } catch (error) {
         console.error("generate_and_publish_post:", toToolMessage(error));

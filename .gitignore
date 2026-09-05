@@ -5,3 +5,4 @@ dist/
 .DS_Store
 tmp/
 .claude/
+last_post.json
