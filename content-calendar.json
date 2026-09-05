@@ -4,37 +4,51 @@
     "2026-09-07": {
       "category": "Kundenservice/24-7-Support",
       "topic": "Wie ein KI-Chatbot nachts und am Wochenende Kundenanfragen beantwortet, während das Team schläft",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 1,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/1"
     },
     "2026-09-08": {
       "category": "Automatisierung/Effizienz",
       "topic": "Wiederkehrende Rückfragen automatisch beantworten lassen, bevor sie im Postfach landen",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 2,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/2"
     },
     "2026-09-09": {
       "category": "Chatbot/ROI",
       "topic": "Wie viel Umsatz ein einziger gut trainierter Chatbot pro Monat zusätzlich bringen kann",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 3,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/3"
     },
     "2026-09-10": {
       "category": "KI-Tools/Digitalisierung",
       "topic": "Die drei KI-Tools, die kleine Teams zuerst einführen sollten",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 4,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/4"
     },
     "2026-09-11": {
       "category": "Kundenservice/24-7-Support",
       "topic": "Warum Kunden schnelle Antworten wichtiger sind als perfekte Antworten",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 5,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/5"
     },
     "2026-09-12": {
       "category": "Automatisierung/Effizienz",
       "topic": "Ein Beispiel-Workflow, der pro Woche mehrere Stunden manueller Arbeit einspart",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 6,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/6"
     },
     "2026-09-13": {
       "category": "Chatbot/ROI",
       "topic": "Vom ersten Chat bis zum Kaufabschluss: der Weg eines Leads durch den Chatbot",
-      "status": "planned"
+      "status": "planned",
+      "issue_number": 7,
+      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/7"
     }
   }
 }
