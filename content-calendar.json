@@ -1,39 +1,39 @@
 {
-  "week_start": "2026-08-31",
+  "week_start": "2026-09-07",
   "days": {
-    "2026-08-31": {
-      "category": "Automatisierung/Effizienz",
-      "topic": "Wiederkehrende Workflows automatisieren und Zeit sparen",
-      "status": "planned"
-    },
-    "2026-09-01": {
-      "category": "Chatbot/ROI",
-      "topic": "Chatbots, die sich durch mehr Conversions selbst finanzieren",
-      "status": "planned"
-    },
-    "2026-09-02": {
-      "category": "KI-Tools/Digitalisierung",
-      "topic": "KI-Tools schneller produktiv einsetzen statt monatelang evaluieren",
-      "status": "planned"
-    },
-    "2026-09-03": {
+    "2026-09-07": {
       "category": "Kundenservice/24-7-Support",
-      "topic": "24/7-Erreichbarkeit ohne zusätzliches Support-Personal",
+      "topic": "Wie ein KI-Chatbot nachts und am Wochenende Kundenanfragen beantwortet, während das Team schläft",
       "status": "planned"
     },
-    "2026-09-04": {
+    "2026-09-08": {
       "category": "Automatisierung/Effizienz",
-      "topic": "Manuelle Arbeit in Kernprozessen halbieren",
+      "topic": "Wiederkehrende Rückfragen automatisch beantworten lassen, bevor sie im Postfach landen",
       "status": "planned"
     },
-    "2026-09-05": {
+    "2026-09-09": {
       "category": "Chatbot/ROI",
-      "topic": "Wie Chat-Interaktionen zu zahlenden Kunden werden",
+      "topic": "Wie viel Umsatz ein einziger gut trainierter Chatbot pro Monat zusätzlich bringen kann",
       "status": "planned"
     },
-    "2026-09-06": {
+    "2026-09-10": {
       "category": "KI-Tools/Digitalisierung",
-      "topic": "KI-Systeme smarter statt aufwändiger ausrollen",
+      "topic": "Die drei KI-Tools, die kleine Teams zuerst einführen sollten",
+      "status": "planned"
+    },
+    "2026-09-11": {
+      "category": "Kundenservice/24-7-Support",
+      "topic": "Warum Kunden schnelle Antworten wichtiger sind als perfekte Antworten",
+      "status": "planned"
+    },
+    "2026-09-12": {
+      "category": "Automatisierung/Effizienz",
+      "topic": "Ein Beispiel-Workflow, der pro Woche mehrere Stunden manueller Arbeit einspart",
+      "status": "planned"
+    },
+    "2026-09-13": {
+      "category": "Chatbot/ROI",
+      "topic": "Vom ersten Chat bis zum Kaufabschluss: der Weg eines Leads durch den Chatbot",
       "status": "planned"
     }
   }
