@@ -2,13 +2,13 @@
 
 **Markenname:** Pipeline AI Solutions (kurz: "Pipeline AI" für kleine On-Image-Brandings). Nicht "Pipebot" — bestimmt Ton, Headline und Caption aller Posts.
 
-## BILDSTIL (cloudstrata-Referenz, Layout v2)
-- **Hintergrund:** Dunkles Blau-Schwarz, nicht reines Schwarz (z.B. `#0a0e1a` oder ähnlicher dunkler Navy-Ton), mit subtiler Textur. Minimalistisch, aber nicht langweilig. Bleibt clean & professionell.
-- **Text (Headline):** Weiße, klassische Serif-Schrift (elegant, nicht modern)
-- **Text-Größe:** Großer, dominanter Headline (3-5 Wörter max)
-- **Text-Positionierung:** Links/mittig positioniert (nicht mehr zentriert über die volle Breite)
-- **Wasserzeichen-Branding:** "Pipeline" als großer, vertikaler Schriftzug am rechten Bildrand, transparent/dezent (~15-20% Deckkraft, wie ein Wasserzeichen), um 90 Grad gedreht (von unten nach oben lesbar). Übernimmt allein die Markenerkennung — **kein separates kleines Branding unten mehr nötig**.
-- **Sonstige Grafiken:** KEINE — kein Icon, keine Pixel-Art, keine geometrischen Formen/Dreiecke/Deko-Elemente, kein Rahmen, nichts außer Hintergrund + Headline-Text
+## BILDSTIL (cloudstrata-Referenz, Layout v3 — Headline jetzt per Code gerendert, siehe BILDGENERIERUNG)
+- **Hintergrund:** Dunkles Blau-Schwarz, nicht reines Schwarz (z.B. `#0a0e1a` oder ähnlicher dunkler Navy-Ton), mit subtiler Textur. Minimalistisch, aber nicht langweilig. Bleibt clean & professionell. Einziger Teil des Bildes, der noch von fal.ai generiert wird.
+- **Text (Headline):** Weiße, klassische Serif-Schrift (`Liberation Serif`, elegant, nicht modern) — wird NICHT mehr von der KI gerendert, sondern per Code aufgelegt (siehe unten). Garantiert exakt, einheitlich, keine Interpunktions-/Schrift-Mix-Fehler mehr möglich.
+- **Text-Größe:** Großer, dominanter Headline (2-4 Wörter), Schriftgröße automatisch an Zeilenlänge angepasst (siehe `addHeadlineText` in `src/watermark.ts`)
+- **Text-Positionierung:** Links/mittig positioniert (nicht zentriert über die volle Breite), bei 3-4 Wörtern automatisch auf 2 Zeilen umgebrochen
+- **Wasserzeichen-Branding:** "Pipeline" als großer, vertikaler Schriftzug am rechten Bildrand, transparent/dezent (~15-20% Deckkraft, wie ein Wasserzeichen), um 90 Grad gedreht (von unten nach oben lesbar). Ebenfalls per Code aufgelegt. Übernimmt allein die Markenerkennung — **kein separates kleines Branding unten mehr nötig**.
+- **Sonstige Grafiken:** KEINE — kein Icon, keine Pixel-Art, keine geometrischen Formen/Dreiecke/Deko-Elemente, kein Rahmen, nichts außer Hintergrund + Headline-Text + Wasserzeichen
 - **Gesamteindruck:** Minimalistisch, edel, "AI-generated" Look, professionell
 
 ## BEISPIEL-LAYOUT
@@ -27,24 +27,28 @@ Scale AI Systems"
 - **Keine Hashtags im Bild selbst** (die gehen in Caption)
 
 ## BILDGENERIERUNG (für fal.ai Flux Schnell)
-**Wichtig:** Das "Pipeline"-Wasserzeichen wird NICHT mehr von der KI gezeichnet — Text-zu-Bild-Modelle rendern gedrehten Text und exakte Deckkraft-Werte unzuverlässig (getestet: gespiegelte Buchstaben, halluzinierter Text-Müll). Das Wasserzeichen wird stattdessen **automatisch per Code** (`src/watermark.ts`, sharp/SVG) nach der Bildgenerierung aufgelegt — exakte Position, Rotation (90°, von unten nach oben lesbar) und Deckkraft (~18%), garantiert korrekt.
 
-Prompt-Template (nur Headline, KEIN Wasserzeichen-Text anfordern):
-"Dark navy-black background (near #0a0e1a), subtle fine linen texture, barely visible. Traditional white serif typeface only, NOT sans-serif, NOT bold, NOT decorative. Text positioned left-of-center reading: '[HEADLINE]'. The text must be rendered exactly as written, no missing or extra characters. Professional, clean, minimalist. No shapes, no triangles, no icons, no decorative graphics, no borders — nothing besides the background and the headline text. No other text/numbers/labels anywhere else in the image."
+**Architektur seit 2026-09-05 (Layout v3): Headline und Wasserzeichen werden BEIDE per Code aufgelegt, NICHT von der KI gerendert.** Text-zu-Bild-Modelle rendern Text unzuverlässig — Vorgeschichte: erst nur das Wasserzeichen (gedrehter Text, exakte Deckkraft) war betroffen, dann zeigte eine 12er-Testreihe mit der Headline im KI-Prompt nur 16,7% Erfolgsquote (verstümmelter Text, fehlende/vertauschte Wörter, Streu-Interpunktion, inkonsistente Schrift-Mischung), und eine weitere Verschärfung des Prompts verschlimmerte das sogar auf 0/12 (das Modell rendert dann teils den Text "Instagram" aus dem eigenen Stil-Prefix statt der Headline, oder gar keinen Text). Lösung: fal.ai bekommt gar keine Text-Anfrage mehr, sondern generiert NUR noch den reinen Hintergrund — Headline und Wasserzeichen kommen danach beide per SVG/sharp exakt, garantiert korrekt dazu.
 
-(Stand 2026-09-05: Textur-Beschreibung bewusst NICHT mehr als "geometrisches Muster" formuliert — das führte nachweislich zu halluzinierten Dreiecken/Deko-Grafiken im Bild. Nur noch "fine linen texture", eindeutig nicht-geometrisch.
+**fal.ai-Prompt (reiner Hintergrund, siehe `IMAGE_STYLE_PREFIX` in `src/fal.ts`):**
+"minimalist background for a social media graphic, dark navy-black (near #0a0e1a) with a subtle fine linen texture, barely visible. Professional, clean, AI-generated aesthetic. Plain and uncluttered. Absolutely no text, no letters, no numbers, no words, no typography of any kind. No icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no geometric shapes, no triangles, no abstract decorative graphics, no borders, no frames, no additional graphic elements of any kind — just the plain dark textured background, nothing else"
 
-Ebenfalls am 2026-09-05 getestet und WIEDER VERWORFEN: ein noch stärker verschärfter Prefix gegen Streu-Interpunktion und inkonsistente Schrift-Mischung (mehr Verbote/negative Anweisungen). Ergebnis einer 12er-Testreihe damit: 0/12 (0%) — schlechter als die 16,7% davor. Vermutlicher Grund: der Prefix wurde zu lang/dicht mit Verneinungen, wodurch das Modell die eigentliche Headline am Ende des Prompts nicht mehr zuverlässig beachtete — mehrfach wurde stattdessen leerer Text oder das Wort "Instagram" (das im Prefix selbst als "minimalist Instagram graphic" vorkommt!) ins Bild gerendert. Zurückgerollt auf den Stand mit 16,7%. Lehre: mehr negative Constraints im Prompt sind nicht automatisch besser — es gibt eine Grenze, ab der Flux Schnell die eigentliche Anweisung verliert.)
+**Code-Rendering-Spezifikation (`addHeadlineText` in `src/watermark.ts`, läuft VOR dem Wasserzeichen-Overlay):**
+- Schrift: `Liberation Serif, serif`, Farbe `#ffffff` (weiß), einheitlicher Schnitt (kein Bold/Italic-Mix möglich, da programmatisch)
+- Position: links, x-Start bei 10% der Bildbreite; vertikal um die Bildmitte zentriert
+- Zeilenumbruch: ≤2 Wörter → 1 Zeile; 3-4 Wörter → automatisch 2 Zeilen (je die Hälfte der Wörter)
+- Schriftgröße: automatisch an die längste Zeile angepasst (Ziel: ~78% der Bildbreite ausgefüllt), Bandbreite 6-12% der Bildhöhe
+- Reihenfolge: Hintergrund generieren → Headline auflegen → Wasserzeichen auflegen → JPEG-Export
+
+(Historie der gescheiterten Prompt-Iterationen — 16,7% dann 0/12 — bleibt zur Nachvollziehbarkeit im Git-Log dieser Datei erhalten, nicht mehr hier ausgeführt, da inzwischen strukturell obsolet.)
 
 ## QUALITÄTSPRÜFUNG BEFORE POSTING
-✅ Text lesbar, links/mittig positioniert (nicht zentriert über volle Breite)?
-✅ Hintergrund dunkles Navy/Blau-Schwarz (nicht reines Schwarz), mit sichtbarer, subtiler Textur?
-✅ Keine zusätzlichen/halluzinierten Text-Elemente, Zeichen oder Interpunktion außer der exakten Headline (das Wasserzeichen kommt separat per Code dazu, danach prüfen — siehe unten)?
-✅ Keine zusätzlichen Grafiken/Icons/Formen/Dreiecke/Rahmen — nur Hintergrund + Text?
-✅ Schrift elegant Serif — NICHT sans-serif, NICHT bold, NICHT verspielt/dekorativ?
-→ Falls NEIN zu etwas: Neugeneration mit angepasstem Prompt.
+✅ Hintergrund dunkles Navy/Blau-Schwarz (nicht reines Schwarz), mit sichtbarer, subtiler Textur, keine Artefakte/Flecken?
+✅ Keine unerwarteten Grafiken/Formen im Hintergrund (Formen/Text sind jetzt strukturell ausgeschlossen, da nicht angefragt — aber Bildmodelle können theoretisch trotzdem abweichen, daher weiterhin kurz gegenprüfen)?
+→ Headline-Text, Schriftart und Positionierung müssen NICHT mehr geprüft werden — die sind seit Layout v3 code-generiert und damit garantiert korrekt. Die Prüfung betrifft nur noch den Hintergrund.
+→ Falls NEIN zum Hintergrund: Neugeneration (bis zu 3 Versuche, siehe Routine-Prompt) — dieser Fall sollte jetzt aber deutlich seltener auftreten als früher, da das Bildmodell nur noch eine simple, textfreie Aufgabe hat.
 
-**Zusätzlich nach dem automatischen Wasserzeichen-Overlay prüfen:** "Pipeline"-Schriftzug rechts sichtbar, korrekt orientiert (nicht gespiegelt), vertikal lesbar von unten nach oben, dezent/transparent?
+**Zusätzlich nach dem automatischen Headline- und Wasserzeichen-Overlay prüfen:** "Pipeline"-Schriftzug rechts sichtbar, korrekt orientiert (nicht gespiegelt), vertikal lesbar von unten nach oben, dezent/transparent? (Rein zur Vollständigkeit — dieser Teil war schon vor Layout v3 code-generiert und zuverlässig.)
 
 ## CAPTION (Instagram Post-Text)
 - Kurzer, lockerer Text zu Headline, IMMER auf Englisch (siehe Sprachregel oben)

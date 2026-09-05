@@ -71,46 +71,46 @@ function createServer(): McpServer {
       "Original theme for logging only, e.g. \"Vorteile von KI-Chatbots im Kundenservice\". Not sent to the image model.",
     );
 
-  const visualSceneSchema = z
+  const headlineSchema = z
     .string()
     .min(1)
+    .max(60)
     .describe(
-      "Must include the exact headline text to render on the image, positioned left-of-center, plus any layout " +
-        "notes. This design puts a short headline (3-5 words) as the dominant visual element on a dark navy " +
-        "textured background — do not avoid text. Do NOT describe a 'Pipeline' watermark/branding text yourself — " +
-        "that is composited automatically by the server after generation, not part of the AI prompt. " +
-        'Example: \'white elegant serif text positioned left-of-center reading: "Deploy AI in Minutes"\'.',
+      "The short (2-4 word) headline to display on the image, verbatim — e.g. \"Automate With Confidence\". " +
+        "This is rendered deterministically in code (not by the image model) as white classic serif text " +
+        "positioned left-of-center, so it is always spelled and styled exactly as given here. Do not include " +
+        "quotes, styling notes, or the 'Pipeline' watermark text — just the plain headline words.",
     );
 
   const HEADLINE_IMAGE_GUIDANCE =
-    "You MUST translate `topic` into `visual_scene` yourself before calling: derive a short (3-5 word) headline from " +
-    "the topic and describe it as white serif text positioned left-of-center on the image. Do NOT mention a " +
-    "'Pipeline' watermark or any branding text in visual_scene — the server composites that automatically after " +
-    "generation. Example: topic Deploy AI in Minutes -> visual_scene: white elegant serif text positioned " +
-    "left-of-center reading: Deploy AI in Minutes. " +
-    "The server prepends a fixed dark-navy-background/serif-typography style prefix; it does not send the raw " +
-    "topic to fal.ai. Flux schnell can occasionally garble or misspell rendered text — always review the image before " +
-    "publishing and regenerate if the text is wrong, distorted, or illegible.";
+    "You MUST translate `topic` into a short (2-4 word) `headline` yourself before calling — just the plain words, " +
+    "e.g. topic \"Deploy AI in Minutes\" -> headline \"Deploy AI Fast\". The headline is composited onto the " +
+    "background deterministically in code (exact spelling and styling guaranteed, no image-model text rendering " +
+    "involved), and the 'Pipeline' watermark is added the same way — do not mention either in any prompt text " +
+    "you write; there is no visual_scene or prompt field to fill in here, the background style is fixed server-side.";
 
   server.registerTool(
     "generate_post_image",
     {
       description:
         "Generate a single Instagram-ready image with fal.ai FLUX schnell WITHOUT publishing it. " +
+        "The headline is composited onto the background deterministically in code (see `headline` below), so " +
+        "text accuracy is guaranteed — the only thing worth reviewing before publishing is the background itself " +
+        "(rare visual artifacts from the image model), not the text. " +
         "Returns the image URL AND the image itself as inline content, so it can be reviewed before posting " +
         "even from a network-restricted sandbox that cannot reach the fal.media host directly (e.g. a cloud " +
         "routine behind an egress proxy) — no separate fetch of the URL is needed to view it. " +
         "Use this instead of `generate_and_publish_post` whenever the image should be checked first " +
-        "(e.g. in unattended/automated routines) — image models occasionally render garbled or wrong text into the image. " +
+        "(e.g. in unattended/automated routines). " +
         HEADLINE_IMAGE_GUIDANCE,
       inputSchema: {
         topic: topicSchema,
-        visual_scene: visualSceneSchema,
+        headline: headlineSchema,
       },
     },
-    async ({ topic, visual_scene }) => {
+    async ({ topic, headline }) => {
       try {
-        const generated = await generateImageUrl(visual_scene);
+        const generated = await generateImageUrl(headline);
         return {
           content: [
             {
@@ -163,20 +163,20 @@ function createServer(): McpServer {
       description:
         "Convenience tool: generates an image with fal.ai FLUX schnell AND immediately publishes it, " +
         "with no review step in between. Internally does the same as calling `generate_post_image` " +
-        "followed by `publish_generated_post`. " +
-        "For unattended/automated routines, prefer calling `generate_post_image` and `publish_generated_post` " +
-        "separately with a visual review step in between — this tool skips that safeguard. " +
+        "followed by `publish_generated_post`. The headline text itself is guaranteed correct (composited in " +
+        "code, not rendered by the image model) — the review step this tool skips only ever mattered for the " +
+        "background's visual quality, not text accuracy. " +
         HEADLINE_IMAGE_GUIDANCE +
         " Does not use R2.",
       inputSchema: {
         topic: topicSchema,
-        visual_scene: visualSceneSchema,
+        headline: headlineSchema,
         caption: z.string().min(1).max(2200).describe("Instagram caption (max 2200 characters)."),
       },
     },
-    async ({ topic, visual_scene, caption }) => {
+    async ({ topic, headline, caption }) => {
       try {
-        const generated = await generateImageUrl(visual_scene);
+        const generated = await generateImageUrl(headline);
         const published = await publishImageToInstagram(generated.imageUrl, caption);
         return textResult({
           postId: published.postId,

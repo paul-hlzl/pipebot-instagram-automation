@@ -26,8 +26,8 @@ MCP-Server (dieses Projekt, Node.js/Express, von pm2 am Leben gehalten)
 ```
 
 **Datenfluss beim typischen Ablauf (`generate_and_publish_post`):**
-1. Claude leitet aus einem Thema eine kurze Headline ab und formuliert `visual_scene` (Headline-Text plus Layout, gemäß `styleguide.md`) sowie eine Caption.
-2. Der MCP-Server hängt einen festen, minimalistischen Schwarz/Weiß-Stil-Prefix an den Prompt (Text ist ausdrücklich Teil des Designs) und ruft fal.ai (Flux Schnell) auf → erhält eine Bild-URL.
+1. Claude leitet aus einem Thema eine kurze (2-4 Wörter) `headline` ab sowie eine Caption.
+2. Der MCP-Server ruft fal.ai (Flux Schnell) mit einem festen, komplett textfreien Hintergrund-Prompt auf (dunkler Navy-Ton, subtile Textur — keine Erwähnung von Text/Headline, siehe `styleguide.md`) → erhält eine Bild-URL. Anschließend werden Headline und "Pipeline"-Wasserzeichen per Code (`src/watermark.ts`, sharp/SVG) exakt aufs Bild gerendert — das Bildmodell muss selbst nie Text zeichnen.
 3. Der Server legt bei Instagram einen Media-Container mit dieser Bild-URL und der Caption an, pollt den Status bis `FINISHED` und veröffentlicht den Post.
 4. Das Ergebnis (Post-ID, Bild-URL, tatsächlich genutzter Prompt) geht zurück an Claude.
 
@@ -133,8 +133,8 @@ Voraussetzung: Ein A-Record der Domain muss bereits auf die öffentliche IP des 
 Verbindliche Vorgabe für alle generierten Post-Bilder (Details und Beispiel-Prompt siehe `styleguide.md` — dort steht der aktuelle Stand, dieser Abschnitt ist nur eine Kurzfassung):
 
 - **Hintergrund:** Dunkles Blau-Schwarz (z.B. `#0a0e1a`), nicht reines Schwarz, mit subtiler Textur — minimalistisch, aber nicht langweilig, bleibt clean & professionell.
-- **Text:** Weiße, elegante Serif-Schrift, links/mittig positioniert (nicht zentriert über die volle Breite), als dominantes Element im Bild.
-- **Branding:** "Pipeline" als großes, vertikales Wasserzeichen am rechten Bildrand (90° gedreht, ~15-20% Deckkraft), **automatisch per Code aufgelegt** (`src/watermark.ts`) — nicht Teil des KI-Bildprompts. `visual_scene` darf daher kein Wasserzeichen/Branding-Text beschreiben (siehe Tool-Beispiele unten).
+- **Text:** Weiße, elegante Serif-Schrift, links/mittig positioniert (nicht zentriert über die volle Breite), als dominantes Element im Bild. **Seit Layout v3 (2026-09-05) komplett per Code gerendert** (`addHeadlineText` in `src/watermark.ts`), nicht mehr vom Bildmodell — das Bild-Generierungs-Tool bekommt nur noch `headline` als reinen Textwert übergeben, keine Layout-Beschreibung mehr nötig.
+- **Branding:** "Pipeline" als großes, vertikales Wasserzeichen am rechten Bildrand (90° gedreht, ~15-20% Deckkraft), **automatisch per Code aufgelegt** (`src/watermark.ts`) — nicht Teil des KI-Bildprompts.
 - **Keine sonstigen Grafiken:** keine Icons, keine Illustrationen, keine Fotoelemente — nur Typografie auf strukturiertem, dunklem Grund.
 
 ## 6. MCP-Tools (Referenz)
@@ -164,13 +164,13 @@ Generiert ein Bild per fal.ai (Flux Schnell), **ohne** es zu veröffentlichen. G
 | Parameter | Typ | Pflicht | Beschreibung |
 |---|---|---|---|
 | `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging — wird nicht an das Bildmodell geschickt |
-| `visual_scene` | string | ja | Muss den exakten Headline-Text enthalten, der im Bild erscheinen soll, plus Layout-Hinweise (siehe `styleguide.md`) |
+| `headline` | string | ja | Der kurze (2-4 Wörter) Headline-Text, wortwörtlich. Wird NICHT an fal.ai geschickt, sondern nach der Bildgenerierung per Code exakt aufs Bild gerendert (siehe `styleguide.md` Abschnitt „BILDGENERIERUNG" — seit Layout v3 garantiert korrekte Rechtschreibung/Schrift/Position, kein Bildmodell-Text-Risiko mehr) |
 
 Beispielaufruf:
 ```json
 {
   "topic": "Deploy AI in Minutes",
-  "visual_scene": "white elegant serif text positioned left-of-center reading: \"Deploy AI in Minutes\""
+  "headline": "Deploy AI Fast"
 }
 ```
 → liefert `{ imageUrl, promptUsed, topic }`.
@@ -197,19 +197,19 @@ Komfort-Variante **ohne** Review-Schritt: generiert das Bild direkt per fal.ai (
 | Parameter | Typ | Pflicht | Beschreibung |
 |---|---|---|---|
 | `topic` | string | ja | Ursprüngliches Thema, nur fürs Logging — wird nicht an das Bildmodell geschickt |
-| `visual_scene` | string | ja | Muss den exakten Headline-Text enthalten, der im Bild erscheinen soll, plus Layout-Hinweise (siehe `styleguide.md`) |
+| `headline` | string | ja | Der kurze (2-4 Wörter) Headline-Text, wortwörtlich — per Code gerendert, siehe oben bei `generate_post_image` |
 | `caption` | string | ja | Caption, max. 2200 Zeichen |
 
 Beispielaufruf:
 ```json
 {
   "topic": "Deploy AI in Minutes",
-  "visual_scene": "white elegant serif text positioned left-of-center reading: \"Deploy AI in Minutes\"",
+  "headline": "Deploy AI Fast",
   "caption": "Unser KI-Chatbot ist rund um die Uhr für dich da. 🤖"
 }
 ```
 
-> **Empfehlung für automatisierte Routinen:** `generate_and_publish_post` postet ungeprüft — Bildmodelle wie Flux Schnell können gelegentlich lesbaren, aber falschen oder verstümmelten Text ins Bild rendern (z. B. "A1" statt "AI"), und der Styleguide setzt gerade auf eine große, lesbare Headline im Bild. Für unbeaufsichtigte Routinen daher immer den zweistufigen Weg nutzen: `generate_post_image` → Bild-URL visuell prüfen (steht die Headline korrekt & lesbar da?) → bei Bedarf bis zu 2× neu generieren → erst dann `publish_generated_post`. Ein Beispiel-Routine-Prompt für genau diesen Ablauf steht unten in Abschnitt 7.
+> **Empfehlung für automatisierte Routinen:** Seit Layout v3 (2026-09-05) ist die Headline selbst code-gerendert und damit immer korrekt — das ursprüngliche Risiko für `generate_and_publish_post` (Bildmodell verstümmelt Text) besteht für die Headline nicht mehr. Ein Review-Schritt bleibt trotzdem sinnvoll, weil das fal.ai-Bildmodell den (jetzt textfreien) Hintergrund gelegentlich mit Artefakten liefern kann. Für unbeaufsichtigte Routinen daher weiterhin den zweistufigen Weg nutzen: `generate_post_image` → Hintergrund visuell prüfen → bei Bedarf bis zu 2× neu generieren → erst dann `publish_generated_post`. Ein Beispiel-Routine-Prompt für genau diesen Ablauf steht unten in Abschnitt 7.
 
 ### `check_publishing_limit`
 Fragt das aktuelle Instagram-Publishing-Kontingent für das konfigurierte Konto ab. Keine Parameter.
@@ -236,18 +236,18 @@ Der Ablauf mit Qualitätsprüfung gehört in den Prompt-Text der Routine selbst 
 
 ```
 1. Lies styleguide.md für Bildstil, Textvorgaben und Caption-Regeln.
-2. Leite aus dem Thema eine kurze Headline (3-5 Wörter) ab und rufe
-   `generate_post_image` mit topic und einer visual_scene auf, die NUR den
-   Headline-Text und das Layout beschreibt — KEIN Wasserzeichen/Branding-Text,
-   das wird automatisch per Code aufgelegt (siehe Bild-Design-Standards).
+2. Leite aus dem Thema eine kurze Headline (2-4 Wörter) ab und rufe
+   `generate_post_image` mit topic und headline (dem reinen Headline-Text,
+   z. B. "Deploy AI Fast") auf — Headline und Wasserzeichen werden beide
+   automatisch per Code aufgelegt, siehe Bild-Design-Standards.
 3. Sieh dir das zurückgegebene Bild (inline im Tool-Ergebnis, bereits inkl.
-   Wasserzeichen) an.
-4. Prüfe gegen die Qualitätscheckliste aus dem Styleguide: Headline korrekt
-   & lesbar? Links/mittig positioniert? Hintergrund dunkles Navy mit Textur?
-   "Pipeline"-Wasserzeichen rechts sichtbar, korrekt orientiert? Keine
-   Zusatzgrafiken? Schrift elegant/serif?
-5. Falls ein Punkt fehlschlägt: Rufe `generate_post_image` erneut auf (max.
-   2 weitere Versuche) mit angepasstem Prompt.
+   Headline und Wasserzeichen) an.
+4. Prüfe nur noch den Hintergrund gegen die Qualitätscheckliste aus dem
+   Styleguide: dunkles Navy mit Textur, keine Artefakte/unerwarteten
+   Grafiken? (Headline-Text/Schrift/Position sind code-generiert und
+   müssen nicht mehr geprüft werden.)
+5. Falls der Hintergrund fehlerhaft aussieht: Rufe `generate_post_image`
+   erneut auf (max. 2 weitere Versuche).
 6. Erst wenn das Bild die Checkliste besteht: Rufe `publish_generated_post`
    mit dieser imageUrl und der Caption auf.
 ```
@@ -276,5 +276,5 @@ Alle Variablen aus `.env.example` — **ohne echte Werte**, nur zur Orientierung
 ## 9. Bekannte Probleme / Learnings
 
 - **CRLF-Zeilenenden in `.env` können den `Authorization`-Header brechen.** Wenn die `.env`-Datei mit Windows-Zeilenenden (`\r\n`) gespeichert wird, kann ein aus der Datei extrahierter Wert (z. B. beim manuellen Kopieren des Tokens) ein unsichtbares `\r` mitschleppen. Landet das im `Authorization`-Header, lehnt Node's HTTP-Parser den Request bereits auf Protokollebene mit einem rohen `400 Bad Request` ab — noch bevor die eigene Anwendungslogik überhaupt läuft. **Lösung:** `.env` konsequent mit LF-Zeilenenden speichern (`sed -i 's/\r$//' .env`), gerade wenn sie unter Windows bearbeitet wurde.
-- **Flux Schnell kann Text im Bild gelegentlich verstümmeln.** Seit dem Styleguide-Update ist Text (die Headline) explizit gewollter Teil des Bildmotivs (siehe `IMAGE_STYLE_PREFIX` in `src/fal.ts` — minimalistischer Schwarz/Weiß-Stil mit Serif-Typografie statt der früheren, textfreien Tech-Grafik-Optik). Das Bildmodell hat aber weiterhin keinen Negative-Prompt-Parameter und kann Buchstaben gelegentlich falsch rendern (z. B. "A1" statt "AI") — deshalb bleibt der zweistufige Ablauf wichtig: `generate_post_image` → Bild visuell gegen die Styleguide-Checkliste prüfen (ggf. bis zu 2× neu generieren) → erst dann `publish_generated_post`. `generate_and_publish_post` bleibt als schnelle Komfort-Variante ohne diesen Review-Schritt bestehen, sollte aber nicht in unbeaufsichtigten Routinen verwendet werden (siehe Abschnitt 6/7).
+- **Flux Schnell konnte Text im Bild verstümmeln — deshalb wird die Headline seit Layout v3 (2026-09-05) gar nicht mehr vom Bildmodell gerendert.** Ursprünglich war die Headline Teil des fal.ai-Prompts (`IMAGE_STYLE_PREFIX` in `src/fal.ts`); eine 12-Bild-Testreihe zeigte dabei nur 16,7% korrekte Ergebnisse (verstümmelter Text, fehlende/vertauschte Wörter, Streu-Interpunktion, inkonsistente Schrift-Mischung), und ein Versuch, den Prompt noch strenger zu formulieren, verschlechterte das sogar auf 0/12 (das Modell rendert dann teils irrelevante Wörter aus dem eigenen Stil-Prefix statt der Headline). Lösung: fal.ai bekommt nur noch einen komplett textfreien Hintergrund-Prompt, Headline und Wasserzeichen werden beide per Code aufgelegt (`addHeadlineText`/`addPipelineWatermark` in `src/watermark.ts`) — eine erneute 12-Bild-Testreihe damit ergab 12/12 (100%). Der zweistufige Ablauf (`generate_post_image` → Review → `publish_generated_post`) bleibt trotzdem sinnvoll, jetzt aber nur noch zur Kontrolle des Hintergrunds (seltene Bildmodell-Artefakte), nicht mehr wegen Text-Risiko.
 - **Cloud-Routinen brauchen einen öffentlich erreichbaren MCP-Server.** Claude-Routinen bei claude.ai laufen serverseitig in der Cloud und können keinen `stdio`-MCP-Server oder einen nur lokal (`localhost`) erreichbaren HTTP-Server ansprechen. Für Automatisierung ist daher zwingend ein öffentlich per HTTPS erreichbarer Server nötig (siehe Hosting-Aufbau in Abschnitt 2) — rein lokale Setups funktionieren nur für manuelle Nutzung über Claude Code oder den Desktop-Client mit lokalem MCP-Server.

@@ -2,19 +2,23 @@ import axios from "axios";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
-import { addPipelineWatermark } from "./watermark.js";
+import { addHeadlineText, addPipelineWatermark } from "./watermark.js";
 import { uploadImageBase64 } from "./r2.js";
 
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
 
 /**
- * Fixed visual style: minimalist typographic look with a subtle textured background.
- * The headline text belongs in visual_scene. The "Pipeline" watermark is NOT part of this
- * prompt — it's composited in code afterward (addPipelineWatermark) because text-to-image
- * models render rotated text and precise opacity unreliably.
+ * Fixed background prompt — deliberately contains NO mention of text, headlines, or
+ * typography. The image model previously had to render the headline itself, which was
+ * unreliable even after extensive prompt tightening (garbled/dropped words, inconsistent
+ * font weight, stray punctuation, hallucinated unrelated text — see styleguide.md's
+ * BILDGENERIERUNG section for the 2026-09-05 test history). The headline is now composited
+ * deterministically in code instead (addHeadlineText in watermark.ts, same approach already
+ * used for the "Pipeline" watermark), so the model only ever has to generate a plain textured
+ * background — a much easier, lower-risk task with no text-accuracy failure mode at all.
  */
 export const IMAGE_STYLE_PREFIX =
-  "minimalist Instagram graphic, dark navy-black background (near #0a0e1a) with a subtle fine linen texture, barely visible. Professional, clean, AI-generated aesthetic. Elegant white classic serif typography as the dominant visual element — a traditional serif typeface only, NOT sans-serif, NOT bold, NOT script, NOT a decorative or stylized font. Social media post format, square. Absolutely no icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no geometric shapes, no triangles, no abstract decorative graphics, no borders, no frames, no additional graphic elements of any kind — nothing in the image except the plain textured background and the headline text. No extra text, numbers, dates, labels, or stray punctuation marks anywhere besides the one exact headline. The headline text must be rendered exactly as written, letter for letter, with no missing, extra, or altered characters";
+  "minimalist background for a social media graphic, dark navy-black (near #0a0e1a) with a subtle fine linen texture, barely visible. Professional, clean, AI-generated aesthetic. Plain and uncluttered. Absolutely no text, no letters, no numbers, no words, no typography of any kind. No icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no geometric shapes, no triangles, no abstract decorative graphics, no borders, no frames, no additional graphic elements of any kind — just the plain dark textured background, nothing else";
 
 interface FalImage {
   url?: string;
@@ -22,14 +26,6 @@ interface FalImage {
 
 interface FalResponse {
   images?: FalImage[];
-}
-
-export function buildImagePrompt(visualScene: string): string {
-  const trimmed = visualScene.trim();
-  if (!trimmed) {
-    throw new ToolError("visual_scene darf nicht leer sein.");
-  }
-  return `${IMAGE_STYLE_PREFIX}, ${trimmed}`;
 }
 
 async function requestFalImage(prompt: string): Promise<string> {
@@ -58,17 +54,22 @@ async function requestFalImage(prompt: string): Promise<string> {
 }
 
 /**
- * Generates an image, composites the "Pipeline" watermark onto it in code, and uploads the
- * result to R2 (the returned imageUrl points at the watermarked version, not the raw fal.ai
- * output). Also returns the watermarked image as base64 so MCP clients that run in a
- * network-restricted sandbox (e.g. cloud routines behind an egress proxy) can view the final
- * image via the MCP tool result itself, without needing direct access to fal.media or R2.
+ * Generates the background image, composites the headline and the "Pipeline" watermark onto
+ * it in code, and uploads the result to R2 (the returned imageUrl points at the finished
+ * version, not the raw fal.ai output). Also returns the finished image as base64 so MCP
+ * clients that run in a network-restricted sandbox (e.g. cloud routines behind an egress
+ * proxy) can view it via the MCP tool result itself, without needing direct access to
+ * fal.media or R2.
  */
 export async function generateImageUrl(
-  visualScene: string,
+  headline: string,
 ): Promise<{ prompt: string; imageUrl: string; imageBase64: string; mimeType: string }> {
-  const prompt = buildImagePrompt(visualScene);
+  const trimmedHeadline = headline.trim();
+  if (!trimmedHeadline) {
+    throw new ToolError("headline darf nicht leer sein.");
+  }
 
+  const prompt = IMAGE_STYLE_PREFIX;
   const rawImageUrl = await withRetry(() => requestFalImage(prompt), 3, "fal.ai generate");
 
   const { data } = await withRetry(
@@ -77,12 +78,13 @@ export async function generateImageUrl(
     "fal.ai image download",
   );
 
-  const watermarked = await addPipelineWatermark(Buffer.from(data));
-  const imageBase64 = watermarked.toString("base64");
+  const withHeadline = await addHeadlineText(Buffer.from(data), trimmedHeadline);
+  const finished = await addPipelineWatermark(withHeadline);
+  const imageBase64 = finished.toString("base64");
   const imageUrl = await withRetry(
     () => uploadImageBase64(`data:image/jpeg;base64,${imageBase64}`),
     3,
-    "R2 upload of watermarked image",
+    "R2 upload of finished image",
   );
 
   return { prompt, imageUrl, imageBase64, mimeType: "image/jpeg" };
