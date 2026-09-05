@@ -71,12 +71,30 @@ veröffentlicht werden — eigener Media-Container-Typ (`media_type=STORIES`) ü
 Graph-API-Endpoint (`POST /{ig-user-id}/media`, dann `media_publish` wie beim Feed-Post,
 siehe `publishStoryToInstagram` in `src/instagram.ts`).
 
-**Bildformat:** 9:16 Hochformat (Ziel 1080x1920) statt quadratisch. fal.ai liefert dafür
-`image_size=portrait_16_9` (das nächstliegende unterstützte Preset — fal dokumentiert die
-exakten Pixelmaße dieses Presets nicht, ist aber irrelevant, da `addHeadlineText` und
-`addPipelineWatermark` die tatsächliche Bildgröße aus den Metadaten lesen und Position/
-Schriftgröße relativ dazu berechnen, siehe `src/watermark.ts`). Derselbe textfreie
-Hintergrund-Prompt (`IMAGE_STYLE_PREFIX`) wird für beide Formate verwendet.
+**Bildformat:** Hochformat statt quadratisch, **768x1344px** (Seitenverhältnis ~0.571,
+nahe an, aber nicht exakt 9:16/0.5625 — siehe Testergebnisse unten). Derselbe textfreie
+Hintergrund-Prompt (`IMAGE_STYLE_PREFIX`) wird für beide Formate verwendet, nur mit
+anderer `image_size` an fal.ai (`FAL_IMAGE_SIZE` in `src/fal.ts`).
+
+**Warum 768x1344 und nicht das "ideale" 1080x1920 (Testreihe 2026-09-05):**
+- fal.ai's Preset `portrait_16_9` lieferte nur **576x1024** — unter Instagrams empfohlenem
+  Minimum von 720x1280 und sichtbar weicher/unschärfer als das Feed-Bild.
+- Eine eigene Größenangabe {width:1088, height:1920} (so nah wie mit fal's
+  32er-Schrittweiten-Beschränkung möglich an 1080x1920) erzeugte in **3 von 3** Testbildern
+  eine deutliche horizontale Naht/Streifen-Artefakt nahe dem unteren Bildrand — vermutlich
+  eine Tiling-Naht, weil diese Auflösung außerhalb des für Flux Schnell typischen
+  Trainingsbereichs liegt. Kein Zufallsfehler, den ein Retry beheben würde, sondern
+  strukturell an dieser Auflösung.
+- **768x1344** (ebenfalls durch 32 teilbar, ~1,03 Megapixel — nah an der Pixelzahl von
+  `square_hd`, das der Feed-Post nutzt) lieferte in **2 von 2** Tests ein sauberes,
+  artefaktfreies Bild und liegt komfortabel über der 720x1280-Mindestauflösung. Das leicht
+  "gestauchtere" Seitenverhältnis (0.571 statt 0.5625) ist der bewusste Kompromiss —
+  Zuverlässigkeit vor Format-Exaktheit.
+
+`addHeadlineText` und `addPipelineWatermark` lesen die tatsächliche Bildgröße ohnehin live
+aus den Bild-Metadaten und berechnen Position/Schriftgröße relativ dazu (siehe
+`src/watermark.ts`) — eine künftige Anpassung der `image_size` erfordert daher keine
+Code-Änderung an der Positionierungslogik selbst.
 
 **Positionierung (Layout-Anpassung ggü. Feed):**
 - Horizontal: Sicherheitszone **10%-90%** der Bildbreite (statt 18%-82% beim Feed) — die

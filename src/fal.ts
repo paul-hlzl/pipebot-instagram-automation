@@ -8,15 +8,26 @@ import { uploadImageBase64 } from "./r2.js";
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
 
 /**
- * fal.ai `image_size` per format. "square_hd" for the feed (1:1). For stories, fal's
- * documented enum values don't include an exact 1080x1920 - "portrait_16_9" is the closest
- * supported preset. This is fine: addHeadlineText/addPipelineWatermark read the actual
- * width/height back from the generated image (sharp metadata) rather than assuming a fixed
- * canvas, so positioning/sizing still comes out correct whatever fal actually returns.
+ * fal.ai `image_size` per format. "square_hd" for the feed (1:1) is 1024x1024.
+ *
+ * For stories, two options were tested and rejected before landing on 768x1344 (2026-09-05):
+ * - preset "portrait_16_9" -> only 576x1024, below Instagram's recommended 720x1280 minimum
+ *   and visibly softer than the feed image.
+ * - custom {width:1088, height:1920} (as close to the "ideal" 1080x1920 as flux's
+ *   multiple-of-32 constraint allows) -> produced a consistent horizontal seam/banding
+ *   artifact near the bottom of the background in 3/3 test generations. Likely a tiled-
+ *   diffusion seam from generating well outside flux schnell's typical trained resolution
+ *   range, not a random fluke a retry would fix.
+ * 768x1344 (also multiples of 32, ~1.03MP - close to square_hd's ~1.05MP) generated cleanly
+ * in 2/2 tests and clears the 720x1280 floor, at the cost of a slightly less extreme aspect
+ * ratio (0.571 vs. the "ideal" 0.5625) - not worth trading reliability for.
+ * addHeadlineText/addPipelineWatermark read the actual width/height back from the generated
+ * image (sharp metadata) rather than assuming a fixed canvas, so positioning/sizing is correct
+ * regardless of the exact pixel dimensions here.
  */
-const FAL_IMAGE_SIZE: Record<PostFormat, string> = {
+const FAL_IMAGE_SIZE: Record<PostFormat, string | { width: number; height: number }> = {
   feed: "square_hd",
-  story: "portrait_16_9",
+  story: { width: 768, height: 1344 },
 };
 
 /**
