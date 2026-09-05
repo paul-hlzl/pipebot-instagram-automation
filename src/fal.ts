@@ -14,7 +14,7 @@ const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
  * models render rotated text and precise opacity unreliably.
  */
 export const IMAGE_STYLE_PREFIX =
-  "minimalist Instagram graphic, dark navy-black background (near #0a0e1a) with subtle elegant texture (fine linen or minimal geometric pattern). Professional, clean, AI-generated aesthetic. Elegant white classic serif typography as the dominant visual element, social media post format, square, no icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no extra text/numbers/dates/labels anywhere in the image besides the one headline";
+  "minimalist Instagram graphic, dark navy-black background (near #0a0e1a) with a subtle fine linen texture, barely visible. Professional, clean, AI-generated aesthetic. Elegant white classic serif typography as the dominant visual element — a traditional serif typeface only, NOT sans-serif, NOT bold, NOT script, NOT a decorative or stylized font. Social media post format, square. Absolutely no icons, no illustrations, no photographic elements, no neural network or circuit graphics, no robotic elements, no geometric shapes, no triangles, no abstract decorative graphics, no borders, no frames, no additional graphic elements of any kind — nothing in the image except the plain textured background and the headline text. No extra text, numbers, dates, labels, or stray punctuation marks anywhere besides the one exact headline. The headline text must be rendered exactly as written, letter for letter, with no missing, extra, or altered characters";
 
 interface FalImage {
   url?: string;
