@@ -3,3 +3,5 @@
 2026-09-03T11:44:00Z	Scale Smarter With AI (texture/Pipeline variant)	manual
 2026-09-03T12:04:25Z	Automate Workflows With Claude	auto
 2026-09-05T15:58:18Z	Scale Without Limits	manual
+2026-09-05T16:07:26Z	Ship Smarter Systems	manual (grid safe-zone fix test)
+2026-09-05T20:21:00Z	Built To Scale (Story, 768x1344)	manual (Story feature live test)

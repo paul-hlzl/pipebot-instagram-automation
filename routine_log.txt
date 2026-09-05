@@ -2,3 +2,4 @@ timestamp	status	details
 2026-09-03T12:04:25Z	POSTED	Headline "Automate Workflows With Claude" published, postId 17956922028235118 (test run cse_01MJEdRRCUaKP6bQw14H97Rm)
 2026-09-03T12:05:18Z	FAILED_CRITICAL	Post succeeded but the routine's own git push and GitHub MCP write tools all returned 403 (Claude GitHub App has no write access to this repo); backfilled manually from local session instead
 2026-09-05T12:17:00Z	TOKEN_REFRESHED	Proactive refresh (no error present) - no reliable record of a prior successful refresh existed in this log, so treated as "unclear" per policy of refreshing at least every 7 days. New token valid 60 days from this date. Manual trigger, not the daily routine itself.
+2026-09-05T20:21:00Z	STORY_POSTED	Manual live test of the new generate_story_image/publish_generated_story tools (768x1344), headline "Built To Scale", postId 18114969053067261 (not part of the daily routine — ad hoc verification session)
