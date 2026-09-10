@@ -6,6 +6,12 @@ import { ToolError } from "./errors.js";
 const API = "https://api.linkedin.com";
 const VERSION = "202509"; // LinkedIn-Versions-Header, ca. quartalsweise anheben
 
+/** Overrides the .env-configured profile. Passed through from a tool's optional `customer_id`. */
+export interface LinkedInCredentials {
+  accessToken: string;
+  personUrn: string;
+}
+
 function env(name: string): string {
   return process.env[name]?.trim() ?? "";
 }
@@ -101,8 +107,8 @@ interface UserInfoResponse {
 }
 
 /** Prüft, ob das Token noch lebt – für den täglichen Health-Check. */
-export async function checkLinkedInToken(): Promise<TokenCheckResult> {
-  const accessToken = requiredEnv("LINKEDIN_ACCESS_TOKEN");
+export async function checkLinkedInToken(creds?: LinkedInCredentials): Promise<TokenCheckResult> {
+  const accessToken = creds?.accessToken ?? requiredEnv("LINKEDIN_ACCESS_TOKEN");
   const res = await fetch(`${API}/v2/userinfo`, {
     headers: headers(accessToken),
   });
@@ -140,9 +146,9 @@ async function resolveImageBytes(imageSource: string | Buffer): Promise<Buffer> 
  * 2. Bytes per PUT hochladen
  * 3. Image-URN zurückgeben, die dann im Post referenziert wird
  */
-export async function uploadLinkedInImage(imageSource: string | Buffer): Promise<string> {
-  const accessToken = requiredEnv("LINKEDIN_ACCESS_TOKEN");
-  const owner = requiredEnv("LINKEDIN_PERSON_URN");
+export async function uploadLinkedInImage(imageSource: string | Buffer, creds?: LinkedInCredentials): Promise<string> {
+  const accessToken = creds?.accessToken ?? requiredEnv("LINKEDIN_ACCESS_TOKEN");
+  const owner = creds?.personUrn ?? requiredEnv("LINKEDIN_PERSON_URN");
 
   // Schritt 1
   const initRes = await fetch(`${API}/rest/images?action=initializeUpload`, {
@@ -194,17 +200,20 @@ export interface PublishResult {
  * also gar nicht erst versuchen. Ebenso keine Artikel (Langform) –
  * die gehen nur über das Web-Interface.
  */
-export async function publishLinkedInPost({
-  text,
-  imageUrn = null,
-  altText = "",
-}: {
-  text: string;
-  imageUrn?: string | null;
-  altText?: string;
-}): Promise<PublishResult> {
-  const accessToken = requiredEnv("LINKEDIN_ACCESS_TOKEN");
-  const author = requiredEnv("LINKEDIN_PERSON_URN");
+export async function publishLinkedInPost(
+  {
+    text,
+    imageUrn = null,
+    altText = "",
+  }: {
+    text: string;
+    imageUrn?: string | null;
+    altText?: string;
+  },
+  creds?: LinkedInCredentials,
+): Promise<PublishResult> {
+  const accessToken = creds?.accessToken ?? requiredEnv("LINKEDIN_ACCESS_TOKEN");
+  const author = creds?.personUrn ?? requiredEnv("LINKEDIN_PERSON_URN");
 
   const payload: Record<string, unknown> = {
     author,
@@ -244,17 +253,20 @@ export async function publishLinkedInPost({
 }
 
 /** Kompletter Durchlauf: Bild hochladen und posten. */
-export async function publishLinkedInImagePost({
-  text,
-  imageSource,
-  altText,
-}: {
-  text: string;
-  imageSource: string | Buffer;
-  altText?: string;
-}): Promise<PublishResult> {
-  const imageUrn = await uploadLinkedInImage(imageSource);
-  return publishLinkedInPost({ text, imageUrn, altText });
+export async function publishLinkedInImagePost(
+  {
+    text,
+    imageSource,
+    altText,
+  }: {
+    text: string;
+    imageSource: string | Buffer;
+    altText?: string;
+  },
+  creds?: LinkedInCredentials,
+): Promise<PublishResult> {
+  const imageUrn = await uploadLinkedInImage(imageSource, creds);
+  return publishLinkedInPost({ text, imageUrn, altText }, creds);
 }
 
 // ---------------------------------------------------------------

@@ -10,16 +10,42 @@ import {
   publishImageToInstagram,
   publishStoryToInstagram,
   refreshAccessToken,
+  type InstagramCredentials,
 } from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
-import { startTokenRefreshSchedule } from "./panel/credentials.js";
+import { getCredentials, listCustomers, startTokenRefreshSchedule } from "./panel/credentials.js";
 import {
   checkLinkedInToken,
   publishLinkedInImagePost,
   publishLinkedInPost,
   refreshLinkedInToken,
+  type LinkedInCredentials,
 } from "./linkedin.js";
+
+const customerIdSchema = z
+  .string()
+  .optional()
+  .describe(
+    "Optional: customerId eines Kunden aus `list_customers`. Ohne diesen Parameter wird der eigene, " +
+      "in der .env konfigurierte Account verwendet (unverändertes Verhalten). Mit customer_id werden " +
+      "die Zugangsdaten dieses Kunden aus dem Kunden-Panel geladen und für diesen Aufruf verwendet - " +
+      "Tokens selbst werden nie zurückgegeben.",
+  );
+
+/** Lädt die Instagram-Zugangsdaten eines Kunden. undefined = eigener .env-Account (Standardverhalten). */
+async function resolveInstagramCredentials(customerId?: string): Promise<InstagramCredentials | undefined> {
+  if (!customerId) return undefined;
+  const cred = await getCredentials(customerId, "instagram");
+  return { accessToken: cred.accessToken, igUserId: cred.accountId };
+}
+
+/** Lädt die LinkedIn-Zugangsdaten eines Kunden. undefined = eigener .env-Account (Standardverhalten). */
+async function resolveLinkedInCredentials(customerId?: string): Promise<LinkedInCredentials | undefined> {
+  if (!customerId) return undefined;
+  const cred = await getCredentials(customerId, "linkedin");
+  return { accessToken: cred.accessToken, personUrn: cred.accountId };
+}
 
 function textResult(data: unknown) {
   return {
@@ -118,16 +144,21 @@ function createServer(): McpServer {
       inputSchema: {
         topic: topicSchema,
         headline: headlineSchema,
+        customer_id: customerIdSchema,
       },
     },
-    async ({ topic, headline }) => {
+    async ({ topic, headline, customer_id }) => {
       try {
         const generated = await generateImageUrl(headline);
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify({ imageUrl: generated.imageUrl, promptUsed: generated.prompt, topic }, null, 2),
+              text: JSON.stringify(
+                { imageUrl: generated.imageUrl, promptUsed: generated.prompt, topic, customerId: customer_id },
+                null,
+                2,
+              ),
             },
             {
               type: "image" as const,
@@ -156,11 +187,13 @@ function createServer(): McpServer {
           .min(1)
           .describe("Image URL, typically from `generate_post_image`. Must be publicly reachable."),
         caption: z.string().min(1).max(2200).describe("Instagram caption (max 2200 characters)."),
+        customer_id: customerIdSchema,
       },
     },
-    async ({ imageUrl, caption }) => {
+    async ({ imageUrl, caption, customer_id }) => {
       try {
-        const result = await publishImageToInstagram(imageUrl, caption);
+        const creds = await resolveInstagramCredentials(customer_id);
+        const result = await publishImageToInstagram(imageUrl, caption, creds);
         return textResult(result);
       } catch (error) {
         console.error("publish_generated_post:", toToolMessage(error));
@@ -184,12 +217,14 @@ function createServer(): McpServer {
         topic: topicSchema,
         headline: headlineSchema,
         caption: z.string().min(1).max(2200).describe("Instagram caption (max 2200 characters)."),
+        customer_id: customerIdSchema,
       },
     },
-    async ({ topic, headline, caption }) => {
+    async ({ topic, headline, caption, customer_id }) => {
       try {
+        const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline);
-        const published = await publishImageToInstagram(generated.imageUrl, caption);
+        const published = await publishImageToInstagram(generated.imageUrl, caption, creds);
         return textResult({
           postId: published.postId,
           topic,
@@ -224,16 +259,21 @@ function createServer(): McpServer {
       inputSchema: {
         topic: topicSchema,
         headline: headlineSchema,
+        customer_id: customerIdSchema,
       },
     },
-    async ({ topic, headline }) => {
+    async ({ topic, headline, customer_id }) => {
       try {
         const generated = await generateImageUrl(headline, "story");
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify({ imageUrl: generated.imageUrl, promptUsed: generated.prompt, topic }, null, 2),
+              text: JSON.stringify(
+                { imageUrl: generated.imageUrl, promptUsed: generated.prompt, topic, customerId: customer_id },
+                null,
+                2,
+              ),
             },
             {
               type: "image" as const,
@@ -263,11 +303,13 @@ function createServer(): McpServer {
           .string()
           .min(1)
           .describe("Image URL, typically from `generate_story_image`. Must be publicly reachable."),
+        customer_id: customerIdSchema,
       },
     },
-    async ({ imageUrl }) => {
+    async ({ imageUrl, customer_id }) => {
       try {
-        const result = await publishStoryToInstagram(imageUrl);
+        const creds = await resolveInstagramCredentials(customer_id);
+        const result = await publishStoryToInstagram(imageUrl, creds);
         return textResult(result);
       } catch (error) {
         console.error("publish_generated_story:", toToolMessage(error));
@@ -290,12 +332,14 @@ function createServer(): McpServer {
       inputSchema: {
         topic: topicSchema,
         headline: headlineSchema,
+        customer_id: customerIdSchema,
       },
     },
-    async ({ topic, headline }) => {
+    async ({ topic, headline, customer_id }) => {
       try {
+        const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "story");
-        const published = await publishStoryToInstagram(generated.imageUrl);
+        const published = await publishStoryToInstagram(generated.imageUrl, creds);
         return textResult({
           postId: published.postId,
           topic,
@@ -314,10 +358,14 @@ function createServer(): McpServer {
     {
       description:
         "Return the current Instagram content publishing quota usage for the configured business account.",
+      inputSchema: {
+        customer_id: customerIdSchema,
+      },
     },
-    async () => {
+    async ({ customer_id }) => {
       try {
-        const limit = await getPublishingLimit();
+        const creds = await resolveInstagramCredentials(customer_id);
+        const limit = await getPublishingLimit(creds);
         return textResult({
           quota_usage: limit.quotaUsage,
           quota_total: limit.quotaTotal,
@@ -366,11 +414,13 @@ function createServer(): McpServer {
           .min(1)
           .max(3000)
           .describe("LinkedIn post text (plain commentary, hashtags at the end). Max 3000 characters."),
+        customer_id: customerIdSchema,
       },
     },
-    async ({ text }) => {
+    async ({ text, customer_id }) => {
       try {
-        const result = await publishLinkedInPost({ text });
+        const creds = await resolveLinkedInCredentials(customer_id);
+        const result = await publishLinkedInPost({ text }, creds);
         return textResult(result);
       } catch (error) {
         console.error("publish_linkedin_post:", toToolMessage(error));
@@ -394,9 +444,10 @@ function createServer(): McpServer {
           .optional()
           .describe("JPEG or PNG as base64, optionally a data URL."),
         alt_text: z.string().optional().describe("Alt text for the image (accessibility)."),
+        customer_id: customerIdSchema,
       },
     },
-    async ({ text, image_url, image_base64, alt_text }) => {
+    async ({ text, image_url, image_base64, alt_text, customer_id }) => {
       try {
         const hasUrl = Boolean(image_url?.trim());
         const hasB64 = Boolean(image_base64?.trim());
@@ -404,11 +455,12 @@ function createServer(): McpServer {
           throw new ToolError("Genau eines von image_url oder image_base64 angeben, nicht beides und nicht keines.");
         }
 
+        const creds = await resolveLinkedInCredentials(customer_id);
         const imageSource: string | Buffer = hasB64
           ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
           : image_url!.trim();
 
-        const result = await publishLinkedInImagePost({ text, imageSource, altText: alt_text });
+        const result = await publishLinkedInImagePost({ text, imageSource, altText: alt_text }, creds);
         return textResult(result);
       } catch (error) {
         console.error("publish_linkedin_image_post:", toToolMessage(error));
@@ -421,10 +473,14 @@ function createServer(): McpServer {
     "check_linkedin_token",
     {
       description: "Check whether the configured LinkedIn access token is still valid (daily health check).",
+      inputSchema: {
+        customer_id: customerIdSchema,
+      },
     },
-    async () => {
+    async ({ customer_id }) => {
       try {
-        const result = await checkLinkedInToken();
+        const creds = await resolveLinkedInCredentials(customer_id);
+        const result = await checkLinkedInToken(creds);
         return textResult(result);
       } catch (error) {
         console.error("check_linkedin_token:", toToolMessage(error));
@@ -451,6 +507,25 @@ function createServer(): McpServer {
         });
       } catch (error) {
         console.error("refresh_linkedin_token:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_customers",
+    {
+      description:
+        "List all active customers from the customer panel: briefing (company, industry, description, " +
+        "tone, posting frequency, posting time) and connected channels with status (ok/renew-soon/expired). " +
+        "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
+        "publish/generate tools to act on that customer's account instead of your own.",
+    },
+    async () => {
+      try {
+        return textResult({ customers: listCustomers() });
+      } catch (error) {
+        console.error("list_customers:", toToolMessage(error));
         return errorResult(error);
       }
     },

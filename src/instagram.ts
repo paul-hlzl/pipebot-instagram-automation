@@ -8,6 +8,12 @@ const GRAPH_BASE = "https://graph.instagram.com/v21.0";
 const POLL_INTERVAL_MS = 4000;
 const POLL_TIMEOUT_MS = 60_000;
 
+/** Overrides the .env-configured account. Passed through from a tool's optional `customer_id`. */
+export interface InstagramCredentials {
+  accessToken: string;
+  igUserId: string;
+}
+
 export interface PublishingLimit {
   quotaUsage: number;
   quotaTotal: number;
@@ -56,12 +62,20 @@ function client(): AxiosInstance {
 
 let cachedUserId: string | undefined;
 
-function tokenParams(): { access_token: string } {
-  return { access_token: getConfig().igAccessToken };
+function tokenParams(creds?: InstagramCredentials): { access_token: string } {
+  return { access_token: creds?.accessToken ?? getConfig().igAccessToken };
 }
 
-/** Prefer the account bound to the token (`/me`) so a mistyped IG_USER_ID does not break calls. */
-async function resolveIgUserId(): Promise<string> {
+/**
+ * Prefer the account bound to the token (`/me`) so a mistyped IG_USER_ID does not break calls.
+ * For a customer account, the ig-user-id is already known from `getCredentials()` (it's the
+ * `accountId` stored at connect time) - use it directly, no lookup or caching needed.
+ */
+async function resolveIgUserId(creds?: InstagramCredentials): Promise<string> {
+  if (creds) {
+    return creds.igUserId;
+  }
+
   if (cachedUserId) {
     return cachedUserId;
   }
@@ -86,13 +100,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function getPublishingLimit(): Promise<PublishingLimit> {
-  const igUserId = await resolveIgUserId();
+export async function getPublishingLimit(creds?: InstagramCredentials): Promise<PublishingLimit> {
+  const igUserId = await resolveIgUserId(creds);
   const { data } = await client().get<GraphLimitResponse>(
     `${GRAPH_BASE}/${igUserId}/content_publishing_limit`,
     {
       params: {
-        ...tokenParams(),
+        ...tokenParams(creds),
         fields: "quota_usage,config",
       },
     },
@@ -111,8 +125,8 @@ export async function getPublishingLimit(): Promise<PublishingLimit> {
   };
 }
 
-export async function assertPublishingQuota(): Promise<PublishingLimit> {
-  const limit = await getPublishingLimit();
+export async function assertPublishingQuota(creds?: InstagramCredentials): Promise<PublishingLimit> {
+  const limit = await getPublishingLimit(creds);
   if (limit.remaining <= 0 || limit.quotaUsage >= limit.quotaTotal) {
     throw new ToolError(
       `Publishing-Limit erreicht: ${limit.quotaUsage}/${limit.quotaTotal} Posts im rollierenden ${Math.round(limit.quotaDuration / 3600)}h-Fenster. ` +
@@ -122,14 +136,18 @@ export async function assertPublishingQuota(): Promise<PublishingLimit> {
   return limit;
 }
 
-async function createMediaContainer(imageUrl: string, caption: string): Promise<string> {
-  const igUserId = await resolveIgUserId();
+async function createMediaContainer(
+  imageUrl: string,
+  caption: string,
+  creds?: InstagramCredentials,
+): Promise<string> {
+  const igUserId = await resolveIgUserId(creds);
   const { data } = await client().post<GraphIdResponse>(
     `${GRAPH_BASE}/${igUserId}/media`,
     null,
     {
       params: {
-        ...tokenParams(),
+        ...tokenParams(creds),
         image_url: imageUrl,
         caption,
       },
@@ -150,14 +168,14 @@ async function createMediaContainer(imageUrl: string, caption: string): Promise<
  * publishContainer) is shared as-is: status polling and media_publish behave identically
  * regardless of media_type.
  */
-async function createStoryMediaContainer(imageUrl: string): Promise<string> {
-  const igUserId = await resolveIgUserId();
+async function createStoryMediaContainer(imageUrl: string, creds?: InstagramCredentials): Promise<string> {
+  const igUserId = await resolveIgUserId(creds);
   const { data } = await client().post<GraphIdResponse>(
     `${GRAPH_BASE}/${igUserId}/media`,
     null,
     {
       params: {
-        ...tokenParams(),
+        ...tokenParams(creds),
         media_type: "STORIES",
         image_url: imageUrl,
       },
@@ -170,21 +188,21 @@ async function createStoryMediaContainer(imageUrl: string): Promise<string> {
   return data.id;
 }
 
-async function getContainerStatus(containerId: string): Promise<string> {
+async function getContainerStatus(containerId: string, creds?: InstagramCredentials): Promise<string> {
   const { data } = await client().get<GraphStatusResponse>(`${GRAPH_BASE}/${containerId}`, {
     params: {
-      ...tokenParams(),
+      ...tokenParams(creds),
       fields: "status_code",
     },
   });
   return (data.status_code ?? "").toUpperCase();
 }
 
-async function waitForContainer(containerId: string): Promise<void> {
+async function waitForContainer(containerId: string, creds?: InstagramCredentials): Promise<void> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    const status = await getContainerStatus(containerId);
+    const status = await getContainerStatus(containerId, creds);
 
     if (status === "FINISHED") {
       return;
@@ -210,14 +228,14 @@ async function waitForContainer(containerId: string): Promise<void> {
   );
 }
 
-async function publishContainer(containerId: string): Promise<string> {
-  const igUserId = await resolveIgUserId();
+async function publishContainer(containerId: string, creds?: InstagramCredentials): Promise<string> {
+  const igUserId = await resolveIgUserId(creds);
   const { data } = await client().post<GraphIdResponse>(
     `${GRAPH_BASE}/${igUserId}/media_publish`,
     null,
     {
       params: {
-        ...tokenParams(),
+        ...tokenParams(creds),
         creation_id: containerId,
       },
     },
@@ -232,18 +250,19 @@ async function publishContainer(containerId: string): Promise<string> {
 export async function publishImageToInstagram(
   imageUrl: string,
   caption: string,
+  creds?: InstagramCredentials,
 ): Promise<PublishResult> {
   // Soft duplicate check: never blocks, only surfaces a warning in the result
   // so the caller (Claude) can decide whether a repeat publish is intentional.
   const duplicateWarning = checkRecentDuplicate();
 
-  await assertPublishingQuota();
+  await assertPublishingQuota(creds);
 
   const result = await withRetry(
     async () => {
-      const containerId = await createMediaContainer(imageUrl, caption);
-      await waitForContainer(containerId);
-      const postId = await publishContainer(containerId);
+      const containerId = await createMediaContainer(imageUrl, caption, creds);
+      await waitForContainer(containerId, creds);
+      const postId = await publishContainer(containerId, creds);
       return { postId, containerId, hostedImageUrl: imageUrl };
     },
     2,
@@ -265,14 +284,17 @@ export async function publishImageToInstagram(
  * and Stories are expected to closely follow (and duplicate the visual of) the feed post
  * they accompany, so the "did we just post this?" warning would just be noise here.
  */
-export async function publishStoryToInstagram(imageUrl: string): Promise<PublishResult> {
-  await assertPublishingQuota();
+export async function publishStoryToInstagram(
+  imageUrl: string,
+  creds?: InstagramCredentials,
+): Promise<PublishResult> {
+  await assertPublishingQuota(creds);
 
   return withRetry(
     async () => {
-      const containerId = await createStoryMediaContainer(imageUrl);
-      await waitForContainer(containerId);
-      const postId = await publishContainer(containerId);
+      const containerId = await createStoryMediaContainer(imageUrl, creds);
+      await waitForContainer(containerId, creds);
+      const postId = await publishContainer(containerId, creds);
       return { postId, containerId, hostedImageUrl: imageUrl };
     },
     2,
