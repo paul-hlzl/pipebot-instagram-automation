@@ -4,7 +4,7 @@ import { PACKAGE_ROOT } from "./config.js";
 import { ToolError } from "./errors.js";
 
 const API = "https://api.linkedin.com";
-const VERSION = "202508"; // LinkedIn-Versions-Header, ca. quartalsweise anheben
+const VERSION = "202509"; // LinkedIn-Versions-Header, ca. quartalsweise anheben
 
 function env(name: string): string {
   return process.env[name]?.trim() ?? "";
