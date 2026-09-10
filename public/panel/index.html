@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Pipeline – Kanäle verbinden</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #FFFFFF;
+    --ink: #000000;
+    --stone: #666666;
+    --rule: #E3E3E3;
+    --wash: #F5F5F5;
+    --go: #137A3F;
+    --stop: #B42318;
+    --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 400 16px/1.55 var(--font); }
+  a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  button { font: inherit; color: inherit; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- Kopfzeile ---------- */
+  .top { display: flex; align-items: center; justify-content: space-between; height: 72px; padding: 0 32px; border-bottom: 1px solid var(--rule); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; text-decoration: none; letter-spacing: -0.01em; }
+  .brand svg { display: block; }
+  .help { font-size: 14px; color: var(--stone); }
+  .help a { color: var(--ink); }
+  .help .short { display: none; }
+
+  .demo { background: var(--wash); border-bottom: 1px solid var(--rule); padding: 10px 32px; font-size: 14px; color: var(--stone); }
+
+  /* ---------- Layout ---------- */
+  .shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 72px; max-width: 1040px; margin: 0 auto; padding: 64px 32px 120px; }
+
+  /* ---------- Die Pipeline (Fortschritt) ---------- */
+  .rail { position: sticky; top: 40px; align-self: start; }
+  .rail ol { list-style: none; margin: 0; padding: 0; }
+  .rail li { position: relative; padding-bottom: 40px; }
+  .rail li:last-child { padding-bottom: 0; }
+  .pipe { position: absolute; left: 5px; top: 16px; bottom: 0; width: 4px; background: var(--rule); overflow: hidden; }
+  .pipe i { display: block; width: 100%; height: 100%; background: var(--ink); transform: scaleY(0); transform-origin: top; transition: transform .7s steps(7, end); }
+  .pipe.full i { transform: none; }
+  .node { display: grid; grid-template-columns: 14px 1fr; column-gap: 16px; align-items: start; width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
+  .node:disabled { cursor: default; }
+  .sq { width: 14px; height: 14px; margin-top: 5px; border: 2px solid var(--ink); background: var(--paper); position: relative; z-index: 1; }
+  .is-done .sq { background: var(--ink); }
+  .is-current .sq { background: var(--ink); box-shadow: inset 0 0 0 2px var(--paper); }
+  .node .lbl { font-size: 15px; font-weight: 500; }
+  .is-current .lbl { font-weight: 700; }
+  .is-todo .lbl { color: var(--stone); }
+  .node .meta { grid-column: 2; font-size: 13px; color: var(--stone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node:not(:disabled):hover .lbl { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---------- Inhalt ---------- */
+  .stage { max-width: 580px; }
+  h1 { font-size: 44px; line-height: 1.08; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 16px; }
+  h2 { font-size: 20px; letter-spacing: -0.01em; margin: 48px 0 16px; }
+  h3 { font-size: 16px; margin: 0 0 4px; }
+  .lede { font-size: 19px; line-height: 1.5; color: var(--stone); margin: 0 0 40px; max-width: 34em; }
+  p { margin: 0 0 12px; }
+
+  .banner { display: grid; grid-template-columns: 10px 1fr; gap: 14px; align-items: start; padding: 14px 16px; margin: 0 0 32px; border: 1px solid var(--rule); font-size: 15px; }
+  .banner::before { content: ""; width: 10px; height: 10px; margin-top: 6px; background: var(--ink); }
+  .banner.ok::before { background: var(--go); }
+  .banner.bad { border-color: var(--stop); }
+  .banner.bad::before { background: var(--stop); }
+
+  /* Formular */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+  .field { margin-bottom: 22px; }
+  .field label, .field legend { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+  .field .opt { color: var(--stone); font-weight: 400; }
+  .field .hint { font-size: 13px; color: var(--stone); margin: 6px 0 0; }
+  input[type=text], input[type=email], input[type=url], input[type=time], select, textarea {
+    width: 100%; height: 48px; padding: 0 14px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; color: inherit;
+  }
+  textarea { height: auto; min-height: 120px; padding: 12px 14px; resize: vertical; line-height: 1.5; }
+  input:focus, select:focus, textarea:focus { border-color: var(--ink); outline: 2px solid var(--ink); outline-offset: 0; }
+  [aria-invalid=true] { border-color: var(--stop) !important; }
+  .err { color: var(--stop); font-size: 13px; margin: 6px 0 0; }
+  fieldset { border: 0; padding: 0; margin: 0; }
+  .seg { display: flex; border: 1px solid #C9C9C9; border-radius: 2px; }
+  .seg label { flex: 1; margin: 0; position: relative; }
+  .seg input { position: absolute; opacity: 0; inset: 0; }
+  .seg span { display: block; text-align: center; padding: 12px 8px; font-size: 15px; cursor: pointer; border-left: 1px solid #C9C9C9; }
+  .seg label:first-child span { border-left: 0; }
+  .seg input:checked + span { background: var(--ink); color: var(--paper); }
+  .seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .check { display: grid; grid-template-columns: 22px 1fr; gap: 12px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; }
+  .check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--ink); }
+
+  /* Buttons */
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-top: 32px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 54px; padding: 0 28px; border: 2px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--paper); font-size: 16px; font-weight: 500; text-decoration: none; cursor: pointer; }
+  .btn:hover { background: var(--paper); color: var(--ink); }
+  .btn[disabled], .btn[aria-disabled=true] { background: var(--wash); border-color: var(--rule); color: var(--stone); cursor: not-allowed; }
+  .btn.busy { opacity: .7; pointer-events: none; }
+  .link { background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 15px; }
+  .fine { font-size: 14px; color: var(--stone); margin-top: 16px; }
+
+  /* Anleitung */
+  .guide { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .guide li { display: grid; grid-template-columns: 36px 1fr; gap: 16px; padding: 20px 0; border-bottom: 1px solid var(--rule); }
+  .guide .n { width: 28px; height: 28px; display: grid; place-items: center; border: 2px solid var(--ink); font-size: 14px; font-weight: 700; }
+  .guide p { color: var(--stone); margin: 0 0 8px; font-size: 15px; }
+  .guide a { font-size: 15px; font-weight: 500; }
+
+  .notice { font-size: 15px; padding-left: 16px; border-left: 4px solid var(--ink); margin: -16px 0 32px; }
+
+  .status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 18px 20px; background: var(--wash); margin: 0 0 8px; }
+  .status .dot { width: 10px; height: 10px; background: var(--go); flex: none; }
+  .status.warn .dot { background: var(--stop); }
+  .status .who { flex: 1; min-width: 180px; }
+  .status small { display: block; color: var(--stone); font-size: 13px; }
+
+  details { border-bottom: 1px solid var(--rule); }
+  details:first-of-type { border-top: 1px solid var(--rule); }
+  summary { padding: 16px 0; cursor: pointer; font-weight: 500; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font-weight: 400; font-size: 20px; line-height: 1; }
+  details[open] summary::after { content: "–"; }
+  details p { color: var(--stone); font-size: 15px; padding-bottom: 12px; }
+
+  /* Zusammenfassung */
+  dl.sum { margin: 0; border-top: 1px solid var(--rule); }
+  dl.sum div { display: grid; grid-template-columns: 160px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--rule); }
+  dl.sum dt { color: var(--stone); font-size: 15px; }
+  dl.sum dd { margin: 0; }
+  .copyrow { display: flex; gap: 8px; margin-top: 12px; }
+  .copyrow input { font-size: 14px; }
+  .copyrow .btn { min-height: 48px; padding: 0 18px; flex: none; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(255,255,255,.94); display: grid; place-items: center; font-size: 18px; font-weight: 500; z-index: 10; }
+  .loading { color: var(--stone); padding: 40px 0; }
+
+  /* ---------- Mobil ---------- */
+  @media (max-width: 820px) {
+    .top { padding: 0 20px; height: 60px; }
+    .help .long { display: none; }
+    .help .short { display: inline; }
+    .demo { padding: 10px 20px; }
+    .shell { grid-template-columns: 1fr; gap: 36px; padding: 28px 20px 96px; }
+    .rail { position: static; }
+    .rail ol { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+    .rail li { padding-bottom: 0; }
+    .pipe { left: 14px; right: 0; top: 5px; bottom: auto; width: auto; height: 4px; }
+    .pipe i { transform: scaleX(0); transform-origin: left; }
+    .node { grid-template-columns: 14px; row-gap: 8px; }
+    .sq { margin-top: 0; }
+    .node .lbl { grid-column: 1 / -1; font-size: 12px; white-space: nowrap; }
+    .node .meta { display: none; }
+    h1 { font-size: 32px; }
+    .lede { font-size: 17px; margin-bottom: 32px; }
+    .grid2 { grid-template-columns: 1fr; }
+    .btn { width: 100%; }
+    .actions { flex-direction: column; align-items: stretch; text-align: center; }
+    dl.sum div { grid-template-columns: 1fr; gap: 2px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .pipe i { transition: none; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="https://pipebot.at" aria-label="Pipeline Startseite">
+    <svg width="22" height="22" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">
+      <rect x="0" y="0" width="3" height="3"/><rect x="3" y="1" width="5" height="1"/><rect x="8" y="0" width="3" height="3"/>
+      <rect x="9" y="3" width="1" height="5"/><rect x="8" y="8" width="3" height="3"/><rect x="3" y="9" width="5" height="1"/><rect x="0" y="8" width="3" height="3"/>
+    </svg>
+    Pipeline
+  </a>
+  <p class="help" style="margin:0">
+    <span class="long">Fragen? <a href="mailto:office@pipeline-solutions.at">office@pipeline-solutions.at</a></span>
+    <a class="short" href="mailto:office@pipeline-solutions.at">Hilfe</a>
+  </p>
+</header>
+<div id="demo" class="demo" hidden>Vorschau: Hier wird nichts gespeichert und keine echte Verbindung aufgebaut.</div>
+
+<div class="shell">
+  <nav class="rail" aria-label="Fortschritt"><ol id="rail"></ol></nav>
+  <main class="stage" id="stage" tabindex="-1"><p class="loading">Wird geladen …</p></main>
+</div>
+
+<script>
+(() => {
+  /* ================= Einstellungen ================= */
+  const CONFIG = {
+    mount: "/panel",
+    privacyUrl: "https://pipebot.at/datenschutz",     // TODO: echte Datenschutzerklärung verlinken
+    nextSteps: "Wir sehen uns Ihre Angaben an und melden uns per E-Mail, bevor der erste Beitrag online geht.",
+  };
+  const DEMO = !location.pathname.startsWith(CONFIG.mount) || new URLSearchParams(location.search).has("demo");
+
+  const TONES = { sachlich: "Sachlich und kompetent", locker: "Locker und nahbar", inspirierend: "Inspirierend", humorvoll: "Mit Humor" };
+  const FREQ = { "3x-woche": "3× pro Woche", werktags: "Werktags", taeglich: "Täglich" };
+
+  const ERRORS = {
+    cancelled: (n) => `Sie haben die Verbindung mit ${n} abgebrochen. Sie können es jederzeit erneut versuchen.`,
+    state: () => "Die Anfrage ist abgelaufen. Bitte klicken Sie noch einmal auf Verbinden.",
+    personal_account: () => "Ihr Instagram-Konto ist noch ein privates Konto. Stellen Sie es zuerst auf ein professionelles Konto um (Punkt 1) und verbinden Sie dann erneut.",
+    missing_permission: (n) => `Die Freigabe zum Veröffentlichen fehlt. Bitte verbinden Sie ${n} erneut und bestätigen Sie alle Berechtigungen.`,
+    not_configured: (n) => `Die Verbindung mit ${n} ist gerade nicht verfügbar. Schreiben Sie uns kurz, wir kümmern uns darum.`,
+    failed: (n) => `Die Verbindung mit ${n || "der Plattform"} hat nicht geklappt. Bitte versuchen Sie es erneut oder schreiben Sie uns.`,
+    login: () => "Dieser Zugangslink ist ungültig oder wurde durch einen neueren ersetzt.",
+    session: () => "Bitte geben Sie zuerst Ihre Unternehmensdaten ein.",
+  };
+
+  /* ================= Zustand ================= */
+  const S = { providers: [], customer: null, connections: [], step: "company", banner: null, skipped: new Set() };
+
+  const $ = (s) => document.querySelector(s);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const conn = (id) => S.connections.find((c) => c.provider === id);
+  const prov = (id) => S.providers.find((p) => p.id === id);
+  const steps = () => ["company", ...S.providers.map((p) => p.id), "done"];
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
+
+  /* ================= API ================= */
+  async function api(method, url, body) {
+    if (DEMO) return mockApi(method, url, body);
+    const res = await fetch(CONFIG.mount + url, {
+      method, credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || "Unbekannter Fehler"), { status: res.status, fields: data.fields });
+    return data;
+  }
+  const applyState = (d) => { S.customer = d.customer; S.connections = d.connections || []; };
+
+  /* ================= Rendering: Pipeline ================= */
+  function renderRail() {
+    const list = steps();
+    const cur = list.indexOf(S.step);
+    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : prov(id).name;
+    const meta = (id) => {
+      if (id === "company") return S.customer ? S.customer.company : "Angaben machen";
+      if (id === "done") return "";
+      const c = conn(id);
+      if (c) return c.status === "expired" ? "Abgelaufen" : c.accountName;
+      return S.skipped.has(id) ? "Übersprungen" : "Nicht verbunden";
+    };
+    const isDone = (id) => id === "company" ? !!S.customer : id === "done" ? false : !!conn(id) && conn(id).status !== "expired";
+
+    $("#rail").innerHTML = list.map((id, i) => {
+      const state = id === S.step ? "is-current" : isDone(id) ? "is-done" : "is-todo";
+      const reachable = S.customer || id === "company";
+      const full = i < cur && (isDone(id) || S.skipped.has(id));
+      return `<li class="${state}">
+        ${i < list.length - 1 ? `<span class="pipe${full ? " full" : ""}"><i></i></span>` : ""}
+        <button class="node" data-go="${id}" ${reachable ? "" : "disabled"} ${id === S.step ? 'aria-current="step"' : ""}>
+          <span class="sq" aria-hidden="true"></span><span class="lbl">${esc(label(id))}</span><span class="meta">${esc(meta(id))}</span>
+        </button></li>`;
+    }).join("");
+  }
+
+  /* ================= Rendering: Schritte ================= */
+  function bannerHtml() {
+    if (!S.banner) return "";
+    return `<div class="banner ${S.banner.kind}" role="${S.banner.kind === "bad" ? "alert" : "status"}">${esc(S.banner.text)}</div>`;
+  }
+
+  function companyHtml() {
+    const c = S.customer || { tone: "sachlich", frequency: "werktags", postTime: "15:00" };
+    const edit = !!S.customer;
+    const f = (name, label, type, opts = {}) => `
+      <div class="field">
+        <label for="f-${name}">${label}${opts.optional ? ' <span class="opt">(optional)</span>' : ""}</label>
+        <input id="f-${name}" name="${name}" type="${type}" value="${esc(c[name])}" ${opts.optional ? "" : "required"} autocomplete="${opts.ac || "off"}" ${opts.ph ? `placeholder="${esc(opts.ph)}"` : ""}>
+      </div>`;
+    return `
+      ${bannerHtml()}
+      <h1>${edit ? "Ihr Unternehmen" : "Social Media, das von selbst läuft."}</h1>
+      <p class="lede">${edit ? "Ändern Sie hier, worüber wir für Sie posten." : "Erzählen Sie uns, worum es bei Ihnen geht, und verbinden Sie Ihre Kanäle. Danach erscheinen regelmäßig Beiträge, ohne dass Sie etwas tun müssen."}</p>
+      <form id="company" novalidate>
+        <div class="grid2">
+          ${f("company", "Firmenname", "text", { ac: "organization" })}
+          ${f("website", "Website", "url", { optional: true, ac: "url", ph: "https://" })}
+          ${f("contactName", "Ihr Name", "text", { ac: "name" })}
+          ${f("email", "E-Mail", "email", { ac: "email" })}
+        </div>
+        ${f("industry", "Branche", "text", { optional: true, ph: "z. B. Physiotherapie, Tischlerei, Steuerberatung" })}
+        <div class="field">
+          <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
+          <textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>
+          <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.</p>
+        </div>
+        <div class="field">
+          <label for="f-tone">Tonalität</label>
+          <select id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        </div>
+        <div class="grid2">
+          <fieldset class="field">
+            <legend>Wie oft posten?</legend>
+            <div class="seg">${Object.entries(FREQ).map(([k, v]) => `<label><input type="radio" name="frequency" value="${k}" ${c.frequency === k ? "checked" : ""}><span>${v}</span></label>`).join("")}</div>
+          </fieldset>
+          <div class="field">
+            <label for="f-postTime">Um wie viel Uhr?</label>
+            <input id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900">
+          </div>
+        </div>
+        ${edit ? "" : `
+        <label class="check"><input type="checkbox" name="consent" id="f-consent">
+          <span>Ich stimme zu, dass Pipeline AI Solutions meine Angaben und die Freigaben der verbundenen Konten speichert, um in meinem Namen Beiträge zu veröffentlichen. Ich kann das jederzeit widerrufen. <a href="${esc(CONFIG.privacyUrl)}" target="_blank" rel="noopener">Datenschutzerklärung</a></span>
+        </label>`}
+        <div class="actions" style="margin-top:${edit ? 32 : 0}px">
+          <button class="btn" type="submit">${edit ? "Speichern und weiter" : `Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}`}</button>
+        </div>
+      </form>`;
+  }
+
+  function providerHtml(p) {
+    const c = conn(p.id);
+    const list = steps();
+    const nextId = list[list.indexOf(p.id) + 1];
+    const nextName = nextId === "done" ? "Zusammenfassung" : prov(nextId).name;
+    const connectBtn = (label) => p.available
+      ? `<a class="btn" href="${CONFIG.mount}/connect/${p.id}" data-connect="${p.id}">${label}</a>`
+      : `<span class="btn" aria-disabled="true">${label}</span>`;
+
+    let statusBox = "";
+    if (c) {
+      const warn = c.status !== "ok";
+      const sub = c.status === "expired" ? "Freigabe abgelaufen, bitte neu verbinden."
+        : c.status === "renew-soon" ? `Freigabe läuft am ${fmtDate(c.expiresAt)} ab, bitte bald neu verbinden.`
+        : `Verbunden seit ${fmtDate(c.connectedAt)}`;
+      statusBox = `
+        <div class="status${warn ? " warn" : ""}">
+          <span class="dot" aria-hidden="true"></span>
+          <div class="who"><strong>${esc(c.accountName)}</strong><small>${sub}</small></div>
+          <button class="link" data-disconnect="${p.id}">Trennen</button>
+        </div>`;
+    }
+
+    return `
+      ${bannerHtml()}
+      <h1>${esc(p.name)} verbinden</h1>
+      <p class="lede">${esc(p.tagline)}</p>
+      ${p.notice ? `<p class="notice">${esc(p.notice)}</p>` : ""}
+      ${statusBox}
+      ${c && c.status === "ok" ? `
+        <div class="actions">
+          <button class="btn" data-go="${nextId}">Weiter zu ${esc(nextName)}</button>
+          <a class="link" href="${CONFIG.mount}/connect/${p.id}" data-connect="${p.id}">Anderes Konto verbinden</a>
+        </div>` : `
+        <h2>So geht's</h2>
+        <ol class="guide">${p.guide.map((g, i) => `
+          <li><span class="n" aria-hidden="true">${i + 1}</span><div>
+            <h3>${esc(g.title)}</h3><p>${esc(g.text)}</p>
+            ${g.link ? `<a href="${esc(g.link.url)}" target="_blank" rel="noopener">${esc(g.link.label)}<span class="vh"> (öffnet in neuem Tab)</span></a>` : ""}
+          </div></li>`).join("")}
+        </ol>
+        <div class="actions">
+          ${connectBtn(c ? `${esc(p.name)} neu verbinden` : `Mit ${esc(p.name)} verbinden`)}
+          <button class="link" data-skip="${p.id}" data-go="${nextId}">Später verbinden</button>
+        </div>
+        <p class="fine">${p.available ? "Wir bekommen nur das Recht, Beiträge zu veröffentlichen. Ihr Passwort sehen wir nie." : "Diese Verbindung ist gerade nicht verfügbar. Schreiben Sie uns, wir schalten sie frei."}</p>
+      `}
+      <h2>Häufige Fragen</h2>
+      <details><summary>Kann ich die Verbindung wieder trennen?</summary><p>Ja, jederzeit mit einem Klick hier im Panel. Danach veröffentlichen wir nichts mehr auf ${esc(p.name)}.</p></details>
+      <details><summary>Sehe ich die Beiträge, bevor sie erscheinen?</summary><p>Zum Start stimmen wir Stil und Themen mit Ihnen ab. Danach laufen die Beiträge im gewählten Rhythmus automatisch.</p></details>
+      <details><summary>Es kommt eine Fehlermeldung. Was tun?</summary><p>Prüfen Sie, ob Sie mit dem richtigen Konto angemeldet sind, und versuchen Sie es erneut. Klappt es nicht, schreiben Sie an <a href="mailto:office@pipeline-solutions.at">office@pipeline-solutions.at</a>.</p></details>
+    `;
+  }
+
+  function doneHtml() {
+    const connected = S.providers.filter((p) => conn(p.id) && conn(p.id).status !== "expired");
+    const missing = S.providers.filter((p) => !connected.includes(p));
+    const c = S.customer;
+    return `
+      ${bannerHtml()}
+      <h1>${missing.length ? "Fast geschafft." : "Alles verbunden."}</h1>
+      <p class="lede">${missing.length
+        ? `Noch offen: ${missing.map((p) => esc(p.name)).join(" und ")}. Sie können das jederzeit nachholen.`
+        : "Ab jetzt kümmern wir uns um Ihre Beiträge. Sie müssen nichts weiter tun."}</p>
+      <dl class="sum">
+        <div><dt>Unternehmen</dt><dd>${esc(c.company)}</dd></div>
+        ${S.providers.map((p) => {
+          const k = conn(p.id);
+          return `<div><dt>${esc(p.name)}</dt><dd>${k ? esc(k.accountName) + (k.status === "expired" ? " (abgelaufen)" : "") : `<button class="link" data-go="${p.id}">Jetzt verbinden</button>`}</dd></div>`;
+        }).join("")}
+        <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
+        <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
+      </dl>
+      <h2>Wie es weitergeht</h2>
+      <p>${esc(CONFIG.nextSteps)}</p>
+      <h2>Später wiederkommen</h2>
+      <p style="color:var(--stone)">Auf diesem Gerät bleiben Sie angemeldet. Für andere Geräte erzeugen Sie einen persönlichen Link. Behandeln Sie ihn wie ein Passwort, ein neuer Link ersetzt den alten.</p>
+      <div id="linkbox"><button class="link" id="mklink">Persönlichen Link erzeugen</button></div>
+      <div class="actions">
+        <button class="btn" data-go="company">Angaben bearbeiten</button>
+        <button class="link" id="logout">Abmelden</button>
+      </div>`;
+  }
+
+  function render(focus) {
+    renderRail();
+    const stage = $("#stage");
+    if (S.step === "company") stage.innerHTML = companyHtml();
+    else if (S.step === "done") stage.innerHTML = doneHtml();
+    else stage.innerHTML = providerHtml(prov(S.step));
+    if (focus) { stage.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
+  }
+
+  function go(step) {
+    if (!steps().includes(step)) return;
+    if (step !== "company" && !S.customer) step = "company";
+    S.step = step; S.banner = null;
+    history.replaceState(null, "", location.pathname + (DEMO && location.search.includes("demo") ? "?demo" : ""));
+    render(true);
+  }
+
+  function firstOpenStep() {
+    if (!S.customer) return "company";
+    const open = S.providers.find((p) => !conn(p.id) || conn(p.id).status !== "ok");
+    return open ? open.id : "done";
+  }
+
+  /* ================= Events ================= */
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-go],[data-connect],[data-disconnect],#mklink,#logout,[data-copy]");
+    if (!t) return;
+
+    if (t.dataset.connect) {
+      if (DEMO) { e.preventDefault(); return demoConnect(t.dataset.connect); }
+      t.classList.add("busy"); return; // echter Link zur Plattform
+    }
+    if (t.dataset.skip) S.skipped.add(t.dataset.skip);
+    if (t.dataset.go) return go(t.dataset.go);
+
+    if (t.dataset.disconnect) {
+      const p = prov(t.dataset.disconnect);
+      if (!confirm(`${p.name} wirklich trennen? Danach veröffentlichen wir dort nichts mehr.`)) return;
+      applyState(await api("POST", `/api/disconnect/${p.id}`));
+      S.banner = { kind: "", text: `${p.name} getrennt.` };
+      return render();
+    }
+    if (t.id === "mklink") {
+      t.classList.add("busy");
+      try {
+        const { link } = await api("POST", "/api/access-link");
+        $("#linkbox").innerHTML = `<label class="vh" for="acc">Ihr persönlicher Link</label>
+          <div class="copyrow"><input id="acc" type="text" readonly value="${esc(link)}"><button class="btn" data-copy>Kopieren</button></div>`;
+      } catch { t.classList.remove("busy"); }
+      return;
+    }
+    if (t.dataset.copy !== undefined) {
+      const input = $("#acc"); input.select();
+      try { await navigator.clipboard.writeText(input.value); } catch { document.execCommand("copy"); }
+      t.textContent = "Kopiert";
+      return;
+    }
+    if (t.id === "logout") {
+      await api("POST", "/api/logout");
+      S.customer = null; S.connections = []; S.skipped.clear();
+      return go("company");
+    }
+  });
+
+  document.addEventListener("submit", async (e) => {
+    if (e.target.id !== "company") return;
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    const body = Object.fromEntries(fd.entries());
+    const edit = !!S.customer;
+    if (!edit) body.consent = !!form.consent?.checked;
+
+    form.querySelectorAll(".err").forEach((n) => n.remove());
+    form.querySelectorAll("[aria-invalid]").forEach((n) => n.removeAttribute("aria-invalid"));
+
+    const errors = {};
+    if (!body.company?.trim()) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
+    if (!body.contactName?.trim()) errors.contactName = "Bitte geben Sie Ihren Namen ein.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(body.email || "")) errors.email = "Bitte geben Sie eine gültige E-Mail-Adresse ein.";
+    if (!edit && !body.consent) errors.consent = "Ohne Ihre Zustimmung können wir nicht für Sie posten.";
+    if (Object.keys(errors).length) return showFieldErrors(form, errors);
+
+    const btn = form.querySelector("button[type=submit]");
+    btn.classList.add("busy");
+    try {
+      applyState(await api(edit ? "PATCH" : "POST", edit ? "/api/me" : "/api/signup", body));
+      S.step = edit ? firstOpenStep() : S.providers[0]?.id || "done";
+      S.banner = edit ? { kind: "ok", text: "Angaben gespeichert." } : null;
+      render(true);
+    } catch (err) {
+      btn.classList.remove("busy");
+      if (err.fields) return showFieldErrors(form, err.fields);
+      S.banner = { kind: "bad", text: err.message };
+      render(true);
+    }
+  });
+
+  function showFieldErrors(form, errors) {
+    let first;
+    for (const [name, msg] of Object.entries(errors)) {
+      const input = form.querySelector(`[name="${name}"]`);
+      if (!input) continue;
+      input.setAttribute("aria-invalid", "true");
+      const p = document.createElement("p");
+      p.className = "err"; p.id = `err-${name}`; p.textContent = msg;
+      input.setAttribute("aria-describedby", p.id);
+      (name === "consent" ? input.closest(".check") : input).insertAdjacentElement("afterend", p);
+      first = first || input;
+    }
+    first?.focus();
+  }
+
+  /* ================= Start ================= */
+  async function init() {
+    if (DEMO) $("#demo").hidden = false;
+    try {
+      S.providers = (await api("GET", "/api/providers")).providers;
+    } catch {
+      $("#stage").innerHTML = `<div class="banner bad" role="alert">Das Panel ist gerade nicht erreichbar. Bitte laden Sie die Seite in ein paar Minuten neu.</div>`;
+      return;
+    }
+    try { applyState(await api("GET", "/api/me")); } catch { /* noch nicht angemeldet */ }
+
+    const q = new URLSearchParams(location.search);
+    const pName = prov(q.get("provider"))?.name || "";
+    if (q.get("connected") && prov(q.get("connected"))) {
+      const id = q.get("connected");
+      const list = steps();
+      S.step = list[list.indexOf(id) + 1];
+      S.banner = { kind: "ok", text: `${prov(id).name} ist verbunden.` };
+    } else if (q.get("error")) {
+      const fn = ERRORS[q.get("error")] || ERRORS.failed;
+      S.banner = { kind: "bad", text: fn(pName) };
+      S.step = S.customer && prov(q.get("provider")) ? q.get("provider") : firstOpenStep();
+    } else {
+      S.step = firstOpenStep();
+    }
+    if (q.has("connected") || q.has("error")) history.replaceState(null, "", location.pathname);
+    render(false);
+  }
+
+  /* ================= Vorschau-Modus (ohne Server) ================= */
+  const MOCK = { customer: null, connections: [] };
+  const DEMO_PROVIDERS = [
+    { id: "instagram", name: "Instagram", available: true, notice: null,
+      tagline: "Ihre Beiträge erscheinen automatisch in Ihrem Instagram-Feed.",
+      guide: [
+        { title: "Professionelles Konto einrichten", text: "Automatisches Posten funktioniert nur mit einem Business- oder Creator-Konto. Das Umstellen ist kostenlos und dauert rund zwei Minuten. Haben Sie schon eines, können Sie diesen Punkt überspringen.", link: { label: "Anleitung von Instagram öffnen", url: "https://help.instagram.com/502981923235522" } },
+        { title: "Zugangsdaten bereithalten", text: "Sie melden sich gleich direkt bei Instagram an. Ihr Passwort geben Sie nur dort ein, nie bei uns.", link: { label: "Passwort vergessen?", url: "https://www.instagram.com/accounts/password/reset/" } },
+        { title: "Verbinden und Freigabe bestätigen", text: "Instagram zeigt Ihnen, welche Rechte Pipeline bekommt: Profil lesen und Beiträge veröffentlichen. Bestätigen Sie, danach landen Sie automatisch wieder hier." },
+      ] },
+    { id: "linkedin", name: "LinkedIn", available: true,
+      tagline: "Ihre Beiträge erscheinen automatisch auf Ihrem LinkedIn-Profil.",
+      notice: "Gepostet wird auf Ihrem persönlichen Profil, nicht auf einer Unternehmensseite.",
+      guide: [
+        { title: "Mit dem richtigen Profil eingeloggt sein", text: "Die Beiträge erscheinen auf dem Profil, mit dem Sie sich gleich anmelden. Prüfen Sie kurz, ob im Browser das richtige Profil offen ist.", link: { label: "LinkedIn öffnen", url: "https://www.linkedin.com/feed/" } },
+        { title: "Verbinden und Freigabe bestätigen", text: "LinkedIn fragt, ob Pipeline in Ihrem Namen Beiträge teilen darf. Bestätigen Sie, danach landen Sie automatisch wieder hier." },
+        { title: "Alle 60 Tage kurz erneuern", text: "LinkedIn begrenzt die Freigabe auf 60 Tage. Das Panel zeigt Ihnen rechtzeitig an, wann Sie mit einem Klick neu verbinden sollten." },
+      ] },
+  ];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const mockState = () => ({ customer: MOCK.customer, connections: MOCK.connections });
+
+  async function mockApi(method, url, body) {
+    await sleep(250);
+    if (url === "/api/providers") return { providers: DEMO_PROVIDERS };
+    if (url === "/api/me" && method === "GET") {
+      if (!MOCK.customer) throw Object.assign(new Error("Nicht angemeldet"), { status: 401 });
+      return mockState();
+    }
+    if (url === "/api/signup" || (url === "/api/me" && method === "PATCH")) {
+      const { consent, ...data } = body;
+      MOCK.customer = { ...MOCK.customer, ...data };
+      return mockState();
+    }
+    if (url.startsWith("/api/disconnect/")) {
+      MOCK.connections = MOCK.connections.filter((c) => c.provider !== url.split("/").pop());
+      return mockState();
+    }
+    if (url === "/api/access-link") return { link: "https://mcp.pipebot.at/panel/login?key=vorschau-beispiel" };
+    if (url === "/api/logout") { MOCK.customer = null; MOCK.connections = []; return { ok: true }; }
+    throw new Error("Unbekannt");
+  }
+
+  async function demoConnect(id) {
+    const p = prov(id);
+    const ov = document.createElement("div");
+    ov.className = "overlay"; ov.setAttribute("role", "status");
+    ov.textContent = `Weiterleitung zu ${p.name} …`;
+    document.body.append(ov);
+    await sleep(1100);
+    ov.remove();
+    const now = new Date();
+    MOCK.connections = MOCK.connections.filter((c) => c.provider !== id).concat({
+      provider: id,
+      accountName: id === "instagram" ? "@" + (MOCK.customer.company || "ihrfirma").toLowerCase().replace(/[^a-z0-9]/g, "") : MOCK.customer.contactName,
+      connectedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 60 * 86400000).toISOString(),
+      status: "ok",
+    });
+    S.connections = MOCK.connections;
+    const list = steps();
+    S.step = list[list.indexOf(id) + 1];
+    S.banner = { kind: "ok", text: `${p.name} ist verbunden.` };
+    render(true);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,312 @@
+import express, { type Request, type Response, type NextFunction, type Router } from "express";
+import path from "node:path";
+import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
+import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
+import { providers, getProvider } from "./providers/index.js";
+import { ProviderError } from "./providers/types.js";
+import { connectionStatus } from "./credentials.js";
+
+const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
+const COOKIE = "pp_session";
+const SESSION_DAYS = 90;
+const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
+const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
+
+const baseUrl = (): string => {
+  const url = (process.env.PANEL_BASE_URL ?? "").replace(/\/$/, "");
+  if (!url) throw new Error("PANEL_BASE_URL fehlt in .env (z. B. https://mcp.pipebot.at)");
+  return url;
+};
+const redirectUri = (providerId: string): string => `${baseUrl()}${MOUNT}/callback/${providerId}`;
+
+// ---------- Hilfsfunktionen ----------
+
+function readCookie(req: Request, name: string): string | undefined {
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return undefined;
+}
+
+function startSession(res: Response, customerId: string): void {
+  const token = randomToken();
+  const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString();
+  db.prepare("INSERT INTO sessions (token_hash, customer_id, expires_at) VALUES (?, ?, ?)").run(sha256(token), customerId, expires);
+  res.setHeader("Set-Cookie", `${COOKIE}=${token}; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`);
+}
+
+function currentCustomer(req: Request): CustomerRow | undefined {
+  const token = readCookie(req, COOKIE);
+  if (!token) return undefined;
+  return db
+    .prepare(
+      `SELECT c.* FROM sessions s JOIN customers c ON c.id = s.customer_id
+       WHERE s.token_hash = ? AND s.expires_at > ? AND c.status = 'active'`,
+    )
+    .get(sha256(token), nowIso()) as CustomerRow | undefined;
+}
+
+const hits = new Map<string, number[]>();
+function rateLimited(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  list.push(now);
+  hits.set(key, list);
+  return list.length > max;
+}
+
+const clientIp = (req: Request): string =>
+  (String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || req.socket.remoteAddress || "unknown").trim();
+
+const str = (v: unknown, max: number): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
+
+interface BriefingInput {
+  company: string; contactName: string; email: string; website: string; industry: string;
+  about: string; tone: string; frequency: string; postTime: string;
+}
+
+function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; errors: Record<string, string> } {
+  const data: BriefingInput = {
+    company: str(body.company, 120),
+    contactName: str(body.contactName, 120),
+    email: str(body.email, 200).toLowerCase(),
+    website: str(body.website, 300),
+    industry: str(body.industry, 120),
+    about: str(body.about, 2000),
+    tone: str(body.tone, 30),
+    frequency: str(body.frequency, 30),
+    postTime: str(body.postTime, 5),
+  };
+  const errors: Record<string, string> = {};
+  if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
+  if (!data.contactName) errors.contactName = "Bitte geben Sie Ihren Namen ein.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email)) errors.email = "Bitte geben Sie eine gültige E-Mail-Adresse ein.";
+  if (!TONES.includes(data.tone)) data.tone = "sachlich";
+  if (!FREQUENCIES.includes(data.frequency)) data.frequency = "werktags";
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(data.postTime)) data.postTime = "15:00";
+  return { data, errors };
+}
+
+function publicState(c: CustomerRow) {
+  const rows = db.prepare("SELECT * FROM connections WHERE customer_id = ?").all(c.id) as ConnectionRow[];
+  return {
+    customer: {
+      company: c.company, contactName: c.contact_name, email: c.email, website: c.website ?? "",
+      industry: c.industry ?? "", about: c.about ?? "", tone: c.tone, frequency: c.frequency, postTime: c.post_time,
+    },
+    connections: rows.map((r) => ({
+      provider: r.provider,
+      accountName: r.account_name,
+      connectedAt: r.connected_at,
+      expiresAt: r.expires_at,
+      status: connectionStatus(r),
+    })),
+  };
+}
+
+const backTo = (res: Response, params: Record<string, string>): void =>
+  res.redirect(303, `${MOUNT}/?${new URLSearchParams(params)}`);
+
+type Handler = (req: Request, res: Response) => Promise<void> | void;
+const safe = (fn: Handler) => async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await fn(req, res);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------- Router ----------
+
+export function createPanelRouter(): Router {
+  assertEncryptionKey();
+  baseUrl();
+  const router = express.Router();
+  const publicDir = process.env.PANEL_PUBLIC_DIR ?? path.resolve(process.cwd(), "public/panel");
+
+  router.use((_req, res, next) => {
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
+    );
+    next();
+  });
+  router.use(express.json({ limit: "50kb" }));
+
+  router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+
+  router.get("/api/providers", (_req, res) => {
+    res.json({
+      providers: providers.map((p) => ({
+        id: p.id, name: p.name, tagline: p.tagline, notice: p.notice ?? null, guide: p.guide, available: p.isConfigured(),
+      })),
+    });
+  });
+
+  router.get("/api/me", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    res.json(publicState(c));
+  });
+
+  router.post("/api/signup", safe((req, res) => {
+    if (rateLimited(`signup:${clientIp(req)}`, 5, 3_600_000)) {
+      res.status(429).json({ error: "Zu viele Versuche. Bitte in einer Stunde erneut probieren." });
+      return;
+    }
+    if (req.body?.consent !== true) {
+      res.status(400).json({ error: "Bitte stimmen Sie der Datenverarbeitung zu.", fields: { consent: "Zustimmung erforderlich." } });
+      return;
+    }
+    const { data, errors } = parseBriefing(req.body ?? {});
+    if (Object.keys(errors).length) {
+      res.status(400).json({ error: "Bitte prüfen Sie Ihre Angaben.", fields: errors });
+      return;
+    }
+    const id = `cus_${randomToken(9)}`;
+    const now = nowIso();
+    db.prepare(
+      `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
+         login_key_hash, consent_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
+      data.tone, data.frequency, data.postTime, sha256(randomToken()), now, now, now);
+    startSession(res, id);
+    console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
+    const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
+    res.status(201).json(publicState(created));
+  }));
+
+  router.patch("/api/me", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const { data, errors } = parseBriefing(req.body ?? {});
+    if (Object.keys(errors).length) {
+      res.status(400).json({ error: "Bitte prüfen Sie Ihre Angaben.", fields: errors });
+      return;
+    }
+    db.prepare(
+      `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?, updated_at=?
+       WHERE id=?`,
+    ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
+      data.tone, data.frequency, data.postTime, nowIso(), c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  }));
+
+  // Persönlicher Zugangslink – ersetzt jeden älteren Link
+  router.post("/api/access-link", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const key = randomToken(24);
+    db.prepare("UPDATE customers SET login_key_hash = ?, updated_at = ? WHERE id = ?").run(sha256(key), nowIso(), c.id);
+    res.json({ link: `${baseUrl()}${MOUNT}/login?key=${key}` });
+  });
+
+  router.get("/login", (req, res) => {
+    const key = str(req.query.key, 100);
+    if (!key || rateLimited(`login:${clientIp(req)}`, 20, 3_600_000)) return backTo(res, { error: "login" });
+    const c = db.prepare("SELECT * FROM customers WHERE login_key_hash = ? AND status = 'active'").get(sha256(key)) as CustomerRow | undefined;
+    if (!c) return backTo(res, { error: "login" });
+    startSession(res, c.id);
+    res.redirect(303, `${MOUNT}/`);
+  });
+
+  router.post("/api/logout", (req, res) => {
+    const token = readCookie(req, COOKIE);
+    if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    res.json({ ok: true });
+  });
+
+  router.post("/api/disconnect/:provider", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    db.prepare("DELETE FROM connections WHERE customer_id = ? AND provider = ?").run(c.id, String(req.params.provider));
+    res.json(publicState(c));
+  });
+
+  // Schritt 1 OAuth: zur Plattform weiterleiten
+  router.get("/connect/:provider", (req, res) => {
+    const provider = getProvider(String(req.params.provider));
+    const c = currentCustomer(req);
+    if (!c) return backTo(res, { error: "session" });
+    if (!provider) return backTo(res, { error: "failed" });
+    if (!provider.isConfigured()) return backTo(res, { error: "not_configured", provider: provider.id });
+    const state = randomToken(24);
+    db.prepare("INSERT INTO oauth_states (state, customer_id, provider, expires_at) VALUES (?, ?, ?, ?)")
+      .run(state, c.id, provider.id, new Date(Date.now() + 15 * 60_000).toISOString());
+    res.redirect(302, provider.authorizeUrl(state, redirectUri(provider.id)));
+  });
+
+  // Schritt 2 OAuth: Rückkehr von der Plattform
+  router.get("/callback/:provider", async (req, res) => {
+    const provider = getProvider(String(req.params.provider));
+    if (!provider) return backTo(res, { error: "failed" });
+    const pid = provider.id;
+
+    const state = str(req.query.state, 100);
+    const stored = db.prepare("SELECT * FROM oauth_states WHERE state = ?").get(state) as
+      | { customer_id: string; provider: string; expires_at: string }
+      | undefined;
+    if (stored) db.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
+
+    if (req.query.error) return backTo(res, { error: "cancelled", provider: pid });
+    if (!stored || stored.provider !== pid || new Date(stored.expires_at).getTime() < Date.now()) {
+      return backTo(res, { error: "state", provider: pid });
+    }
+    const code = str(req.query.code, 2000);
+    if (!code) return backTo(res, { error: "failed", provider: pid });
+
+    try {
+      const result = await provider.exchangeCode(code, redirectUri(pid));
+      const now = nowIso();
+      db.prepare(
+        `INSERT INTO connections (customer_id, provider, account_id, account_name, access_token_enc, refresh_token_enc, expires_at, scopes, connected_at, updated_at)
+         VALUES (@customer_id, @provider, @account_id, @account_name, @access, @refresh, @expires, @scopes, @now, @now)
+         ON CONFLICT(customer_id, provider) DO UPDATE SET
+           account_id = excluded.account_id, account_name = excluded.account_name,
+           access_token_enc = excluded.access_token_enc, refresh_token_enc = excluded.refresh_token_enc,
+           expires_at = excluded.expires_at, scopes = excluded.scopes,
+           connected_at = excluded.connected_at, updated_at = excluded.updated_at`,
+      ).run({
+        customer_id: stored.customer_id,
+        provider: pid,
+        account_id: result.accountId,
+        account_name: result.accountName,
+        access: encrypt(result.accessToken),
+        refresh: result.refreshToken ? encrypt(result.refreshToken) : null,
+        expires: result.expiresAt ? result.expiresAt.toISOString() : null,
+        scopes: result.scopes ?? null,
+        now,
+      });
+      console.log(`[panel] ${stored.customer_id} hat ${provider.name} verbunden (${result.accountName})`);
+      backTo(res, { connected: pid });
+    } catch (err) {
+      console.error(`[panel] OAuth ${pid} fehlgeschlagen:`, err);
+      backTo(res, { error: err instanceof ProviderError ? err.code : "failed", provider: pid });
+    }
+  });
+
+  router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error("[panel] Fehler:", err);
+    res.status(500).json({ error: "Da ist auf unserer Seite etwas schiefgelaufen. Bitte versuchen Sie es erneut." });
+  });
+
+  return router;
+}

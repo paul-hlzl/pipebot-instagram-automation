@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { getConfig } from "./config.js";
 import { linkedinOAuthRouter } from "./linkedin-oauth-route.js";
+import { createPanelRouter } from "./panel/router.js";
 
 function isValidToken(provided: string, expected: string): boolean {
   const providedBuf = Buffer.from(provided);
@@ -37,11 +38,20 @@ function requireBearerToken(req: Request, res: Response, next: NextFunction): vo
  */
 export function createHttpApp(createMcpServer: () => McpServer): express.Express {
   const app = express();
-  app.use(express.json({ limit: "10mb" }));
+  // Nginx sits in front of this process, so trust its X-Forwarded-* headers
+  // (client IP for rate limiting, https detection for secure cookies).
+  app.set("trust proxy", 1);
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });
   });
+
+  // Customer panel: browser-facing, its own cookie-based session auth and its
+  // own express.json() (50kb limit), so it must be mounted before the global
+  // express.json() below, or that would already consume the request body.
+  app.use("/panel", createPanelRouter());
+
+  app.use(express.json({ limit: "10mb" }));
 
   // LinkedIn's OAuth redirect hits this in the user's browser, without an
   // MCP_AUTH_TOKEN header, so it must be mounted before requireBearerToken.
