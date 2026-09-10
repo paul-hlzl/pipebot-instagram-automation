@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { getConfig } from "./config.js";
+import { linkedinOAuthRouter } from "./linkedin-oauth-route.js";
 
 function isValidToken(provided: string, expected: string): boolean {
   const providedBuf = Buffer.from(provided);
@@ -41,6 +42,10 @@ export function createHttpApp(createMcpServer: () => McpServer): express.Express
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });
   });
+
+  // LinkedIn's OAuth redirect hits this in the user's browser, without an
+  // MCP_AUTH_TOKEN header, so it must be mounted before requireBearerToken.
+  app.use(linkedinOAuthRouter);
 
   app.use(requireBearerToken);
 

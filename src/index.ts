@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig } from "./config.js";
 import { generateImageUrl } from "./fal.js";
-import { ensureAuthToken, writeAccessToken } from "./env-file.js";
+import { ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
 import {
   getPublishingLimit,
@@ -13,6 +13,12 @@ import {
 } from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
+import {
+  checkLinkedInToken,
+  publishLinkedInImagePost,
+  publishLinkedInPost,
+  refreshLinkedInToken,
+} from "./linkedin.js";
 
 function textResult(data: unknown) {
   return {
@@ -342,6 +348,108 @@ function createServer(): McpServer {
         });
       } catch (error) {
         console.error("refresh_access_token:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "publish_linkedin_post",
+    {
+      description:
+        "Publish a plain-text LinkedIn feed post on the configured personal profile. No image. " +
+        "Follow linkedin-styleguide.md for length (600-1200 characters), tone, and hashtags.",
+      inputSchema: {
+        text: z
+          .string()
+          .min(1)
+          .max(3000)
+          .describe("LinkedIn post text (plain commentary, hashtags at the end). Max 3000 characters."),
+      },
+    },
+    async ({ text }) => {
+      try {
+        const result = await publishLinkedInPost({ text });
+        return textResult(result);
+      } catch (error) {
+        console.error("publish_linkedin_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "publish_linkedin_image_post",
+    {
+      description:
+        "Publish a LinkedIn feed post with a single image. Provide either a public image_url or " +
+        "image_base64 (uploaded to LinkedIn's own image storage, no R2 involved). Landscape " +
+        "1200x627 recommended, no text in the image (see linkedin-styleguide.md).",
+      inputSchema: {
+        text: z.string().min(1).max(3000).describe("LinkedIn post text. Max 3000 characters."),
+        image_url: z.string().optional().describe("Publicly reachable image URL."),
+        image_base64: z
+          .string()
+          .optional()
+          .describe("JPEG or PNG as base64, optionally a data URL."),
+        alt_text: z.string().optional().describe("Alt text for the image (accessibility)."),
+      },
+    },
+    async ({ text, image_url, image_base64, alt_text }) => {
+      try {
+        const hasUrl = Boolean(image_url?.trim());
+        const hasB64 = Boolean(image_base64?.trim());
+        if (hasUrl === hasB64) {
+          throw new ToolError("Genau eines von image_url oder image_base64 angeben, nicht beides und nicht keines.");
+        }
+
+        const imageSource: string | Buffer = hasB64
+          ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
+          : image_url!.trim();
+
+        const result = await publishLinkedInImagePost({ text, imageSource, altText: alt_text });
+        return textResult(result);
+      } catch (error) {
+        console.error("publish_linkedin_image_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "check_linkedin_token",
+    {
+      description: "Check whether the configured LinkedIn access token is still valid (daily health check).",
+    },
+    async () => {
+      try {
+        const result = await checkLinkedInToken();
+        return textResult(result);
+      } catch (error) {
+        console.error("check_linkedin_token:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "refresh_linkedin_token",
+    {
+      description:
+        "Refresh the LinkedIn access token using the stored refresh token and write the new " +
+        "access (and, if rotated, refresh) token back to .env.",
+    },
+    async () => {
+      try {
+        const refreshed = await refreshLinkedInToken();
+        writeLinkedInTokens(refreshed.accessToken, refreshed.refreshToken);
+        return textResult({
+          ok: true,
+          expires_in_days: refreshed.expiresInDays,
+          message: "Neuer LinkedIn Access Token wurde in die lokale .env geschrieben.",
+        });
+      } catch (error) {
+        console.error("refresh_linkedin_token:", toToolMessage(error));
         return errorResult(error);
       }
     },

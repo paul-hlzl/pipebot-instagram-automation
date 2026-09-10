@@ -22,6 +22,29 @@ export function writeAccessToken(newToken: string): void {
   process.env.IG_ACCESS_TOKEN = newToken;
 }
 
+function setEnvLine(contents: string, key: string, value: string): string {
+  const line = `${key}=${value}`;
+  const pattern = new RegExp(`^${key}=[^\\r\\n]*`, "m");
+  return pattern.test(contents) ? contents.replace(pattern, line) : `${contents.trimEnd()}\n${line}\n`;
+}
+
+/** Replace or append LINKEDIN_ACCESS_TOKEN / LINKEDIN_REFRESH_TOKEN in the local .env and update process.env. */
+export function writeLinkedInTokens(accessToken: string, refreshToken: string): void {
+  let contents: string;
+  try {
+    contents = fs.readFileSync(ENV_PATH, "utf8");
+  } catch {
+    throw new Error(`Die .env-Datei konnte nicht gelesen werden: ${ENV_PATH}`);
+  }
+
+  contents = setEnvLine(contents, "LINKEDIN_ACCESS_TOKEN", accessToken);
+  contents = setEnvLine(contents, "LINKEDIN_REFRESH_TOKEN", refreshToken);
+
+  fs.writeFileSync(ENV_PATH, contents, "utf8");
+  process.env.LINKEDIN_ACCESS_TOKEN = accessToken;
+  process.env.LINKEDIN_REFRESH_TOKEN = refreshToken;
+}
+
 /**
  * Return the configured MCP_AUTH_TOKEN, generating and persisting a new random
  * one to the local .env if none is set yet.
