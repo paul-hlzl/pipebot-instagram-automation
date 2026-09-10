@@ -6,4 +6,5 @@ dist/
 tmp/
 .claude/
 last_post.json
+last_post-*.json
 data/

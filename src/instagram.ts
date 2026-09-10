@@ -251,10 +251,12 @@ export async function publishImageToInstagram(
   imageUrl: string,
   caption: string,
   creds?: InstagramCredentials,
+  customerId?: string,
 ): Promise<PublishResult> {
   // Soft duplicate check: never blocks, only surfaces a warning in the result
   // so the caller (Claude) can decide whether a repeat publish is intentional.
-  const duplicateWarning = checkRecentDuplicate();
+  // Kept per customer (see dedupe.ts) so different accounts never trigger each other's warning.
+  const duplicateWarning = checkRecentDuplicate(customerId);
 
   await assertPublishingQuota(creds);
 
@@ -269,7 +271,7 @@ export async function publishImageToInstagram(
     "Instagram publish",
   );
 
-  writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption });
+  writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);
 
   return duplicateWarning ? { ...result, warning: duplicateWarning } : result;
 }

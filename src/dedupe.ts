@@ -11,9 +11,20 @@ export interface LastPost {
   caption: string;
 }
 
-function readLastPost(): LastPost | undefined {
+/**
+ * Own account (no customerId) keeps using last_post.json as before. Each customer gets
+ * their own last_post-<customerId>.json, so one customer's post is never mistaken for a
+ * duplicate of another customer's (or the owner's) post.
+ */
+function lastPostPath(customerId?: string): string {
+  if (!customerId) return LAST_POST_PATH;
+  const safe = customerId.replace(/[^a-zA-Z0-9_-]/g, "");
+  return path.join(PACKAGE_ROOT, `last_post-${safe}.json`);
+}
+
+function readLastPost(customerId?: string): LastPost | undefined {
   try {
-    const raw = fs.readFileSync(LAST_POST_PATH, "utf8");
+    const raw = fs.readFileSync(lastPostPath(customerId), "utf8");
     const parsed = JSON.parse(raw) as Partial<LastPost>;
     if (typeof parsed.timestamp === "string" && typeof parsed.postId === "string") {
       return parsed as LastPost;
@@ -25,11 +36,11 @@ function readLastPost(): LastPost | undefined {
 }
 
 /** Best-effort; a write failure must never block an otherwise-successful publish. */
-export function writeLastPost(entry: LastPost): void {
+export function writeLastPost(entry: LastPost, customerId?: string): void {
   try {
-    fs.writeFileSync(LAST_POST_PATH, JSON.stringify(entry, null, 2), "utf8");
+    fs.writeFileSync(lastPostPath(customerId), JSON.stringify(entry, null, 2), "utf8");
   } catch (error) {
-    console.error("dedupe: failed to write last_post.json:", error);
+    console.error(`dedupe: failed to write ${lastPostPath(customerId)}:`, error);
   }
 }
 
@@ -39,8 +50,8 @@ export function writeLastPost(entry: LastPost): void {
  * never blocks the publish itself - the caller (Claude, in an automated
  * routine or a manual chat) decides whether to proceed.
  */
-export function checkRecentDuplicate(): string | undefined {
-  const last = readLastPost();
+export function checkRecentDuplicate(customerId?: string): string | undefined {
+  const last = readLastPost(customerId);
   if (!last) {
     return undefined;
   }

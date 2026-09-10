@@ -193,7 +193,7 @@ function createServer(): McpServer {
     async ({ imageUrl, caption, customer_id }) => {
       try {
         const creds = await resolveInstagramCredentials(customer_id);
-        const result = await publishImageToInstagram(imageUrl, caption, creds);
+        const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         return textResult(result);
       } catch (error) {
         console.error("publish_generated_post:", toToolMessage(error));
@@ -224,7 +224,7 @@ function createServer(): McpServer {
       try {
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline);
-        const published = await publishImageToInstagram(generated.imageUrl, caption, creds);
+        const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
         return textResult({
           postId: published.postId,
           topic,
