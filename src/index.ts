@@ -19,12 +19,14 @@ import {
   assertNoBannedWords,
   assertRequiredElements,
   getCustomerOverview,
+  getPlannedPostByChannelDate,
   getStyleSamples,
   listCustomers,
   listApprovedPendingPosts,
   listOpenPostRequests,
   logPost,
   markPendingApprovalPublished,
+  markPlannedPostStatus,
   markPostRequestDone,
   resolveImageBranding,
   resolveInstagramCredentials,
@@ -751,6 +753,58 @@ function createServer(): McpServer {
         return textResult({ ok });
       } catch (error) {
         console.error("mark_pending_approval_published:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_planned_post",
+    {
+      description:
+        "Checks whether the server's own daily pre-planning already prepared a post for one customer/channel/day " +
+        "(headline, caption, image already generated - see the panel's \"Vorschau\" tab, where the customer may " +
+        "have reviewed or edited it). Call this FIRST for every due customer/channel, before generating anything " +
+        "yourself. Returns null if nothing was prepared (pre-planning hasn't run yet for that day, generation " +
+        "failed for that customer, or the customer has no content pillars/isn't otherwise eligible) - in that " +
+        "case, fall back to generating on the spot exactly as before. If it returns a post: " +
+        "status 'rejected' means the customer explicitly skipped this one - do NOT generate a replacement, just " +
+        "skip this customer/channel/day entirely. status 'planned' or 'edited' means it's ready to use as-is " +
+        "(the image already exists - do not call generate_post_image/generate_story_image again). status " +
+        "'approved' is also ready to use (the customer pre-approved it in the panel, ahead of the usual " +
+        "approval-mode review). status 'published' should not normally appear here (already handled), skip it " +
+        "if it does.",
+      inputSchema: {
+        customer_id: z.string().describe("customerId eines Kunden aus `list_customers`."),
+        channel: z.enum(["ig_feed", "ig_story", "linkedin"]).describe("Which channel/format to check."),
+        date: z.string().describe("The calendar date to check, YYYY-MM-DD - normally today's date."),
+      },
+    },
+    async ({ customer_id, channel, date }) => {
+      try {
+        return textResult({ post: getPlannedPostByChannelDate(customer_id, channel, date) });
+      } catch (error) {
+        console.error("get_planned_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_planned_post_published",
+    {
+      description:
+        "Marks one pre-planned post (from `get_planned_post`) as published, after you've actually published it " +
+        "using its existing image/headline/caption. Has no effect on publishing itself - purely bookkeeping, and " +
+        "distinct from `logPost` (which still happens automatically inside the publish_* tools you called).",
+      inputSchema: { id: z.string().describe("The `id` of the planned post, from `get_planned_post`.") },
+    },
+    async ({ id }) => {
+      try {
+        const post = markPlannedPostStatus(id, "published");
+        return textResult({ ok: Boolean(post) });
+      } catch (error) {
+        console.error("mark_planned_post_published:", toToolMessage(error));
         return errorResult(error);
       }
     },
