@@ -21,7 +21,7 @@ um zu sehen, wo der Stand ist.
 | 9 | Kunden-Dashboard ausbauen | ✅ Code fertig, ⚠️ nicht in echtem Browser getestet |
 | 10 | Betrieb absichern (Backup/Health) | ✅ erledigt |
 | 11 | Meta App Review Vorbereitung | ✅ erledigt |
-| 12 | Abschluss & Deploy | ⏳ offen |
+| 12 | Abschluss & Deploy | ✅ **deployed, live auf mcp.pipebot.at** |
 
 ## Aufgabe 1 – Sicherheitsnetz ✅
 
@@ -188,10 +188,10 @@ Prompt-Text dafür ganz unten in diesem Bericht (Abschnitt "Routine-Prompt-Text"
 
 ---
 
-## Routine-Prompt-Text (für claude.ai einfügen)
+## Routine-Prompt-Text (für claude.ai einfügen) - finale Fassung
 
-Dieser Abschnitt wird während der Sitzung weiter ergänzt (Aufgabe 6 fügt einen Absatz zum
-Stil-Lernen hinzu) und am Ende noch einmal als Ganzes im Abschlussbericht wiederholt.
+Dieser Abschnitt ist die vollständige, finale Fassung (nach Aufgaben 4, 6 und 7) und wird am
+Ende im Abschlussbericht noch einmal wiederholt.
 
 **Zeitplan der Routine:** von 1×/Tag (~15:00 UTC) auf **stündlich** umstellen (z. B. `0 * * * *`
 UTC), damit für jeden Kunden möglichst nah an seiner eingestellten `postTime` gepostet wird -
@@ -204,24 +204,24 @@ Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Be
 2. Gehe jeden Kunden einzeln durch. Überspringe einen Kunden sofort (kein Tool-Aufruf für ihn),
    wenn `trialExpired` true ist ODER `dueNow` false ist. Nur Kunden mit `dueNow: true` und
    `trialExpired: false` werden in diesem Lauf bearbeitet.
-3. Für jeden fälligen Kunden:
-   a. Formuliere ein Thema und eine kurze, prägnante Headline (2-4 Wörter) passend zu seinem
-      Briefing (`about`, `industry`, `tone`, `avoidTopics`, `ctaPreference`).
-   b. Erzeuge das Bild mit `generate_post_image` (customer_id angeben) und prüfe kurz, ob der
-      Hintergrund sauber aussieht (keine Artefakte, keine unerwünschten Texte/Icons).
-   c. Veröffentliche mit `publish_generated_post` (customer_id angeben, Caption passend zum
-      Tonfall und `ctaPreference` des Kunden, inkl. sinnvoller Hashtags/Emojis nur wenn zum
-      Ton passend).
-   d. Wiederhole das für jeden Kanal, den der Kunde verbunden hat (`channels`), sofern für
-      LinkedIn ein eigenes Text-Tool nötig ist statt eines Bild-Posts.
-
-   Bevor du Headline und Caption formulierst: rufe `get_customer_style_samples` für diesen
-   Kunden auf. Wenn dort bisherige Posts zurückkommen, orientiere dich an Tonfall, Emoji-
-   Nutzung, Hashtag-Stil und wiederkehrenden Themen daraus, statt nur aus dem Briefing zu
-   raten. Kommt eine leere Liste zurück (noch keine Posts oder kein Instagram verbunden),
-   nutze wie bisher nur das Briefing.
-4. Poste NIE für einen Kunden mit `trialExpired: true` oder `dueNow: false` - auch nicht
-   "vorsorglich" oder weil gerade sonst nichts zu tun ist.
+3. Für jeden fälligen Kunden, für jeden Kanal/jedes Format, das er aktiviert hat
+   (`igFeedEnabled`/`igStoryEnabled`/`linkedinEnabled` - übersprungene Kanäle nie bespielen):
+   a. Rufe `get_customer_style_samples` für diesen Kunden auf. Kommen bisherige Posts zurück,
+      orientiere dich an Tonfall, Emoji-Nutzung, Hashtag-Stil und wiederkehrenden Themen
+      daraus statt nur aus dem Briefing zu raten. Kommt eine leere Liste zurück (noch keine
+      Posts oder kein Instagram verbunden), nutze nur das Briefing.
+   b. Formuliere ein Thema und eine kurze, prägnante Headline (2-4 Wörter) passend zu Briefing
+      (`about`, `industry`, `tone`, `avoidTopics`, `ctaPreference`) und Stilproben. Schreibe die
+      Caption in der eingestellten Sprache (`language`: de/en), mit Hashtags gemäß
+      `hashtagPreference` (keine/wenige/viele) und Emojis nur wenn `emojisEnabled` true ist.
+   c. Erzeuge das Bild mit `generate_post_image` bzw. für Storys `generate_story_image`
+      (customer_id angeben) und prüfe kurz, ob der Hintergrund sauber aussieht (keine
+      Artefakte, keine unerwünschten Texte/Icons).
+   d. Veröffentliche mit `publish_generated_post` (Feed), `publish_generated_story` (Story)
+      oder den LinkedIn-Tools (customer_id jeweils angeben).
+4. Poste NIE für einen Kunden mit `trialExpired: true` oder `dueNow: false`, und NIE über einen
+   Kanal, den der Kunde deaktiviert hat - auch nicht "vorsorglich" oder weil gerade sonst
+   nichts zu tun ist.
 5. Bei einem Fehler für einen Kunden (z. B. abgelaufene Verbindung): den Kunden überspringen,
    kurz notieren welcher Fehler auftrat, und mit dem nächsten Kunden weitermachen - ein
    einzelner fehlerhafter Kunde darf den Lauf für alle anderen nicht abbrechen.
@@ -435,5 +435,116 @@ Bild-Raster, Kalender) nur per Code-Durchsicht und JS-Syntax-Check geprüft, nic
 tatsächliches Anschauen im Browser. Bitte nach dem Deploy `https://mcp.pipebot.at/panel?demo`
 kurz öffnen und die "Fertig"-Seite als eingeloggter Test-Kunde ansehen.
 
+## Aufgabe 12 – Abschluss und Deploy ✅
+
+**Voraussetzungen geprüft, bevor deployed wurde:**
+- `npm run build`: fehlerfrei.
+- `npm run test:panel`: **41 passed, 0 failed** (letzter Lauf direkt vor dem Merge, gegen
+  den frischen Staging-Build von `main`).
+- Staging manuell per curl durchgespielt (siehe alle Aufgaben oben).
+- Uhrzeit beim Deploy: **09:41 UTC** - weit außerhalb des Sperrfensters 14:30-15:45 UTC.
+
+**Ablauf:**
+1. Zusätzliches, klar benanntes Vor-Deploy-Backup der Produktions-DB erstellt
+   (`/root/backups/panel/panel-pre-deploy-panel-v3-<Zeitstempel>.db`, getrennt von der
+   täglichen Rotation aus Aufgabe 10) und durch Öffnen verifiziert.
+2. `panel-v3` mit `--no-ff` in `main` gemerged (sauberer Merge, keine Konflikte), gepusht.
+3. `npm run build` auf `main`, Staging noch einmal neu gestartet und `npm run test:panel`
+   gegen den frischen `main`-Build laufen lassen - grün.
+4. `pm2 restart instagram-mcp` (Produktion).
+5. **Nach dem Deploy geprüft (alles erfolgreich):**
+   - `GET /panel` → 200 (lokal **und** über `https://mcp.pipebot.at/panel`).
+   - `GET /panel/api/health` → `{"status":"ok","version":"1.0.0"}` (lokal und über die echte
+     Domain).
+   - `POST /mcp` ohne Bearer-Token → 401.
+   - `list_customers` (per rohem MCP-HTTP-Aufruf verifiziert, da die claude.ai-Verbindung nach
+     einem Prozess-Neustart neu initialisiert werden muss) liefert weiterhin **beide**
+     bestehenden Kunden mit intakten Verbindungen: `Pipeline Ai Solutions` (Instagram
+     verbunden, Status "ok") und `Testunternehmen`, jeweils inklusive aller neuen Panel-v3-
+     Felder (`trialExpired`, `dueNow`, `igFeedEnabled`, …).
+   - Admin-Login (`POST /panel/admin/api/login` mit dem echten Passwort aus `.env`) → 200.
+6. Staging-Prozess `instagram-mcp-staging` aus pm2 entfernt (`pm2 delete`), Staging-DB-Dateien
+   aufgeräumt. `pm2 list` zeigt wieder genau die ursprünglichen drei Prozesse
+   (`instagram-mcp`, `tiktok-mcp`, `x-mcp`) plus `pm2-logrotate`.
+
+**Ergebnis: erfolgreich deployed.** Kein Rollback nötig.
+
+Finaler Commit auf `main`: `d5cce5f` (Merge-Commit von `panel-v3`, Ausgangspunkt war
+`54712b3`). Tag `pre-panel-v3` zeigt weiterhin auf den alten Stand, falls doch einmal ein
+Rollback nötig werden sollte (`git checkout pre-panel-v3` + Build + `pm2 restart
+instagram-mcp`, plus DB-Backup zurückspielen falls die DB betroffen wäre - war sie hier nicht,
+alle Migrationen waren rein additiv).
+
 ---
-*(wird fortgesetzt)*
+
+# Abschlussbericht
+
+## 1. Welche Aufgaben erledigt, welche teilweise, welche nicht
+
+**Alle 12 Aufgaben erledigt und deployed.** Zwei mit einer Einschränkung, die dir bekannt sein
+sollte:
+
+- **Aufgabe 4** (Posting-Rhythmus): Code fertig und getestet, aber die Cloud-Routine selbst
+  läuft noch 1×/Tag und ignoriert `dueNow` - **du musst die Routine umstellen** (Prompt-Text
+  unten), sonst ändert sich am tatsächlichen Postingverhalten nichts.
+- **Aufgabe 5** ("Mit KI verbessern"): Code fertig, Button bleibt aber ausgeblendet, bis du
+  `ANTHROPIC_API_KEY` einträgst.
+- **Aufgaben 8 und 9** (Onboarding-Intro/Live-Vorschau/Formular-Split, Kunden-Dashboard mit
+  Kalender): Code fertig, per sorgfältiger Durchsicht und JS-Syntax-Check geprüft, **aber
+  nicht in einem echten Browser angeklickt** - diese Sitzung lief ohne Display/Chrome-Zugriff.
+  Bitte einmal kurz `https://mcp.pipebot.at/panel?demo` durchklicken.
+
+Nichts wurde ausgelassen oder nur teilweise begonnen.
+
+## 2. Deployed oder nur im Branch?
+
+**Deployed und live.** `main` wurde mit `panel-v3` gemerged (Merge-Commit `d5cce5f`), gepusht,
+und die Produktion (`pm2` Prozess `instagram-mcp`) läuft seit 09:41 UTC mit diesem Stand.
+Verifiziert über `https://mcp.pipebot.at/panel` und `/panel/api/health`. Der Branch `panel-v3`
+bleibt zusätzlich bestehen (nicht gelöscht), der Sicherheits-Tag `pre-panel-v3` zeigt weiter
+auf den Stand vor dieser Sitzung.
+
+## 3. Was DU manuell tun musst
+
+1. **Cloud-Routine umstellen** - von 1×/Tag auf stündlich, mit dem neuen Prompt-Text unten
+   (Aufgabe 4 + 6 + 7). Ohne das bleibt der ganze Rhythmus-/Kanal-Feinschliff wirkungslos.
+2. **`ANTHROPIC_API_KEY`** (optional `ANTHROPIC_MODEL`) in `.env` eintragen, damit "Mit KI
+   verbessern" im Panel erscheint. Zwei auskommentierte Beispielzeilen stehen schon bereit.
+3. **`PANEL_ENCRYPTION_KEY`** aus `.env` selbst extern sichern (Passwort-Manager) - wurde
+   bewusst nicht mit ins DB-Backup-Verzeichnis kopiert.
+4. **`PANEL_ADMIN_PASSWORD`** steht bereits in `.env` (wurde beim ersten Start automatisch
+   generiert) - dort nachsehen für den Login unter `https://mcp.pipebot.at/panel/admin`.
+5. **Kurzer Browser-Check** von `https://mcp.pipebot.at/panel?demo` (Onboarding-Intro,
+   Formular-Split, Live-Vorschau) und als eingeloggter Testkunde (Dashboard, Kalender,
+   Bild-Raster) - siehe Einschränkung zu Aufgabe 8/9 oben.
+6. **Vor dem echten Meta App Review**: Checkliste in `docs/META_APP_REVIEW.md` abarbeiten
+   (App-Icon fehlt noch, Unternehmensverifizierung, echtes Screencast-Video), und
+   `docs/DATENSCHUTZ_ENTWURF.md` von einem/einer Juristen/Juristin prüfen lassen, bevor daraus
+   eine echte, verlinkte Datenschutzerklärung wird.
+
+## 4. Routine-Prompt-Text zum Einfügen bei claude.ai
+
+Siehe Abschnitt weiter oben in diesem Dokument ("Routine-Prompt-Text (für claude.ai einfügen) -
+finale Fassung") - identischer Text, hier nicht noch einmal dupliziert. Ich habe ihn zusätzlich
+komplett in meine Chat-Antwort kopiert.
+
+## 5. Bekannte Risiken / worauf du noch schauen solltest
+
+- **Kein echter Browser-Test** für die neue Formular-/Dashboard-Optik (siehe oben) - höchstes
+  Restrisiko dieser Sitzung.
+- **Trial-Ablauf ohne Cloud-Routine-Umstellung**: bis du die Routine umstellst, postet sie
+  weiterhin unabhängig von `dueNow` - `trialExpired` und der eigene Pause-Schalter werden aber
+  bereits jetzt hart in `getCredentials()` erzwungen, ein abgelaufener/pausierter Kunde wird
+  also so oder so nie tatsächlich bepostet, auch wenn die alte Routine es versucht.
+- **`weekly-report.mjs`** liegt weiterhin als untracked Datei im Repo (nicht von mir, nicht
+  angefasst wie angewiesen) - falls das gebraucht wird, separat committen.
+- **Admin-Dashboard** hat aktuell keine Möglichkeit, `customerPaused` (Aufgabe 9) einzusehen -
+  nur der Kunde selbst sieht das in seinem eigenen Dashboard. Kleine mögliche Ergänzung für
+  später, falls gewünscht.
+- Die Migration lief bereits einmal live gegen die Produktions-DB (beim `pm2 restart`) - beide
+  bestehenden Kunden wurden danach mit allen neuen Feldern und unverändert intakten
+  Verbindungen zurückgegeben (siehe Aufgabe 12 oben), aber ein Blick ins Panel als du selbst
+  schadet nicht.
+
+---
+*(Ende des Berichts)*
