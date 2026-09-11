@@ -15,7 +15,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 3 | Wortverbote (hart) | ✅ erledigt |
 | 4 | Pflicht-Elemente | ✅ erledigt |
 | 5 | Granulare Zeitplanung | ✅ Code fertig, ⚠️ Weekday-Picker nicht im Browser getestet |
-| 6 | "Jetzt posten"-Button | ⏳ offen |
+| 6 | "Jetzt posten"-Button | ✅ Code fertig, ⚠️ Panel-Button nicht im Browser getestet |
 | 7 | Freigabe-Modus | ⏳ offen |
 | 8 | Mehrere Farbthemen | ⏳ offen |
 | 9 | Eigenes Logo | ⏳ offen |
@@ -170,6 +170,62 @@ Speichern, `classifyFrequency`-Rückübersetzung) wurde per Code-Durchsicht, JS-
 HTTP-Ebenen-Tests geprüft, aber nie tatsächlich angeklickt.
 
 **Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
+
+## Aufgabe 6 – "Jetzt posten"-Button ✅ Code / ⚠️ Browser-Test steht aus
+
+**Erledigt:**
+- Neue Tabelle `post_requests` (id, customer_id, topic, channel, status, Zeitstempel), additiv.
+- `POST /panel/api/post-now` (Kunden-Session): legt eine `pending`-Anfrage an. Bewusst **keine**
+  direkte KI-/MCP-Aktion vom Server aus - reine Warteschlange, wie gefordert (dieser Server hat
+  in diesem Kontext keinen Anthropic-Zugriff). Rate-Limits durchgesetzt: max. 1 gleichzeitig
+  offene Anfrage, max. 3 pro Tag - mit einem echten Testkunden verifiziert (erste Anfrage → 200,
+  zweite sofort danach → 429 "schon offen").
+- Zwei neue MCP-Tools:
+  - `list_post_requests` - alle offenen Anfragen über alle Kunden, älteste zuerst. Tool-
+    Beschreibung weist die Routine an, diese **vor** der regulären `list_customers`-Schleife
+    abzuarbeiten.
+  - `mark_post_request_done(request_id)` - Statuswechsel auf `done`. Mit einem echten
+    Roundtrip gegen Staging verifiziert (anlegen → über `list_post_requests` sichtbar → über
+    `mark_post_request_done` erledigt → Status in der DB tatsächlich `done`).
+- `GET /api/me` liefert `lastPostRequest` (letzte Anfrage jedes Status) fürs Dashboard.
+- Panel: neuer Dashboard-Bereich "Jetzt posten" - optionales Themenfeld + Button, Status der
+  letzten Anfrage (ausstehend/erledigt) als Banner, Feld+Button gesperrt solange eine Anfrage
+  offen ist (serverseitig ohnehin durchgesetzt, hier nur UX).
+- `npm run test:panel` erweitert (Anfrage anlegen, zweite blockiert, Status in `/api/me`,
+  401 ohne Login). **55 passed, 0 failed.**
+
+**⚠️ Gleiche Einschränkung wie die übrigen v4-UI-Arbeiten:** der neue Dashboard-Bereich wurde
+nicht in einem echten Browser angeklickt, nur die API dahinter (siehe oben).
+
+**Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
+
+---
+
+## Routine-Prompt-Text - Entwurf (wird nach jeder weiteren Aufgabe ergänzt, komplette Fassung in Aufgabe 11)
+
+```
+Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Bei jedem Lauf:
+
+1. Rufe `list_post_requests` auf und arbeite JEDE offene Anfrage zuerst ab, bevor du mit der
+   regulären Kundenliste weitermachst - ein Kunde, der explizit "jetzt posten" gedrückt hat,
+   soll nicht hinter der normalen Zeitplanung warten. Nutze `topic` als Thema (fällt es leer
+   aus: nutze das übliche Briefing/die Content-Säulen des Kunden). Nach erfolgreicher
+   Veröffentlichung: `mark_post_request_done` mit der `id` aufrufen - nie doppelt bearbeiten.
+2. Rufe `list_customers` auf. Überspringe einen Kunden, wenn `trialExpired` true ist ODER
+   `dueNow` false ist.
+3. Rufe für jeden fälligen Kunden `get_customer_style_samples` auf, um Tonfall/Hashtag-Stil
+   zu übernehmen, sofern vorhanden.
+4. Prüfe `contentPillars`/`suggestedPillar`: ist `suggestedPillar` gesetzt, formuliere das
+   Thema danach und gib den exakten `title` als `pillar_title` beim Publish-Tool mit. Sonst
+   nutze `about` wie bisher.
+5. Prüfe `bannedWords`/`requiredElements`: baue verbotene Wörter gar nicht erst ein, Pflicht-
+   Elemente immer ein. Schlägt ein Publish-Tool trotzdem mit einer entsprechenden Fehlermeldung
+   fehl, formuliere die Caption angepasst um und versuche es genau einmal erneut - gib nicht
+   nach dem ersten Fehlversuch auf.
+6. Veröffentliche entsprechend `igFeedEnabled`/`igStoryEnabled`/`linkedinEnabled`.
+```
+
+*(wird nach Aufgabe 7 um approval_mode/pending_approvals ergänzt.)*
 
 ---
 *(wird fortgesetzt)*

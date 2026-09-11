@@ -236,6 +236,32 @@ async function main() {
     ok("linkedinDueNow ist ein boolean", typeof body.customer?.linkedinDueNow === "boolean");
   }
 
+  // --- 3d. POST /api/post-now ("Jetzt posten"-Warteschlange, v4) ---
+  console.log("\nJetzt posten:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ topic: "Herbstaktion" }),
+    });
+    const body = await res.json();
+    ok("post-now -> 200 mit pending request", res.status === 200 && body.request?.status === "pending", JSON.stringify(body));
+
+    const secondRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ topic: "Noch eins" }),
+    });
+    ok("zweite offene Anfrage -> 429 (max 1 gleichzeitig)", secondRes.status === 429, `status=${secondRes.status}`);
+
+    const meRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } });
+    const meBody = await meRes.json();
+    ok("lastPostRequest erscheint in /api/me", meBody.customer?.lastPostRequest?.topic === "Herbstaktion", JSON.stringify(meBody.customer?.lastPostRequest));
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/post-now`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: "x" }) });
+    ok("post-now ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+  }
+
   // --- 4a. POST /api/pause (customer's own pause toggle) ---
   console.log("\nPausieren:");
   {

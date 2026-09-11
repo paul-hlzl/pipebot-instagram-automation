@@ -637,6 +637,18 @@
     `;
   }
 
+  function hasOpenPostRequest(c) {
+    return c.lastPostRequest && c.lastPostRequest.status === "pending";
+  }
+
+  function postNowStatusHtml(req) {
+    if (!req) return "";
+    const topicPart = req.topic ? `: "${esc(req.topic)}"` : "";
+    return req.status === "pending"
+      ? `<div class="banner" role="status">Ausstehend${topicPart} - angefragt am ${esc(fmtDate(req.createdAt))}.</div>`
+      : `<div class="banner ok" role="status">Erledigt${topicPart}.</div>`;
+  }
+
   function statusHtml(c) {
     if (c.trialExpired) return `<span class="dash-status warn">Trial abgelaufen</span>`;
     if (c.customerPaused) return `<span class="dash-status warn">Pausiert (von Ihnen)</span>`;
@@ -683,6 +695,16 @@
         <button class="btn" data-go="company">Stil bearbeiten</button>
         <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
         <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
+      </div>
+      <h2>Jetzt posten</h2>
+      <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wir übernehmen das beim nächsten Lauf.</p>
+      ${postNowStatusHtml(c.lastPostRequest)}
+      <div class="field">
+        <label for="f-postNowTopic" class="vh">Thema (optional)</label>
+        <input id="f-postNowTopic" type="text" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${hasOpenPostRequest(c) ? "disabled" : ""}>
+      </div>
+      <div class="actions">
+        <button class="btn" id="post-now-btn" ${hasOpenPostRequest(c) ? "disabled" : ""}>Jetzt zu diesem Thema posten</button>
       </div>
       <h2>Letzte Beiträge</h2>
       <div id="dash-posts" class="post-grid"><p class="empty">Wird geladen …</p></div>
@@ -918,6 +940,21 @@
       return;
     }
 
+    if (e.target.closest("#post-now-btn")) {
+      const btn = e.target.closest("#post-now-btn");
+      const topic = $("#f-postNowTopic")?.value || "";
+      btn.classList.add("busy");
+      try {
+        const { request } = await api("POST", "/api/post-now", { topic });
+        S.customer.lastPostRequest = request;
+        S.banner = { kind: "ok", text: "Angefragt - wir kümmern uns beim nächsten Lauf darum." };
+        render(true);
+      } catch (err) {
+        alert(err.message || "Anfrage fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#toggle-pause")) {
       const nextPaused = !S.customer.customerPaused;
       if (nextPaused && !confirm("Posting pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht, bis Sie es wieder fortsetzen.")) return;
@@ -1151,6 +1188,11 @@
     if (url === "/api/pause") {
       MOCK.customer = { ...MOCK.customer, customerPaused: body.paused === true, dueNow: body.paused === true ? false : MOCK.customer.dueNow };
       return mockState();
+    }
+    if (url === "/api/post-now") {
+      const request = { id: "preq_demo", topic: body.topic || "", status: "pending", createdAt: new Date().toISOString() };
+      MOCK.customer = { ...MOCK.customer, lastPostRequest: request };
+      return { ok: true, request };
     }
     if (url === "/api/me" && method === "DELETE") {
       MOCK.customer = null; MOCK.connections = [];

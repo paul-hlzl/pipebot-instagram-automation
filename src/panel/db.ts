@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS style_cache (
   fetched_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS post_requests (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  topic TEXT,
+  channel TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS post_requests_customer ON post_requests(customer_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS content_pillars (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -219,6 +230,16 @@ export interface ContentPillarRow {
   description: string | null;
   weight: number;
   active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostRequestRow {
+  id: string;
+  customer_id: string;
+  topic: string | null;
+  channel: string | null;
+  status: string;
   created_at: string;
   updated_at: string;
 }

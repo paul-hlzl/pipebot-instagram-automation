@@ -23,7 +23,9 @@ import {
   getCredentials,
   getCustomerOverview,
   listCustomers,
+  listOpenPostRequests,
   logPost,
+  markPostRequestDone,
   setCachedStyleSamples,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
@@ -658,6 +660,50 @@ function createServer(): McpServer {
         return textResult({ samples, cached: false });
       } catch (error) {
         console.error("get_customer_style_samples:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_post_requests",
+    {
+      description:
+        "List all still-pending \"post now\" requests customers queued themselves from their panel dashboard " +
+        "(topic, customerId, channel, createdAt). Call this and work through every entry BEFORE the regular " +
+        "list_customers/dueNow loop in each routine run - a customer who explicitly asked for a post right now " +
+        "should not wait behind the scheduled queue. For each entry, generate and publish a post for that " +
+        "customerId using its `topic` (fall back to the customer's usual briefing/content pillars if `topic` is " +
+        "empty), respecting that customer's usual rules (bannedWords, requiredElements, approval_mode if set, " +
+        "channel toggles). After successfully handling one (published, or filed into pending_approvals under " +
+        "approval_mode), call `mark_post_request_done` with its id - never leave a handled request pending, " +
+        "and never call a publish tool twice for the same request.",
+    },
+    async () => {
+      try {
+        return textResult({ requests: listOpenPostRequests() });
+      } catch (error) {
+        console.error("list_post_requests:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_post_request_done",
+    {
+      description:
+        "Marks one \"post now\" request (from `list_post_requests`) as done, after you've published (or queued " +
+        "for approval) a post for it. Idempotent-safe to call once per request - has no effect on publishing " +
+        "itself, purely bookkeeping so the panel can show the customer their request was handled.",
+      inputSchema: { request_id: z.string().describe("The `id` of the request, from `list_post_requests`.") },
+    },
+    async ({ request_id }) => {
+      try {
+        const ok = markPostRequestDone(request_id);
+        return textResult({ ok });
+      } catch (error) {
+        console.error("mark_post_request_done:", toToolMessage(error));
         return errorResult(error);
       }
     },

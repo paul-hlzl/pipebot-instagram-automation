@@ -2,7 +2,7 @@
  * Schnittstelle zwischen Kunden-Panel und MCP-Tools.
  * MCP-Tools holen sich Tokens NUR über diese Datei – nie direkt aus der DB.
  */
-import { db, nowIso, cleanupExpired, type ConnectionRow, type ContentPillarRow, type CustomerRow, type PostRow } from "./db.js";
+import { db, nowIso, cleanupExpired, type ConnectionRow, type ContentPillarRow, type CustomerRow, type PostRequestRow, type PostRow } from "./db.js";
 import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
@@ -470,6 +470,72 @@ export function assertRequiredElements(customerId: string | undefined, ...texts:
   if (missing) {
     throw new Error(`Caption fehlt ein Pflicht-Element: "${missing}" - bitte ergänzen und erneut versuchen.`);
   }
+}
+
+export interface PostRequest {
+  id: string;
+  customerId: string;
+  topic: string | null;
+  channel: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toPostRequest(r: PostRequestRow): PostRequest {
+  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at };
+}
+
+export const POST_REQUEST_MAX_OPEN = 1;
+export const POST_REQUEST_MAX_PER_DAY = 3;
+
+/** How many still-pending requests this customer currently has (should be 0 or 1 - enforced at creation). */
+export function openPostRequestCount(customerId: string): number {
+  return (db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status = 'pending'").get(customerId) as { n: number }).n;
+}
+
+/** How many requests (any status) this customer created today (server-local calendar day - a soft daily cap, precision doesn't matter). */
+export function postRequestCountToday(customerId: string): number {
+  return (
+    db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND date(created_at) = date('now')").get(customerId) as {
+      n: number;
+    }
+  ).n;
+}
+
+/**
+ * Queues a "post now" request for the routine to pick up - does NOT call any MCP tool or
+ * generate anything itself (this server has no Anthropic API access in this context, and the
+ * whole point is that the routine decides how to fulfil it). Caller must check
+ * openPostRequestCount/postRequestCountToday against POST_REQUEST_MAX_OPEN/_PER_DAY first.
+ */
+export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null): PostRequest {
+  const id = `preq_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(id, customerId, topic || null, channel, now, now);
+  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now };
+}
+
+/** Most recent request for one customer (any status), for the panel's own status display. Null if they never asked. */
+export function lastPostRequestForCustomer(customerId: string): PostRequest | null {
+  const row = db
+    .prepare("SELECT * FROM post_requests WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1")
+    .get(customerId) as PostRequestRow | undefined;
+  return row ? toPostRequest(row) : null;
+}
+
+/** All still-open requests across all customers, oldest first - what the routine should process before its regular customer loop. */
+export function listOpenPostRequests(): PostRequest[] {
+  const rows = db.prepare("SELECT * FROM post_requests WHERE status = 'pending' ORDER BY created_at").all() as PostRequestRow[];
+  return rows.map(toPostRequest);
+}
+
+/** Marks a request done once the routine has fulfilled it. Returns false if the id doesn't exist (already handled by someone else, or invalid). */
+export function markPostRequestDone(id: string): boolean {
+  const result = db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
+  return result.changes > 0;
 }
 
 const STYLE_CACHE_HOURS = 24;

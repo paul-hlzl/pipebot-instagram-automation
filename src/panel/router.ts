@@ -6,7 +6,21 @@ import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus, isTrialExpired, listContentPillars, listPostsForCustomer, scheduleInputFor, setContentPillars, trialDaysLeft } from "./credentials.js";
+import {
+  connectionStatus,
+  createPostRequest,
+  isTrialExpired,
+  lastPostRequestForCustomer,
+  listContentPillars,
+  listPostsForCustomer,
+  openPostRequestCount,
+  POST_REQUEST_MAX_OPEN,
+  POST_REQUEST_MAX_PER_DAY,
+  postRequestCountToday,
+  scheduleInputFor,
+  setContentPillars,
+  trialDaysLeft,
+} from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
 import { isDue, isDueForChannel, nextPostAt } from "./schedule.js";
 import { anthropicAvailable, improveBriefing } from "../anthropic.js";
@@ -196,6 +210,7 @@ function publicState(c: CustomerRow) {
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
       customerPaused: Boolean(c.customer_paused),
       contentPillars: listContentPillars(c.id),
+      lastPostRequest: lastPostRequestForCustomer(c.id),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -449,6 +464,28 @@ export function createPanelRouter(): Router {
     db.prepare("UPDATE customers SET customer_paused = ?, updated_at = ? WHERE id = ?").run(paused ? 1 : 0, nowIso(), c.id);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   });
+
+  // Reine Warteschlange - kein direkter MCP-/KI-Aufruf von hier aus (der Server hat in diesem
+  // Kontext keinen Anthropic-Zugriff). Die naechste Routine-Ausfuehrung holt sich offene
+  // Anfragen ueber das MCP-Tool `list_post_requests` ab.
+  router.post("/api/post-now", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (openPostRequestCount(c.id) >= POST_REQUEST_MAX_OPEN) {
+      res.status(429).json({ error: "Sie haben schon eine offene Anfrage. Bitte warten Sie, bis diese bearbeitet wurde." });
+      return;
+    }
+    if (postRequestCountToday(c.id) >= POST_REQUEST_MAX_PER_DAY) {
+      res.status(429).json({ error: `Maximal ${POST_REQUEST_MAX_PER_DAY} Anfragen pro Tag.` });
+      return;
+    }
+    const topic = str(req.body?.topic, 300);
+    const request = createPostRequest(c.id, topic || null);
+    res.json({ ok: true, request });
+  }));
 
   // Schritt 1 OAuth: zur Plattform weiterleiten
   router.get("/connect/:provider", (req, res) => {
