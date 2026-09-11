@@ -50,8 +50,10 @@ export interface CustomerOverview {
   accentColor: string | null;
   /** Text stamped on generated images instead of "Pipeline" (e.g. the customer's own brand name). Falls back to company name when empty. */
   watermarkText: string | null;
-  /** Free-text topics/phrasing this customer wants avoided. */
+  /** Free-text topics/phrasing this customer wants avoided (soft - an AI instruction, not enforced). */
   avoidTopics: string | null;
+  /** Comma-separated words that are HARD-blocked: publish tools refuse a caption/headline containing one of these. */
+  bannedWords: string | null;
   /** Preferred call-to-action slug: link_bio | anrufen | nachricht | termin | keiner */
   ctaPreference: string | null;
   /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
@@ -105,6 +107,7 @@ function overview(c: CustomerRow): CustomerOverview {
     accentColor: c.accent_color,
     watermarkText: c.watermark_text,
     avoidTopics: c.avoid_topics,
+    bannedWords: c.banned_words,
     ctaPreference: c.cta_preference,
     trialEndsAt: c.trial_ends_at,
     trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
@@ -386,6 +389,40 @@ export function pickPillarForToday(customerId: string): ContentPillar | null {
     if (r <= 0) return p;
   }
   return candidates[candidates.length - 1];
+}
+
+function splitCommaList(raw: string | null): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((w) => w.trim())
+    .filter(Boolean);
+}
+
+/** Case-insensitive substring check against a customer's hard-blocked words. Returns the matched word, or null. */
+export function containsBannedWord(text: string, customerId: string): string | null {
+  const row = db.prepare("SELECT banned_words FROM customers WHERE id = ?").get(customerId) as
+    | { banned_words: string | null }
+    | undefined;
+  const words = splitCommaList(row?.banned_words ?? null);
+  if (!words.length || !text) return null;
+  const lower = text.toLowerCase();
+  return words.find((w) => lower.includes(w.toLowerCase())) ?? null;
+}
+
+/**
+ * Throws a clear, actionable error if any of the given text fields contains a word this
+ * customer hard-banned. A missing customerId (the operator's own .env account) is never
+ * checked - unchanged behavior. Call this from every publish tool, before the network call.
+ */
+export function assertNoBannedWords(customerId: string | undefined, ...texts: (string | undefined)[]): void {
+  if (!customerId) return;
+  for (const text of texts) {
+    if (!text) continue;
+    const hit = containsBannedWord(text, customerId);
+    if (hit) {
+      throw new Error(`Caption enthält verbotenes Wort: "${hit}" - bitte neu formulieren und erneut versuchen.`);
+    }
+  }
 }
 
 const STYLE_CACHE_HOURS = 24;

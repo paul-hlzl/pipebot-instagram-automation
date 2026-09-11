@@ -470,7 +470,13 @@
           <div class="field">
             <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
             <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
+            <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
           </div>
+        </div>
+        <div class="field">
+          <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
+          <input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">
+          <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
         </div>
         <div class="field">
           <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>

@@ -12,7 +12,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 |---|---------|--------|
 | 1 | Sicherheitsnetz | ✅ erledigt |
 | 2 | Content-Säulen | ✅ erledigt |
-| 3 | Wortverbote (hart) | ⏳ offen |
+| 3 | Wortverbote (hart) | ✅ erledigt |
 | 4 | Pflicht-Elemente | ⏳ offen |
 | 5 | Granulare Zeitplanung | ⏳ offen |
 | 6 | "Jetzt posten"-Button | ⏳ offen |
@@ -66,6 +66,36 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 
 **Für Paul:** nichts zu tun. Wie die Routine `suggestedPillar`/`pillar_title` nutzen soll:
 siehe Routine-Prompt-Text weiter unten bzw. im Abschlussbericht.
+
+## Aufgabe 3 – Echte Wortverbote (hart im Code) ✅
+
+**Erledigt:**
+- Neue Spalte `banned_words` (TEXT, kommagetrennt) auf `customers`, additiv. Bewusst getrennt
+  von `avoid_topics` (bleibt die weiche KI-Anweisung).
+- `credentials.ts`: `containsBannedWord(text, customerId)` (case-insensitive Teilstring-Suche,
+  gibt das gefundene Wort zurück oder `null`) und `assertNoBannedWords(customerId, ...texte)`
+  als Durchsetzungs-Helfer (wirft mit klarer Fehlermeldung, no-op ohne `customer_id` - eigener
+  Account bleibt unverändert).
+- **In allen 6 Publish-fähigen Tools** durchgesetzt (nicht nur den 3 explizit genannten) -
+  auch `generate_and_publish_post`/`_story`, da diese ebenso direkt veröffentlichen und sonst
+  eine Lücke in der "harten" Durchsetzung gewesen wären:
+  - Feed-Tools: prüfen Headline UND Caption.
+  - Story-Tools: prüfen nur die Headline (Instagram Stories haben keine Caption).
+  - LinkedIn-Tools: prüfen den Beitragstext.
+- Mit einem echten Testkunden verifiziert: Wort im Text → Fehler mit dem exakten Wort in der
+  Meldung; sauberer Text → kein Fehler; ohne `customer_id` → nie geprüft (Rückwärtskompatibel).
+- Panel: neues Feld "Wörter, die NIE vorkommen dürfen (optional, kommagetrennt)", mit
+  Hinweistext "Wird automatisch blockiert, nicht nur vermieden" - bewusst optisch/inhaltlich
+  von "Was sollen wir vermeiden?" (jetzt mit Hinweis "Eine Bitte an die KI - wird nicht hart
+  erzwungen") abgesetzt.
+- `list_customers` liefert `bannedWords` pro Kunde; Tool-Beschreibung weist die Routine an,
+  Wörter vorher selbst zu meiden UND bei einem Fehler die Caption umzuformulieren und einmal
+  erneut zu versuchen statt aufzugeben (kein automatisches Retry im Server - das macht
+  bewusst die Routine, siehe Routine-Prompt-Text in Aufgabe 11).
+- `npm run test:panel` erweitert (Signup speichert `bannedWords` korrekt). **45 passed, 0
+  failed.**
+
+**Für Paul:** nichts zu tun.
 
 ---
 *(wird fortgesetzt)*

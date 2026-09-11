@@ -17,6 +17,7 @@ import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 import {
   assertChannelEnabled,
+  assertNoBannedWords,
   getCachedStyleSamples,
   getCredentials,
   getCustomerOverview,
@@ -236,6 +237,7 @@ function createServer(): McpServer {
     async ({ imageUrl, caption, customer_id, headline, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
+        assertNoBannedWords(customer_id, headline, caption);
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
@@ -271,6 +273,7 @@ function createServer(): McpServer {
     async ({ topic, headline, caption, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
+        assertNoBannedWords(customer_id, headline, caption);
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
@@ -375,6 +378,7 @@ function createServer(): McpServer {
     async ({ imageUrl, customer_id, headline, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_story");
+        assertNoBannedWords(customer_id, headline);
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
@@ -409,6 +413,7 @@ function createServer(): McpServer {
     async ({ topic, headline, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_story");
+        assertNoBannedWords(customer_id, headline);
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         const published = await publishStoryToInstagram(generated.imageUrl, creds);
@@ -501,6 +506,7 @@ function createServer(): McpServer {
     async ({ text, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "linkedin");
+        assertNoBannedWords(customer_id, text);
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
@@ -542,6 +548,7 @@ function createServer(): McpServer {
         }
 
         assertChannelEnabled(customer_id, "linkedin");
+        assertNoBannedWords(customer_id, text);
         const creds = await resolveLinkedInCredentials(customer_id);
         const imageSource: string | Buffer = hasB64
           ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
@@ -675,6 +682,12 @@ function createServer(): McpServer {
         "`pillar_title` argument on the publish tool so future picks keep rotating pillars instead of repeating. " +
         "If `suggestedPillar` is null (customer has no pillars configured), fall back to `about` as before and " +
         "omit `pillar_title`. " +
+        "Each customer also has `bannedWords` (comma-separated string, or null) - words that are HARD-blocked: " +
+        "the publish tools will refuse (with a clear error naming the word) any caption/headline containing one " +
+        "of them, even if this looks fine to you. Check `bannedWords` yourself before writing the caption so you " +
+        "avoid them proactively; if a publish call still fails with a banned-word error, rewrite the caption " +
+        "without that word and retry once rather than giving up on the customer for this run. This is separate " +
+        "from `avoidTopics`, which is only a soft style hint. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },

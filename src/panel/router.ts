@@ -89,7 +89,7 @@ const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean"
 interface BriefingInput {
   company: string; contactName: string; email: string; website: string; industry: string;
   about: string; tone: string; frequency: string; postTime: string;
-  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string;
+  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string; bannedWords: string;
   igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
   hashtagPreference: string; emojisEnabled: boolean; language: string;
   contentPillars: { title: string; description?: string; weight?: number }[];
@@ -124,6 +124,7 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     watermarkText: str(body.watermarkText, 40),
     avoidTopics: str(body.avoidTopics, 500),
     ctaPreference: str(body.ctaPreference, 30),
+    bannedWords: str(body.bannedWords, 500),
     igFeedEnabled: bool(body.igFeedEnabled, true),
     igStoryEnabled: bool(body.igStoryEnabled, true),
     linkedinEnabled: bool(body.linkedinEnabled, true),
@@ -154,6 +155,7 @@ function publicState(c: CustomerRow) {
       industry: c.industry ?? "", about: c.about ?? "", tone: c.tone, frequency: c.frequency, postTime: c.post_time,
       accentColor: c.accent_color ?? "", watermarkText: c.watermark_text ?? "",
       avoidTopics: c.avoid_topics ?? "", ctaPreference: c.cta_preference ?? "link_bio",
+      bannedWords: c.banned_words ?? "",
       trialEndsAt: c.trial_ends_at,
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
@@ -293,13 +295,13 @@ export function createPanelRouter(): Router {
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
-         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language,
+         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
-      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null,
       sha256(randomToken()), now, now, now);
     setContentPillars(id, data.contentPillars);
     startSession(res, id);
@@ -322,12 +324,12 @@ export function createPanelRouter(): Router {
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
-         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, updated_at=?
+         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
-      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null,
       nowIso(), c.id);
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));

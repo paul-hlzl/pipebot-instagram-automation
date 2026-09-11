@@ -128,6 +128,9 @@ migrateColumns("customers", [
   // admin's status column: a paused customer can still log in and see their dashboard, they
   // just stop being posted for until they resume it themselves.
   ["customer_paused", "INTEGER NOT NULL DEFAULT 0"],
+  // Hard-enforced, comma-separated - distinct from the existing soft avoid_topics (an AI
+  // instruction the routine may or may not follow perfectly). NULL/empty = no restriction.
+  ["banned_words", "TEXT"],
 ]);
 
 migrateColumns("posts", [
@@ -160,6 +163,7 @@ export interface CustomerRow {
   emojis_enabled: number;
   language: string;
   customer_paused: number;
+  banned_words: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;
