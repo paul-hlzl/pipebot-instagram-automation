@@ -16,7 +16,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 4 | Pflicht-Elemente | ✅ erledigt |
 | 5 | Granulare Zeitplanung | ✅ Code fertig, ⚠️ Weekday-Picker nicht im Browser getestet |
 | 6 | "Jetzt posten"-Button | ✅ Code fertig, ⚠️ Panel-Button nicht im Browser getestet |
-| 7 | Freigabe-Modus | ⏳ offen |
+| 7 | Freigabe-Modus | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
 | 8 | Mehrere Farbthemen | ⏳ offen |
 | 9 | Eigenes Logo | ⏳ offen |
 | 10 | Abschluss & Deploy | ⏳ offen |
@@ -204,28 +204,84 @@ nicht in einem echten Browser angeklickt, nur die API dahinter (siehe oben).
 ## Routine-Prompt-Text - Entwurf (wird nach jeder weiteren Aufgabe ergänzt, komplette Fassung in Aufgabe 11)
 
 ```
-Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Bei jedem Lauf:
+Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Bei jedem Lauf,
+IN DIESER REIHENFOLGE:
 
-1. Rufe `list_post_requests` auf und arbeite JEDE offene Anfrage zuerst ab, bevor du mit der
+1. Rufe `list_approved_pending_posts` auf. Für jeden Eintrag: veröffentliche ihn mit dem
+   passenden Publish-Tool (`publish_generated_post` für ig_feed-Provider "instagram" ohne
+   weitere Kennzeichnung, `publish_generated_story` falls als Story markiert, LinkedIn-Tools
+   für Provider "linkedin"), unter Verwendung von `imageUrl`/`caption`/`headline`, mit
+   `customerId` als `customer_id` und `pillarTitle` als `pillar_title`. Nach Erfolg:
+   `mark_pending_approval_published` mit der `id` aufrufen.
+2. Rufe `list_post_requests` auf und arbeite JEDE offene Anfrage ab, bevor du mit der
    regulären Kundenliste weitermachst - ein Kunde, der explizit "jetzt posten" gedrückt hat,
    soll nicht hinter der normalen Zeitplanung warten. Nutze `topic` als Thema (fällt es leer
-   aus: nutze das übliche Briefing/die Content-Säulen des Kunden). Nach erfolgreicher
-   Veröffentlichung: `mark_post_request_done` mit der `id` aufrufen - nie doppelt bearbeiten.
-2. Rufe `list_customers` auf. Überspringe einen Kunden, wenn `trialExpired` true ist ODER
+   aus: nutze das übliche Briefing/die Content-Säulen des Kunden). Prüfe für diesen Kunden
+   trotzdem `approvalMode` (Schritt 5) - eine "Jetzt posten"-Anfrage überspringt NICHT die
+   Freigabe. Nach erfolgreicher Veröffentlichung (oder erfolgreichem Einreichen zur Freigabe):
+   `mark_post_request_done` mit der `id` aufrufen - nie doppelt bearbeiten.
+3. Rufe `list_customers` auf. Überspringe einen Kunden, wenn `trialExpired` true ist ODER
    `dueNow` false ist.
-3. Rufe für jeden fälligen Kunden `get_customer_style_samples` auf, um Tonfall/Hashtag-Stil
+4. Rufe für jeden fälligen Kunden `get_customer_style_samples` auf, um Tonfall/Hashtag-Stil
    zu übernehmen, sofern vorhanden.
-4. Prüfe `contentPillars`/`suggestedPillar`: ist `suggestedPillar` gesetzt, formuliere das
-   Thema danach und gib den exakten `title` als `pillar_title` beim Publish-Tool mit. Sonst
-   nutze `about` wie bisher.
-5. Prüfe `bannedWords`/`requiredElements`: baue verbotene Wörter gar nicht erst ein, Pflicht-
-   Elemente immer ein. Schlägt ein Publish-Tool trotzdem mit einer entsprechenden Fehlermeldung
-   fehl, formuliere die Caption angepasst um und versuche es genau einmal erneut - gib nicht
-   nach dem ersten Fehlversuch auf.
-6. Veröffentliche entsprechend `igFeedEnabled`/`igStoryEnabled`/`linkedinEnabled`.
+5. Prüfe `contentPillars`/`suggestedPillar`: ist `suggestedPillar` gesetzt, formuliere das
+   Thema danach und gib den exakten `title` als `pillar_title` mit. Sonst nutze `about`.
+6. Prüfe `bannedWords`/`requiredElements`: baue verbotene Wörter gar nicht erst ein, Pflicht-
+   Elemente immer ein. Schlägt ein Tool trotzdem mit einer entsprechenden Fehlermeldung fehl,
+   formuliere die Caption angepasst um und versuche es genau einmal erneut - gib nicht nach
+   dem ersten Fehlversuch auf.
+7. **Prüfe `approvalMode` für diesen Kunden, BEVOR du veröffentlichst:**
+   - `approvalMode: false` (Standard) → wie bisher: `publish_generated_post`/
+     `publish_generated_story`/LinkedIn-Tools direkt aufrufen.
+   - `approvalMode: true` → NIE direkt veröffentlichen. Stattdessen `save_pending_approval`
+     mit `customer_id`, `channel` (ig_feed/ig_story/linkedin), `headline`, `caption`,
+     `image_url`, `pillar_title` aufrufen. Der Kunde entscheidet im Panel selbst, ob und wann
+     es veröffentlicht wird - das übernimmt erst ein SPÄTERER Lauf über Schritt 1.
+8. Veröffentliche (bzw. reiche zur Freigabe ein) entsprechend `igFeedEnabled`/
+   `igStoryEnabled`/`linkedinEnabled`.
 ```
 
-*(wird nach Aufgabe 7 um approval_mode/pending_approvals ergänzt.)*
+## Aufgabe 7 – Freigabe-Modus ✅ Code / ⚠️ Panel-Teil-Browser-Test steht aus
+
+**Erledigt:**
+- Neue Spalte `approval_mode` (0/1, Default 0), neue Tabelle `pending_approvals` (id,
+  customer_id, provider, headline, caption, image_url, pillar_title, status, Zeitstempel).
+  Additiv.
+- **Bewusste Design-Entscheidung, genau wie im Aufgabentext vorgegeben:** kein serverseitiges
+  Abfangen von `generate_and_publish_post` & Co. - die Routine selbst entscheidet anhand von
+  `approvalMode` aus `list_customers`, ob sie ein normales Publish-Tool oder das neue
+  `save_pending_approval` aufruft. Das hält die bestehenden Tools unverändert (Rückwärts-
+  kompatibilität) und vermeidet überraschendes verstecktes Verhalten.
+- Drei neue MCP-Tools:
+  - `save_pending_approval` (customer_id, channel, headline, caption, image_url, pillar_title) -
+    prüft **dieselben** Banned-Words-/Pflicht-Elemente-Regeln wie die echten Publish-Tools
+    (schlägt fehl, bevor der Kunde etwas zur Freigabe sieht, das ohnehin nie veröffentlicht
+    werden könnte), schreibt dann nach `pending_approvals` mit Status `pending`.
+  - `list_approved_pending_posts` - alle vom Kunden bereits freigegebenen (`status='approved'`)
+    Beiträge über alle Kunden, älteste zuerst.
+  - `mark_pending_approval_published` - Statuswechsel auf `published`, verhindert erneutes
+    Veröffentlichen beim nächsten Lauf.
+- Panel-Endpunkte: `GET /api/approvals` (eigene `pending`, mit Session), `POST
+  /api/approvals/:id/approve` und `/:id/reject` - **veröffentlichen selbst nichts**, setzen nur
+  den Status (scoped auf den eigenen Kunden, ein Kunde kann nie die Anfrage eines anderen
+  anfassen).
+- Panel: neuer Umschalter "Beiträge vor Veröffentlichung freigeben" in den Kanal-Einstellungen;
+  neuer Dashboard-Bereich "Warten auf Ihre Freigabe" (nur sichtbar, wenn `approvalMode` an ist)
+  mit Bild-Vorschau, Text, Freigeben-/Ablehnen-Buttons.
+- **Kompletter Ablauf einmal end-to-end gegen Staging durchgespielt** (nicht nur einzelne
+  Teile): `save_pending_approval` (mit `approvalMode:true`-Testkunde) → erscheint unter `GET
+  /api/approvals` → `POST .../approve` → verschwindet aus `/api/approvals` → erscheint unter
+  `list_approved_pending_posts` → `mark_pending_approval_published` → Status in der DB
+  tatsächlich `published`. Jeder Schritt hat funktioniert.
+- `npm run test:panel` erweitert (HTTP-Seite: approvalMode speichern, `/api/approvals` leer/
+  401/404-Fälle - die MCP-Tool-Seite lässt sich in diesem reinen HTTP-Testskript nicht sauber
+  abbilden, wurde stattdessen wie oben beschrieben manuell verifiziert). **59 passed, 0
+  failed.**
+
+**⚠️ Gleiche Einschränkung wie die übrigen v4-UI-Arbeiten:** der Umschalter und der neue
+Dashboard-Bereich wurden nicht in einem echten Browser angeklickt.
+
+**Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
 
 ---
 *(wird fortgesetzt)*

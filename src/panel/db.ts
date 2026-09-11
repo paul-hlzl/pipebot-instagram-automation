@@ -95,6 +95,20 @@ CREATE TABLE IF NOT EXISTS post_requests (
 );
 CREATE INDEX IF NOT EXISTS post_requests_customer ON post_requests(customer_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS pending_approvals (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  headline TEXT,
+  caption TEXT,
+  image_url TEXT,
+  pillar_title TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pending_approvals_customer ON pending_approvals(customer_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS content_pillars (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -152,6 +166,8 @@ migrateColumns("customers", [
   ["linkedin_weekdays", "TEXT"],
   ["pause_from", "TEXT"],
   ["pause_until", "TEXT"],
+  // Default 0 (off) - existing customers keep the current auto-publish behavior exactly.
+  ["approval_mode", "INTEGER NOT NULL DEFAULT 0"],
 ]);
 
 migrateColumns("posts", [
@@ -191,6 +207,7 @@ export interface CustomerRow {
   linkedin_weekdays: string | null;
   pause_from: string | null;
   pause_until: string | null;
+  approval_mode: number;
   login_key_hash: string;
   status: string;
   consent_at: string;
@@ -230,6 +247,19 @@ export interface ContentPillarRow {
   description: string | null;
   weight: number;
   active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PendingApprovalRow {
+  id: string;
+  customer_id: string;
+  provider: string;
+  headline: string | null;
+  caption: string | null;
+  image_url: string | null;
+  pillar_title: string | null;
+  status: string;
   created_at: string;
   updated_at: string;
 }

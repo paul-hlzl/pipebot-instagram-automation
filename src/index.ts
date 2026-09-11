@@ -23,9 +23,12 @@ import {
   getCredentials,
   getCustomerOverview,
   listCustomers,
+  listApprovedPendingPosts,
   listOpenPostRequests,
   logPost,
+  markPendingApprovalPublished,
   markPostRequestDone,
+  savePendingApproval,
   setCachedStyleSamples,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
@@ -710,6 +713,90 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
+    "save_pending_approval",
+    {
+      description:
+        "Files a generated post away for the customer to review and approve in their panel, INSTEAD of publishing " +
+        "it. Use this - never a publish_* tool - whenever `list_customers` shows `approvalMode: true` for this " +
+        "customer; that check is the routine's own responsibility, nothing on the server redirects a publish " +
+        "call automatically. Still runs the same banned-word/required-element checks as the publish tools (fails " +
+        "fast instead of showing the customer a caption that could never actually go out). The customer approves " +
+        "or rejects it in their dashboard; once approved, it shows up in `list_approved_pending_posts` for you " +
+        "to actually publish on a later run.",
+      inputSchema: {
+        customer_id: z.string().describe("customerId - required, this tool only makes sense for a specific approval_mode customer."),
+        channel: z.enum(["ig_feed", "ig_story", "linkedin"]).describe("Which format/channel this post is intended for."),
+        headline: z.string().optional().describe("The headline used on the image, if any."),
+        caption: z.string().optional().describe("The caption/post text the customer will review."),
+        image_url: z.string().optional().describe("The generated image URL, if any (e.g. from generate_post_image)."),
+        pillar_title: pillarTitleSchema,
+      },
+    },
+    async ({ customer_id, channel, headline, caption, image_url, pillar_title }) => {
+      try {
+        assertChannelEnabled(customer_id, channel);
+        assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
+        const provider = channel === "linkedin" ? "linkedin" : "instagram";
+        const approval = savePendingApproval({
+          customerId: customer_id,
+          provider,
+          headline,
+          caption,
+          imageUrl: image_url,
+          pillarTitle: pillar_title,
+        });
+        return textResult(approval);
+      } catch (error) {
+        console.error("save_pending_approval:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_approved_pending_posts",
+    {
+      description:
+        "Lists posts across all customers that were saved via `save_pending_approval` and have since been " +
+        "approved by the customer in their panel (status 'approved') - these are ready to actually publish. For " +
+        "each one, call the matching publish tool (`publish_generated_post` for ig_feed, `publish_generated_story` " +
+        "for ig_story, the LinkedIn tools for linkedin) using its `imageUrl`/`caption`/`headline`, with that " +
+        "entry's `customerId` as `customer_id` and `pillarTitle` as `pillar_title`. After a successful publish, " +
+        "call `mark_pending_approval_published` with its `id` so it isn't published again next run. Process " +
+        "these before the regular `list_customers`/`dueNow` loop, same priority as `list_post_requests`.",
+    },
+    async () => {
+      try {
+        return textResult({ approvals: listApprovedPendingPosts() });
+      } catch (error) {
+        console.error("list_approved_pending_posts:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_pending_approval_published",
+    {
+      description:
+        "Marks one approved pending post (from `list_approved_pending_posts`) as published, after you've " +
+        "actually published it. Has no effect on publishing itself - purely bookkeeping so it isn't published " +
+        "again on a later run.",
+      inputSchema: { id: z.string().describe("The `id` of the approval, from `list_approved_pending_posts`.") },
+    },
+    async ({ id }) => {
+      try {
+        const ok = markPendingApprovalPublished(id);
+        return textResult({ ok });
+      } catch (error) {
+        console.error("mark_pending_approval_published:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "list_customers",
     {
       description:
@@ -745,6 +832,10 @@ function createServer(): McpServer {
         "somewhere across the headline+caption combined (e.g. a mandatory hashtag or handle), or the publish " +
         "tools refuse with a clear error naming what's missing. Include every required element yourself before " +
         "publishing; on a missing-element error, add it and retry once rather than giving up. " +
+        "Each customer also has `approvalMode` (boolean) - when true, NEVER call a publish_* tool for them " +
+        "directly; call `save_pending_approval` instead so they can review it first (see that tool's " +
+        "description), and separately check `list_approved_pending_posts` each run for posts they already " +
+        "approved that are ready to actually publish. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },

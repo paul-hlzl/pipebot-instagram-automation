@@ -2,7 +2,17 @@
  * Schnittstelle zwischen Kunden-Panel und MCP-Tools.
  * MCP-Tools holen sich Tokens NUR über diese Datei – nie direkt aus der DB.
  */
-import { db, nowIso, cleanupExpired, type ConnectionRow, type ContentPillarRow, type CustomerRow, type PostRequestRow, type PostRow } from "./db.js";
+import {
+  db,
+  nowIso,
+  cleanupExpired,
+  type ConnectionRow,
+  type ContentPillarRow,
+  type CustomerRow,
+  type PendingApprovalRow,
+  type PostRequestRow,
+  type PostRow,
+} from "./db.js";
 import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
@@ -88,6 +98,8 @@ export interface CustomerOverview {
   contentPillars: ContentPillar[];
   /** This call's weighted pick among contentPillars, avoiding whatever pillar the last post used. Null when contentPillars is empty. */
   suggestedPillar: ContentPillar | null;
+  /** When true, the routine must call `save_pending_approval` instead of a publish tool for this customer - see list_customers' tool description. */
+  approvalMode: boolean;
   channels: ChannelOverview[];
 }
 
@@ -151,6 +163,7 @@ function overview(c: CustomerRow): CustomerOverview {
     customerPaused: Boolean(c.customer_paused),
     contentPillars: listContentPillars(c.id),
     suggestedPillar: pickPillarForToday(c.id),
+    approvalMode: Boolean(c.approval_mode),
     channels: channelsFor(c.id),
   };
 }
@@ -535,6 +548,88 @@ export function listOpenPostRequests(): PostRequest[] {
 /** Marks a request done once the routine has fulfilled it. Returns false if the id doesn't exist (already handled by someone else, or invalid). */
 export function markPostRequestDone(id: string): boolean {
   const result = db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
+  return result.changes > 0;
+}
+
+export interface PendingApproval {
+  id: string;
+  customerId: string;
+  provider: string;
+  headline: string | null;
+  caption: string | null;
+  imageUrl: string | null;
+  pillarTitle: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toPendingApproval(r: PendingApprovalRow): PendingApproval {
+  return {
+    id: r.id,
+    customerId: r.customer_id,
+    provider: r.provider,
+    headline: r.headline,
+    caption: r.caption,
+    imageUrl: r.image_url,
+    pillarTitle: r.pillar_title,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/**
+ * Used by `save_pending_approval` (the MCP tool) when a customer has `approval_mode` on -
+ * files a generated post away for the customer to review in their panel instead of
+ * publishing it. Whether to call this instead of a publish tool is the routine's own decision
+ * (based on `approvalMode` from list_customers) - nothing here intercepts the publish tools.
+ */
+export function savePendingApproval(input: {
+  customerId: string;
+  provider: string;
+  headline?: string;
+  caption?: string;
+  imageUrl?: string;
+  pillarTitle?: string;
+}): PendingApproval {
+  const id = `appr_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO pending_approvals (id, customer_id, provider, headline, caption, image_url, pillar_title, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(id, input.customerId, input.provider, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, now, now);
+  return toPendingApproval(
+    db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow,
+  );
+}
+
+/** A customer's own pending_approvals in a given status ("pending" for the review UI), newest first. */
+export function listPendingApprovalsForCustomer(customerId: string, status: string = "pending"): PendingApproval[] {
+  const rows = db
+    .prepare("SELECT * FROM pending_approvals WHERE customer_id = ? AND status = ? ORDER BY created_at DESC")
+    .all(customerId, status) as PendingApprovalRow[];
+  return rows.map(toPendingApproval);
+}
+
+/** Sets one of a customer's own pending_approvals to a new status (approve/reject) - scoped to that customer, so one customer can never touch another's. Returns null if not found/not theirs/not pending. */
+export function setPendingApprovalStatus(customerId: string, id: string, status: "approved" | "rejected"): PendingApproval | null {
+  const result = db
+    .prepare("UPDATE pending_approvals SET status = ?, updated_at = ? WHERE id = ? AND customer_id = ? AND status = 'pending'")
+    .run(status, nowIso(), id, customerId);
+  if (result.changes === 0) return null;
+  return toPendingApproval(db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow);
+}
+
+/** All customer-approved posts across all customers, oldest first - what `list_approved_pending_posts` (the MCP tool) returns for the routine to actually publish + logPost, then mark done via `mark_pending_approval_published`. */
+export function listApprovedPendingPosts(): PendingApproval[] {
+  const rows = db.prepare("SELECT * FROM pending_approvals WHERE status = 'approved' ORDER BY created_at").all() as PendingApprovalRow[];
+  return rows.map(toPendingApproval);
+}
+
+/** Marks an approved pending_approval as published once the routine has actually published it - stops it from being returned by list_approved_pending_posts again. */
+export function markPendingApprovalPublished(id: string): boolean {
+  const result = db.prepare("UPDATE pending_approvals SET status = 'published', updated_at = ? WHERE id = ? AND status = 'approved'").run(nowIso(), id);
   return result.changes > 0;
 }
 

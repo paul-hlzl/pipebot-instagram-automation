@@ -262,6 +262,31 @@ async function main() {
     ok("post-now ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
   }
 
+  // --- 3e. Freigabe-Modus (approval_mode, v4) - HTTP-Seite. Der volle Roundtrip inkl. der 3
+  // neuen MCP-Tools (save_pending_approval/list_approved_pending_posts/
+  // mark_pending_approval_published) wurde manuell gegen Staging verifiziert (siehe Report),
+  // MCP-Tool-Aufrufe lassen sich in diesem reinen HTTP-Testskript nicht sauber abbilden.
+  console.log("\nFreigabe-Modus:");
+  {
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", approvalMode: true }),
+    });
+    const patchBody = await patchRes.json();
+    ok("approvalMode wird gespeichert", patchBody.customer?.approvalMode === true, patchBody.customer?.approvalMode);
+
+    const approvalsRes = await fetch(`${BASE}${MOUNT}/api/approvals`, { headers: { cookie: sessionCookie } });
+    const approvalsBody = await approvalsRes.json();
+    ok("/api/approvals mit Login -> 200, leeres Array", approvalsRes.status === 200 && Array.isArray(approvalsBody.approvals) && approvalsBody.approvals.length === 0);
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/approvals`);
+    ok("/api/approvals ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/approvals/does-not-exist/approve`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Freigeben einer nicht existierenden Anfrage -> 404", approveRes.status === 404, `status=${approveRes.status}`);
+  }
+
   // --- 4a. POST /api/pause (customer's own pause toggle) ---
   console.log("\nPausieren:");
   {

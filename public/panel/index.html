@@ -109,6 +109,13 @@
   .post-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 16px 0 8px; }
   .post-grid img, .post-grid .ph { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--wash); display: block; }
 
+  .approval-card { display: flex; gap: 16px; border: 1px solid var(--rule); border-radius: 2px; padding: 16px; margin-bottom: 12px; }
+  .approval-card img, .approval-card .ph { width: 96px; height: 96px; object-fit: cover; border-radius: 2px; background: var(--wash); flex: none; }
+  .approval-card .approval-body { flex: 1; min-width: 0; }
+  .approval-card .approval-body p { color: var(--stone); font-size: 14px; }
+  .approval-card .actions { margin-top: 10px; }
+  @media (max-width: 480px) { .approval-card { flex-direction: column; } .approval-card img, .approval-card .ph { width: 100%; height: auto; aspect-ratio: 1; } }
+
   .cal { margin: 16px 0 8px; }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   .cal-grid .hd { font-size: 11px; color: var(--stone); text-align: center; padding-bottom: 4px; }
@@ -520,6 +527,7 @@
           <label class="check"><input type="checkbox" name="linkedinEnabled" ${c.linkedinEnabled !== false ? "checked" : ""}><span>LinkedIn-Beiträge</span></label>
           <p class="hint">Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.</p>
         </div>
+        <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben - bevor etwas online geht, prüfen Sie es im Dashboard und geben es frei.</span></label>
         <div class="grid2">
           <div class="field">
             <label for="f-hashtagPreference">Hashtags</label>
@@ -696,6 +704,8 @@
         <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
         <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
       </div>
+      ${c.approvalMode ? `<h2>Warten auf Ihre Freigabe</h2>
+      <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
       <h2>Jetzt posten</h2>
       <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wir übernehmen das beim nächsten Lauf.</p>
       ${postNowStatusHtml(c.lastPostRequest)}
@@ -765,6 +775,30 @@
       if (postsBox) postsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
       if (calBox) calBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
     }
+
+    const approvalsBox = $("#dash-approvals");
+    if (approvalsBox) {
+      try {
+        const { approvals } = await api("GET", "/api/approvals");
+        approvalsBox.innerHTML = approvals.length ? approvals.map(approvalCardHtml).join("") : `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch {
+        approvalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
+      }
+    }
+  }
+
+  function approvalCardHtml(a) {
+    return `<div class="approval-card" data-approval-id="${esc(a.id)}">
+      ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : `<div class="ph"></div>`}
+      <div class="approval-body">
+        ${a.headline ? `<strong>${esc(a.headline)}</strong>` : ""}
+        ${a.caption ? `<p>${esc(a.caption)}</p>` : ""}
+        <div class="actions">
+          <button class="btn" data-approve="${esc(a.id)}">Freigeben</button>
+          <button class="link" data-reject="${esc(a.id)}">Ablehnen</button>
+        </div>
+      </div>
+    </div>`;
   }
 
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
@@ -940,6 +974,25 @@
       return;
     }
 
+    const approveBtn = e.target.closest("[data-approve]");
+    const rejectBtn = e.target.closest("[data-reject]");
+    if (approveBtn || rejectBtn) {
+      const btn = approveBtn || rejectBtn;
+      const id = btn.dataset.approve || btn.dataset.reject;
+      const action = approveBtn ? "approve" : "reject";
+      if (action === "reject" && !confirm("Diesen Beitrag ablehnen? Er wird dann nicht veröffentlicht.")) return;
+      btn.classList.add("busy");
+      try {
+        await api("POST", `/api/approvals/${id}/${action}`);
+        btn.closest(".approval-card")?.remove();
+        const box = $("#dash-approvals");
+        if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch (err) {
+        alert(err.message || "Aktion fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#post-now-btn")) {
       const btn = e.target.closest("#post-now-btn");
       const topic = $("#f-postNowTopic")?.value || "";
@@ -1042,6 +1095,7 @@
     body.igStoryEnabled = !!form.igStoryEnabled?.checked;
     body.linkedinEnabled = !!form.linkedinEnabled?.checked;
     body.emojisEnabled = !!form.emojisEnabled?.checked;
+    body.approvalMode = !!form.approvalMode?.checked;
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
@@ -1189,6 +1243,8 @@
       MOCK.customer = { ...MOCK.customer, customerPaused: body.paused === true, dueNow: body.paused === true ? false : MOCK.customer.dueNow };
       return mockState();
     }
+    if (url === "/api/approvals") return { approvals: [] };
+    if (/^\/api\/approvals\/.+\/(approve|reject)$/.test(url)) return { ok: true };
     if (url === "/api/post-now") {
       const request = { id: "preq_demo", topic: body.topic || "", status: "pending", createdAt: new Date().toISOString() };
       MOCK.customer = { ...MOCK.customer, lastPostRequest: request };
