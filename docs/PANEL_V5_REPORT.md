@@ -10,9 +10,9 @@ Sicherheitsnetz: Tag `pre-panel-v5` auf dem Stand vor dieser Sitzung, Branch `pa
 - [x] Aufgabe 1 - Sicherheitsnetz (Tag + Branch)
 - [x] Aufgabe 2 - "KI-Ideen"-Button beim "Jetzt posten"-Thema-Feld (Commit c3c26cd)
 - [x] Aufgabe 3 - Datenmodell `planned_posts` (Commit c2b6b4c)
-- [x] Aufgabe 4 - Serverseitige tägliche Vorausplanung
-- [ ] Aufgabe 5 - Panel-Oberfläche "Vorschau"
-- [ ] Aufgabe 6 - K1-K9-Routinen-Ergänzung (docs/ROUTINE_TEIL1_V5.md)
+- [x] Aufgabe 4 - Serverseitige tägliche Vorausplanung (Commit 6d521bf)
+- [x] Aufgabe 5 - Panel-Oberfläche "Vorschau" (Commit 699ca65)
+- [x] Aufgabe 6 - K1-K9-Routinen-Ergänzung (Server: Commit 2bb304b; Text: docs/ROUTINE_TEIL1_V5.md)
 - [ ] Aufgabe 7 - Abschluss und Deploy
 
 ## Entscheidungen
@@ -60,6 +60,15 @@ Codes (alles andere ist auch DB-basiert), leicht abfragbar für einen künftigen
 Neustart zu einer zufälligen Tageszeit den Lauf dauerhaft auf diese Zeit verschieben. 03:00 UTC
 liegt weit außerhalb des 14:30-15:45-UTC-Blackouts und trifft keine volle Stunde (Kunden-Loop).
 
+**Aufgabe 5 - `scheduled_for` in Vienna- statt UTC-Kalendertagen:** Die Aufgabenstellung nennt
+"UTC-Datum als YYYY-MM-DD". Die gesamte bestehende Zeitplanungs-Logik (`schedule.ts`: Wochentage,
+Pause-Bereiche, `isDue`/`isDueForChannel`) arbeitet aber durchgängig in Europe/Vienna-Kalendertagen
+- ein UTC-Datum hätte nahe der Mitternachtsgrenze gelegentlich vom Vienna-Tag abgewichen (z. B.
+1 Uhr UTC = 2 oder 3 Uhr Vienna, schon der nächste Kalendertag), was zu falschen
+Pause-Bereichs-Treffern oder einem scheinbar falschen Wochentag geführt hätte. Bewusst abgewichen:
+`scheduled_for` ist ein Vienna-Kalendertag (`viennaDateStr()`), konsistent mit `pauseFrom`/
+`pauseUntil` und den Wochentag-Feldern.
+
 ## Bekannte Risiken / offene Punkte
 
 - Aufgabe 4 wurde mit einem echten, aber bewusst auf 1 Kunde/1 Kanal/1 Tag eingeschränkten Lauf
@@ -68,7 +77,38 @@ liegt weit außerhalb des 14:30-15:45-UTC-Blackouts und trifft keine volle Stund
   Kanälen/vollen 7 Tagen wurde NICHT ausprobiert (Kosten) - das reale Anlaufverhalten (Laufzeit,
   Fehlerquote bei echten, unterschiedlich konfigurierten Kunden) zeigt sich erst im echten Betrieb
   um 03:00 UTC. `planning_errors` sammelt Fehler, ohne den Lauf abzubrechen.
+- **Aufgabe 5 (Vorschau-UI) wurde NICHT in einem echten Browser getestet** - in dieser Sitzung
+  stand kein Browser-Werkzeug zur Verfügung. Backend (alle Endpunkte inkl. Validierung,
+  Kostendeckel, Freigabe-Gate) ist per Black-Box-HTTP-Tests (11 neue, 84/84 gesamt) verifiziert;
+  reine JS-Syntax wurde geprüft. Was NICHT geprüft wurde: tatsächliches Rendering, CSS-Layout
+  (insbesondere die Karten auf Mobilgeräten), Klick-Interaktionen im echten DOM, das
+  Zusammenspiel von `previewSelectedDate` mit `renderPreview()` bei schnellem Tage-Wechsel. Bitte
+  vor dem ersten echten Kundenzugriff einmal manuell durchklicken.
+
+**Aufgabe 6 - "K0" umbenannt/umplatziert zu "K3b":** Die Aufgabenstellung wollte den neuen Check
+als "Schritt K0, vor K1". Das würde die Kern-Anforderung selbst brechen: der Check braucht die
+"ist dieser Kunde/Kanal heute fällig"-Information aus K3, und der wichtigste Fall
+(status='rejected' → nicht spontan neu generieren) funktioniert nur, wenn der Check an genau der
+Stelle sitzt, wo sonst die spontane Generierung ausgelöst würde - sonst würde K3 hinterher, ohne
+von der Entscheidung zu wissen, trotzdem spontan generieren. Als "K3b" direkt in K3s Schleife
+platziert, vor K4. Vollständige Begründung in docs/ROUTINE_TEIL1_V5.md.
+
+**Aufgabe 6 - approvalMode-Kunden nutzen einen noch nicht freigegebenen vorbereiteten Beitrag
+NICHT wieder:** Exakt wie in der Aufgabenstellung verlangt ("unverändert zum jetzigen
+Verhalten") - K4-K8 generiert für diese Kunden weiterhin komplett neu, bis der Kunde im Panel
+freigibt. Als bekannte Einschränkung dokumentiert (siehe unten), nicht stillschweigend anders
+gelöst.
 
 ## Was Paul manuell tun muss
 
-(wird nach Aufgabe 6 befüllt: die Ergänzung für die K1-K9-Routine)
+1. **Die K1-K9-Routine bei claude.ai ergänzen** - genaue Anleitung inkl. des einzufügenden Texts
+   in `docs/ROUTINE_TEIL1_V5.md` (nicht hier im Chat, siehe Regel 11). Kurzfassung: ein neuer
+   Absatz "K3b" wird zwischen dem Ende von K3 und dem Anfang von K4 eingefügt. Ohne diese
+   Ergänzung läuft die Routine unverändert weiter (Rückwärtskompatibilität ist gegeben - siehe
+   Regel 6), die Vorausplanung/Vorschau würde dann aber nie tatsächlich genutzt, nur angezeigt.
+2. Die tägliche Vorausplanung läuft automatisch (03:00 UTC), sobald die Produktion neu gestartet
+   ist - keine manuelle Aktion nötig, aber der erste echte Lauf mit allen Kunden/Kanälen/7 Tagen
+   war in dieser Sitzung nicht beobachtbar (siehe Risiken). Ein Blick in `planning_errors` (DB-
+   Tabelle) nach dem ersten Lauf ist sinnvoll.
+3. Die "Vorschau"-Oberfläche im Panel bitte einmal selbst im Browser durchklicken (kein
+   Browser-Werkzeug in dieser Sitzung verfügbar, siehe Risiken).
