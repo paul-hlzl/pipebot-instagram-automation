@@ -233,6 +233,8 @@
   const TONES = { sachlich: "Sachlich und kompetent", locker: "Locker und nahbar", inspirierend: "Inspirierend", humorvoll: "Mit Humor" };
   const FREQ = { "3x-woche": "3× pro Woche", werktags: "Werktags", taeglich: "Täglich" };
   const CTAS = { link_bio: "Link in der Bio", anrufen: "Anrufen", nachricht: "Nachricht senden", termin: "Termin buchen", keiner: "Kein Aufruf" };
+  const HASHTAGS = { keine: "Keine", wenige: "Wenige (2-3)", viele: "Viele (5+)" };
+  const LANGUAGES = { de: "Deutsch", en: "Englisch" };
   const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
 
   const ERRORS = {
@@ -310,7 +312,10 @@
   }
 
   function companyHtml() {
-    const c = S.customer || { tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio" };
+    const c = S.customer || {
+      tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
+      igFeedEnabled: true, igStoryEnabled: true, linkedinEnabled: true, hashtagPreference: "wenige", emojisEnabled: true, language: "de",
+    };
     const edit = !!S.customer;
     const f = (name, label, type, opts = {}) => `
       <div class="field">
@@ -377,6 +382,24 @@
             <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
           </div>
         </div>
+        <div class="field">
+          <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
+          <label class="check"><input type="checkbox" name="igFeedEnabled" ${c.igFeedEnabled !== false ? "checked" : ""}><span>Instagram Feed-Beiträge</span></label>
+          <label class="check"><input type="checkbox" name="igStoryEnabled" ${c.igStoryEnabled !== false ? "checked" : ""}><span>Instagram Storys</span></label>
+          <label class="check"><input type="checkbox" name="linkedinEnabled" ${c.linkedinEnabled !== false ? "checked" : ""}><span>LinkedIn-Beiträge</span></label>
+          <p class="hint">Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.</p>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label for="f-hashtagPreference">Hashtags</label>
+            <select id="f-hashtagPreference" name="hashtagPreference">${Object.entries(HASHTAGS).map(([k, v]) => `<option value="${k}" ${(c.hashtagPreference || "wenige") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+          </div>
+          <div class="field">
+            <label for="f-language">Sprache der Beiträge</label>
+            <select id="f-language" name="language">${Object.entries(LANGUAGES).map(([k, v]) => `<option value="${k}" ${(c.language || "de") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" name="emojisEnabled" ${c.emojisEnabled !== false ? "checked" : ""}><span>Emojis in Beiträgen verwenden</span></label>
         ${edit ? "" : `
         <label class="check"><input type="checkbox" name="consent" id="f-consent">
           <span>Ich stimme zu, dass Pipeline AI Solutions meine Angaben und die Freigaben der verbundenen Konten speichert, um in meinem Namen Beiträge zu veröffentlichen. Ich kann das jederzeit widerrufen. <a href="${esc(CONFIG.privacyUrl)}" target="_blank" rel="noopener">Datenschutzerklärung</a></span>
@@ -660,6 +683,12 @@
     const body = Object.fromEntries(fd.entries());
     const edit = !!S.customer;
     if (!edit) body.consent = !!form.consent?.checked;
+    // FormData omits unchecked boxes entirely (rather than sending false), so read these
+    // directly off the elements instead of trusting fd.entries() for them.
+    body.igFeedEnabled = !!form.igFeedEnabled?.checked;
+    body.igStoryEnabled = !!form.igStoryEnabled?.checked;
+    body.linkedinEnabled = !!form.linkedinEnabled?.checked;
+    body.emojisEnabled = !!form.emojisEnabled?.checked;
 
     form.querySelectorAll(".err").forEach((n) => n.remove());
     form.querySelectorAll("[aria-invalid]").forEach((n) => n.removeAttribute("aria-invalid"));

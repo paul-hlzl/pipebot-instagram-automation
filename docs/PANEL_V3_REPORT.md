@@ -16,7 +16,7 @@ um zu sehen, wo der Stand ist.
 | 4 | Posting-Rhythmus (isDue) | ✅ erledigt (Code) – Routine-Umstellung durch Paul nötig |
 | 5 | "Mit KI verbessern" | ✅ Code fertig, ⚠️ ANTHROPIC_API_KEY fehlt (Feature bleibt bis dahin ausgeblendet) |
 | 6 | Stil aus Instagram-Posts lernen | ✅ erledigt |
-| 7 | Kanal-/Formateinstellungen | ⏳ offen |
+| 7 | Kanal-/Formateinstellungen | ✅ erledigt |
 | 8 | Onboarding aufwerten | ⏳ offen |
 | 9 | Kunden-Dashboard ausbauen | ⏳ offen |
 | 10 | Betrieb absichern (Backup/Health) | ⏳ offen |
@@ -276,6 +276,38 @@ Feature sauber ausgeblendet, keine Fehler im laufenden Betrieb.
 - `npm run test:panel`: weiterhin grün (**32 passed**); ein echter Instagram-API-Aufruf lässt
   sich ohne echten Kunden-Account nicht sinnvoll automatisiert testen - die Cache-Logik selbst
   wurde stattdessen direkt gegen die Staging-DB geprüft (siehe oben).
+
+**Für Paul:** nichts zu tun.
+
+## Aufgabe 7 – Kanal- und Formateinstellungen pro Kunde ✅
+
+**Erledigt:**
+- 6 neue Spalten (additive Migration, mit `DEFAULT`, damit bestehende Kunden exakt beim
+  bisherigen Verhalten bleiben - alles an, `hashtag_pref='wenige'`, `language='de'`):
+  `ig_feed_enabled`, `ig_story_enabled`, `linkedin_enabled`, `hashtag_pref`, `emojis_enabled`,
+  `language`.
+- Panel-Formular (Signup + Bearbeiten): drei Kanal-Checkboxen (Instagram Feed/Story,
+  LinkedIn), Hashtag-Auswahl (keine/wenige/viele), Emoji-Checkbox, Sprache (Deutsch/Englisch).
+  **Bug beim ersten Schreiben bemerkt und behoben:** `FormData` lässt nicht angehakte
+  Checkboxen komplett weg statt `false` zu senden - ohne Gegenmaßnahme hätte Abwählen eines
+  Kanals nie etwas bewirkt. Die vier Checkbox-Felder werden jetzt explizit über
+  `form.<name>.checked` gelesen statt über `FormData`.
+- `list_customers` liefert `igFeedEnabled`/`igStoryEnabled`/`linkedinEnabled`/
+  `hashtagPreference`/`emojisEnabled`/`language` pro Kunde; Tool-Beschreibung weist die
+  Routine an, deaktivierte Kanäle zu überspringen und Captions passend zu Hashtag-/Emoji-/
+  Sprachpräferenz zu schreiben (Hashtag/Emoji/Sprache sind Empfehlungen an die Routine, nicht
+  im Code erzwingbar, da die Routine die Caption-Texte schreibt, nicht dieser Server).
+- **Kanal/Format-Sperre ist im Code erzwungen, nicht nur eine Empfehlung:** neue Funktion
+  `assertChannelEnabled(customerId, "ig_feed"|"ig_story"|"linkedin")` in `credentials.ts`,
+  aufgerufen in allen 6 Publish-Tools (`publish_generated_post`, `generate_and_publish_post`,
+  `publish_generated_story`, `generate_and_publish_story`, `publish_linkedin_post`,
+  `publish_linkedin_image_post`) - bricht mit klarer Fehlermeldung ab, wenn der jeweilige
+  Kanal für den Kunden deaktiviert ist. Mit einem echten Testkunden verifiziert: `ig_story`
+  deaktiviert → blockiert, `ig_feed` weiterhin aktiv → erlaubt.
+- `npm run test:panel`: weiterhin grün (**32 passed**); PATCH-Roundtrip der neuen Felder und
+  die `assertChannelEnabled`-Sperre wurden zusätzlich manuell gegen Staging verifiziert (siehe
+  oben) statt ins Testskript aufgenommen, da beides schon in Aufgabe 1-4 etablierte Muster
+  direkt wiederverwendet - kein neues Risiko.
 
 **Für Paul:** nichts zu tun.
 

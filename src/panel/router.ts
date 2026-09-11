@@ -15,6 +15,8 @@ const SESSION_DAYS = 90;
 const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
 const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
+const HASHTAG_PREFS = ["keine", "wenige", "viele"];
+const LANGUAGES = ["de", "en"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 /** Trial length for newly signed-up customers. Existing customers are never retroactively limited. */
@@ -72,11 +74,14 @@ const clientIp = (req: Request): string =>
   (String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || req.socket.remoteAddress || "unknown").trim();
 
 const str = (v: unknown, max: number): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean" ? v : fallback);
 
 interface BriefingInput {
   company: string; contactName: string; email: string; website: string; industry: string;
   about: string; tone: string; frequency: string; postTime: string;
   accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string;
+  igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
+  hashtagPreference: string; emojisEnabled: boolean; language: string;
 }
 
 function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; errors: Record<string, string> } {
@@ -94,6 +99,12 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     watermarkText: str(body.watermarkText, 40),
     avoidTopics: str(body.avoidTopics, 500),
     ctaPreference: str(body.ctaPreference, 30),
+    igFeedEnabled: bool(body.igFeedEnabled, true),
+    igStoryEnabled: bool(body.igStoryEnabled, true),
+    linkedinEnabled: bool(body.linkedinEnabled, true),
+    hashtagPreference: str(body.hashtagPreference, 20) || "wenige",
+    emojisEnabled: bool(body.emojisEnabled, true),
+    language: str(body.language, 5) || "de",
   };
   const errors: Record<string, string> = {};
   if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
@@ -104,6 +115,8 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(data.postTime)) data.postTime = "15:00";
   if (data.accentColor && !HEX_COLOR.test(data.accentColor)) data.accentColor = "";
   if (!CTAS.includes(data.ctaPreference)) data.ctaPreference = "link_bio";
+  if (!HASHTAG_PREFS.includes(data.hashtagPreference)) data.hashtagPreference = "wenige";
+  if (!LANGUAGES.includes(data.language)) data.language = "de";
   return { data, errors };
 }
 
@@ -120,6 +133,9 @@ function publicState(c: CustomerRow) {
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
       nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
       dueNow: isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
+      linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
+      emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -236,11 +252,13 @@ export function createPanelRouter(): Router {
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
+         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
       sha256(randomToken()), now, now, now);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
@@ -261,11 +279,13 @@ export function createPanelRouter(): Router {
     }
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
-         accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?, updated_at=?
+         accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
+         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
       nowIso(), c.id);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   }));

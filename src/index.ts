@@ -16,6 +16,7 @@ import {
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 import {
+  assertChannelEnabled,
   getCachedStyleSamples,
   getCredentials,
   getCustomerOverview,
@@ -223,6 +224,7 @@ function createServer(): McpServer {
     },
     async ({ imageUrl, caption, customer_id, headline }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_feed");
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
@@ -256,6 +258,7 @@ function createServer(): McpServer {
     },
     async ({ topic, headline, caption, customer_id }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_feed");
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
@@ -357,6 +360,7 @@ function createServer(): McpServer {
     },
     async ({ imageUrl, customer_id, headline }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_story");
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
@@ -389,6 +393,7 @@ function createServer(): McpServer {
     },
     async ({ topic, headline, customer_id }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_story");
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         const published = await publishStoryToInstagram(generated.imageUrl, creds);
@@ -478,6 +483,7 @@ function createServer(): McpServer {
     },
     async ({ text, customer_id }) => {
       try {
+        assertChannelEnabled(customer_id, "linkedin");
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
@@ -517,6 +523,7 @@ function createServer(): McpServer {
           throw new ToolError("Genau eines von image_url oder image_base64 angeben, nicht beides und nicht keines.");
         }
 
+        assertChannelEnabled(customer_id, "linkedin");
         const creds = await resolveLinkedInCredentials(customer_id);
         const imageSource: string | Buffer = hasB64
           ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
@@ -638,6 +645,10 @@ function createServer(): McpServer {
         "them yet today) and `nextPostAt` (ISO timestamp of their next planned slot). Only generate/publish " +
         "for a customer when `dueNow` is true - do not post for customers where it is false, even if you " +
         "are running anyway; that is what makes each customer's own posting rhythm actually work. " +
+        "Each customer also has `igFeedEnabled`/`igStoryEnabled`/`linkedinEnabled` (booleans - skip a " +
+        "format/channel that is false; the publish tools refuse it anyway, but check first to avoid a wasted " +
+        "generation) and caption style preferences `hashtagPreference` (keine/wenige/viele), `emojisEnabled` " +
+        "(boolean), and `language` (de/en) - write the caption to match these. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },

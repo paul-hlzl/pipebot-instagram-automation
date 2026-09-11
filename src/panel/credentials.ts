@@ -64,6 +64,14 @@ export interface CustomerOverview {
   dueNow: boolean;
   /** ISO timestamp of this customer's next planned (not yet posted) slot per their frequency/postTime. */
   nextPostAt: string;
+  /** Channel/format toggles - publish tools refuse to post when the relevant one is false. */
+  igFeedEnabled: boolean;
+  igStoryEnabled: boolean;
+  linkedinEnabled: boolean;
+  /** Caption style preferences the routine should follow when writing captions (not enforced in code). */
+  hashtagPreference: "keine" | "wenige" | "viele";
+  emojisEnabled: boolean;
+  language: "de" | "en";
   channels: ChannelOverview[];
 }
 
@@ -97,8 +105,43 @@ function overview(c: CustomerRow): CustomerOverview {
     trialDaysLeft: trialDaysLeft(c.trial_ends_at),
     dueNow: isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
     nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    igFeedEnabled: Boolean(c.ig_feed_enabled),
+    igStoryEnabled: Boolean(c.ig_story_enabled),
+    linkedinEnabled: Boolean(c.linkedin_enabled),
+    hashtagPreference: (c.hashtag_pref as CustomerOverview["hashtagPreference"]) || "wenige",
+    emojisEnabled: Boolean(c.emojis_enabled),
+    language: (c.language as CustomerOverview["language"]) || "de",
     channels: channelsFor(c.id),
   };
+}
+
+export type PublishChannel = "ig_feed" | "ig_story" | "linkedin";
+
+const CHANNEL_LABEL: Record<PublishChannel, string> = {
+  ig_feed: "Instagram Feed",
+  ig_story: "Instagram Story",
+  linkedin: "LinkedIn",
+};
+
+const CHANNEL_COLUMN: Record<PublishChannel, "ig_feed_enabled" | "ig_story_enabled" | "linkedin_enabled"> = {
+  ig_feed: "ig_feed_enabled",
+  ig_story: "ig_story_enabled",
+  linkedin: "linkedin_enabled",
+};
+
+/**
+ * Throws a clear error if a customer has switched this channel/format off in the panel.
+ * A missing customerId (the operator's own .env account) is never gated - unchanged behavior.
+ */
+export function assertChannelEnabled(customerId: string | undefined, channel: PublishChannel): void {
+  if (!customerId) return;
+  const column = CHANNEL_COLUMN[channel];
+  const row = db.prepare(`SELECT ${column} as enabled FROM customers WHERE id = ?`).get(customerId) as
+    | { enabled: number }
+    | undefined;
+  if (row && !row.enabled) {
+    throw new Error(`Kunde ${customerId}: ${CHANNEL_LABEL[channel]} ist im Panel deaktiviert - keine Veröffentlichung möglich.`);
+  }
 }
 
 /** True if this customer has a trial end date in the past. Routines should skip these instead of posting. */
