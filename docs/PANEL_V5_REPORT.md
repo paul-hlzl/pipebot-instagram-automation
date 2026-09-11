@@ -13,7 +13,35 @@ Sicherheitsnetz: Tag `pre-panel-v5` auf dem Stand vor dieser Sitzung, Branch `pa
 - [x] Aufgabe 4 - Serverseitige tägliche Vorausplanung (Commit 6d521bf)
 - [x] Aufgabe 5 - Panel-Oberfläche "Vorschau" (Commit 699ca65)
 - [x] Aufgabe 6 - K1-K9-Routinen-Ergänzung (Server: Commit 2bb304b; Text: docs/ROUTINE_TEIL1_V5.md)
-- [ ] Aufgabe 7 - Abschluss und Deploy
+- [x] Aufgabe 7 - Abschluss und Deploy (Merge-Commit a1a9f4b, Produktion neu gestartet 2026-09-11 18:02 UTC)
+
+## Deploy-Status
+
+**Deployed.** Branch `panel-v5` in `main` gemerged (`--no-ff`, Commit `a1a9f4b`), gepusht,
+Produktion (`pm2 restart instagram-mcp`) um ca. 2026-09-11 18:02 UTC neu gestartet - außerhalb
+des 14:30-15:45-UTC-Blackouts, kurz nach der vollen Stunde (Kunden-Loop-Routine feuert um
+:00 und ist bei der aktuellen Kundenzahl in Sekunden fertig).
+
+Vor dem Neustart: Backup `backups/panel-pre-v5-deploy-2026-09-11T18-01-01-977Z.db` (via
+better-sqlite3 `.backup()`).
+
+Nach dem Neustart geprüft (alles grün):
+- `/health` -> 200
+- `/mcp` ohne Bearer-Token -> 401 (unverändert)
+- CSP-Header enthält weiterhin die R2-Medien-Domain (aus der letzten Sitzung)
+- `planned_posts`/`planning_errors`-Tabellen existieren (additive Migration erfolgreich)
+- `tools/list` per echtem MCP-Handshake: 22 Tools (20 vorher + `get_planned_post` +
+  `mark_planned_post_published`), alle bisherigen Namen weiterhin vorhanden
+- `list_customers` per echtem MCP-Aufruf: bestehende Felder (`instagramDueNow`, `igFeedEnabled`,
+  `approvalMode`, `trialExpired`, ...) korrekt und unverändert für beide echten Kunden
+- `get_planned_post` gegen Produktion (noch keine Daten dort) liefert sauber `null`, kein Fehler
+- Admin-Login -> 200
+
+Rollback-Bereitschaft: Tag `pre-panel-v5` (Code-Stand vor der Sitzung) und die DB-Backups
+(`backups/panel-pre-v5-deploy-*.db` sowie das ältere `panel-pre-approval-badge-fix-*.db` von der
+vorherigen Sitzung) sind vorhanden. Ein Rollback wäre: `git checkout pre-panel-v5 -- .` (oder
+`git revert` des Merge-Commits) + `npm run build` + DB-Datei aus dem Backup zurückkopieren + `pm2
+restart instagram-mcp`.
 
 ## Entscheidungen
 
@@ -68,6 +96,32 @@ Pause-Bereiche, `isDue`/`isDueForChannel`) arbeitet aber durchgängig in Europe/
 Pause-Bereichs-Treffern oder einem scheinbar falschen Wochentag geführt hätte. Bewusst abgewichen:
 `scheduled_for` ist ein Vienna-Kalendertag (`viennaDateStr()`), konsistent mit `pauseFrom`/
 `pauseUntil` und den Wochentag-Feldern.
+
+## Kosten-Hinweis (Aufgabe im Abschlussbericht gefordert)
+
+Pro fälligem Kunde/Kanal/Tag verursacht die Vorausplanung 1 Anthropic-Aufruf (Text, plus im
+Ausnahmefall 1 Wiederholung bei einem verletzten Pflicht-Element/verbotenen Wort) und 1
+fal.ai-Bildaufruf - dieselbe Größenordnung, die die stündliche Routine heute pro Beitrag ohnehin
+verursacht. Der Unterschied: die Vorausplanung generiert bis zu 7 Tage im Voraus, nicht erst zum
+Fälligkeitszeitpunkt.
+
+- **Erste Nacht nach dem Deploy (Nachhol-Effekt):** bis zu (Anzahl aktiver Kunden × aktivierte
+  Kanäle × 7 Tage) Aufrufe auf einmal - bei den aktuell 2 aktiven Kunden mit je bis zu 3 Kanälen
+  im Extremfall (beide täglich, alle Kanäle) bis zu 42 Anthropic- + 42 fal.ai-Aufrufe in einer
+  Nacht.
+- **Danach im Normalbetrieb (steady state):** nur der jeweils neu hinzukommende 7. Tag pro
+  Kunde/Kanal und Nacht - bei den aktuellen 2 Kunden also bis zu ~6 Anthropic- + ~6 fal.ai-Aufrufe
+  pro Nacht, linear mit der Kundenzahl wachsend.
+- **Das ersetzt größtenteils bestehende Kosten, ist nicht rein zusätzlich:** dank K3b (siehe
+  docs/ROUTINE_TEIL1_V5.md, sobald Paul sie einträgt) generiert die stündliche Routine für einen
+  bereits vorbereiteten Beitrag NICHT mehr spontan neu - die Generierung verschiebt sich von
+  "zum Fälligkeitszeitpunkt" auf "in der Nacht davor", statt zusätzlich zu passieren.
+- **Echte Mehrkosten entstehen** (a) wenn ein Kunde einen vorbereiteten Beitrag im Panel
+  überspringt (die Generierung war dann "umsonst", da nie veröffentlicht) und (b) durch "Mit
+  dieser Farbe neu erstellen" (pro Klick 1 fal.ai-Aufruf, hart gedeckelt auf 3 pro Beitrag).
+- approvalMode-Kunden: siehe bekannte Einschränkung oben - ein noch nicht freigegebener
+  vorbereiteter Beitrag wird bei Fälligkeit trotzdem nochmal komplett neu generiert, dort ist die
+  Vorausplanung also tatsächlich zusätzliche Kosten, keine Verschiebung.
 
 ## Bekannte Risiken / offene Punkte
 
