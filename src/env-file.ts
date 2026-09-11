@@ -46,6 +46,38 @@ export function writeLinkedInTokens(accessToken: string, refreshToken: string): 
 }
 
 /**
+ * Return the configured PANEL_ADMIN_PASSWORD, generating and persisting a new random
+ * one to the local .env if none is set yet. Unlike ensureAuthToken, the caller must NOT
+ * log the returned password value - only whether one was freshly generated.
+ */
+export function ensureAdminPassword(): { password: string; generated: boolean } {
+  const existing = process.env.PANEL_ADMIN_PASSWORD?.trim();
+  if (existing) {
+    return { password: existing, generated: false };
+  }
+
+  const password = crypto.randomBytes(24).toString("base64");
+  const line = `PANEL_ADMIN_PASSWORD=${password}`;
+
+  let contents: string;
+  try {
+    contents = fs.readFileSync(ENV_PATH, "utf8");
+  } catch {
+    contents = "";
+  }
+
+  if (/^PANEL_ADMIN_PASSWORD=/m.test(contents)) {
+    contents = contents.replace(/^PANEL_ADMIN_PASSWORD=[^\r\n]*/m, line);
+  } else {
+    contents = `${contents.trimEnd()}\n${line}\n`.trimStart();
+  }
+
+  fs.writeFileSync(ENV_PATH, contents, "utf8");
+  process.env.PANEL_ADMIN_PASSWORD = password;
+  return { password, generated: true };
+}
+
+/**
  * Return the configured MCP_AUTH_TOKEN, generating and persisting a new random
  * one to the local .env if none is set yet.
  */

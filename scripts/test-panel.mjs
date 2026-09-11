@@ -200,14 +200,52 @@ async function main() {
     }
   }
 
-  // --- 8. Admin-Endpunkte ohne Auth (nur falls schon gebaut) ---
+  // --- 8. Admin ---
   console.log("\nAdmin (falls vorhanden):");
   {
-    const res = await fetch(`${BASE}${MOUNT}/admin/api/customers`);
+    const res = await fetch(`${BASE}${MOUNT}/admin/api/overview`);
     if (await isMcpGateFallthrough(res)) {
       console.log("  skip - Admin-API noch nicht implementiert (Aufgabe 3 steht noch aus)");
     } else {
-      ok("/admin/api/customers ohne Auth -> 401", res.status === 401, `status=${res.status}`);
+      ok("/admin/api/overview ohne Auth -> 401", res.status === 401, `status=${res.status}`);
+      ok("/admin/api/me ohne Auth -> 401", (await fetch(`${BASE}${MOUNT}/admin/api/me`)).status === 401);
+
+      const badLogin = await fetch(`${BASE}${MOUNT}/admin/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "definitely-wrong-password" }),
+      });
+      ok("Admin-Login mit falschem Passwort -> 401", badLogin.status === 401, `status=${badLogin.status}`);
+
+      // Full login round-trip using the real PANEL_ADMIN_PASSWORD from .env (never logged).
+      let adminPassword = "";
+      try {
+        const fs = await import("node:fs");
+        const envText = fs.readFileSync(".env", "utf8");
+        adminPassword = /^PANEL_ADMIN_PASSWORD=(.*)$/m.exec(envText)?.[1]?.trim() ?? "";
+      } catch {
+        // ignore - .env not readable from here
+      }
+      if (adminPassword) {
+        const loginRes = await fetch(`${BASE}${MOUNT}/admin/api/login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: adminPassword }),
+        });
+        ok("Admin-Login mit richtigem Passwort -> 200", loginRes.status === 200, `status=${loginRes.status}`);
+        const adminCookie = cookieHeader(loginRes.headers.get("set-cookie"));
+
+        const overviewRes = await fetch(`${BASE}${MOUNT}/admin/api/overview`, { headers: { cookie: adminCookie } });
+        const overviewBody = await overviewRes.json();
+        ok("/admin/api/overview mit Session -> 200", overviewRes.status === 200, `status=${overviewRes.status}`);
+        ok("overview liefert metrics + customers", typeof overviewBody.metrics?.totalCustomers === "number" && Array.isArray(overviewBody.customers));
+
+        await fetch(`${BASE}${MOUNT}/admin/api/logout`, { method: "POST", headers: { cookie: adminCookie } });
+        const afterLogout = await fetch(`${BASE}${MOUNT}/admin/api/overview`, { headers: { cookie: adminCookie } });
+        ok("/admin/api/overview nach Logout -> 401", afterLogout.status === 401, `status=${afterLogout.status}`);
+      } else {
+        console.log("  skip - PANEL_ADMIN_PASSWORD nicht lesbar, Login-Roundtrip übersprungen");
+      }
     }
   }
 

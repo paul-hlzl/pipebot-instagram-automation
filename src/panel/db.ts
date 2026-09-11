@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS posts (
   posted_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS posts_customer ON posts(customer_id, posted_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token_hash TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);
 `);
 
 // Migration: add columns to a customers table that existed before this version.
@@ -144,4 +149,5 @@ export function cleanupExpired(): void {
   const now = nowIso();
   db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
   db.prepare("DELETE FROM oauth_states WHERE expires_at < ?").run(now);
+  db.prepare("DELETE FROM admin_sessions WHERE expires_at < ?").run(now);
 }

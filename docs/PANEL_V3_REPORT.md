@@ -12,7 +12,7 @@ um zu sehen, wo der Stand ist.
 |---|---------|--------|
 | 1 | Sicherheitsnetz (Tag/Branch/Staging/Testskript) | ✅ erledigt |
 | 2 | Probekonto (Trial) | ✅ erledigt |
-| 3 | Admin-Dashboard | ⏳ offen |
+| 3 | Admin-Dashboard | ✅ erledigt |
 | 4 | Posting-Rhythmus (isDue) | ⏳ offen |
 | 5 | "Mit KI verbessern" | ⏳ offen |
 | 6 | Stil aus Instagram-Posts lernen | ⏳ offen |
@@ -99,6 +99,55 @@ um zu sehen, wo der Stand ist.
   Vorschaubildern - unkritisch und im Aufgabentext nicht verlangt.
 
 **Für Paul:** nichts zu tun.
+
+## Aufgabe 3 – Admin-Dashboard (`/panel/admin`) ✅
+
+**Erledigt:**
+- `PANEL_ADMIN_PASSWORD`: falls beim Start nicht in `.env` gesetzt, generiert der Server
+  selbst ein zufälliges Passwort (`crypto.randomBytes(24).toString("base64")`, äquivalent zu
+  `openssl rand -base64 24`) und hängt es an `.env` an - **der Wert wird nirgends geloggt**.
+  Beim Staging-Neustart wurde es bereits automatisch generiert.
+  **Für Paul: Wert steht in `.env` unter `PANEL_ADMIN_PASSWORD` - dort nachsehen.**
+- Neue Tabelle `admin_sessions` (additive Migration, `CREATE TABLE IF NOT EXISTS`).
+- Eigener Router `src/panel/admin.ts`, gemountet unter `/panel/admin` **innerhalb** des
+  bestehenden Panel-Routers (`router.use("/admin", createAdminRouter())`) - dadurch vor dem
+  globalen MCP-Bearer-Gate und mit denselben Security-Headern/JSON-Parser wie der Rest des
+  Panels (siehe Erkenntnis aus Aufgabe 1).
+  - `POST /admin/api/login` (Passwort, konstante Zeit-Vergleich wie beim MCP-Token),
+    IP-Rate-Limit 8 Versuche/15 Min, eigener httpOnly-Cookie `pp_admin` (Pfad `/panel/admin`,
+    12h Gültigkeit, eigene Session-Tabelle).
+  - Alle `/admin/api/*`-Routen außer `login`/`me` verlangen eine gültige Session (401 sonst).
+  - `GET /admin/api/overview`: Kennzahlen (Kunden gesamt/aktiv/im Trial/Trial abgelaufen,
+    Posts letzte 7 Tage, Verbindungen mit Handlungsbedarf) + Kundenliste (Firma, Kontakt,
+    E-Mail, erstellt, Status, Trial, Kanäle mit Token-Status, Post-Anzahl, letzter Post).
+  - `GET /admin/api/customers/:id`: Details (Briefing) + letzte 30 Posts.
+  - `POST /admin/api/customers/:id/extend-trial` `{days}`: verlängert ab dem späteren von
+    "jetzt" oder aktuellem Ablauf (verkürzt nie versehentlich einen noch laufenden Trial).
+  - `POST /admin/api/customers/:id/unlimited`: setzt `trial_ends_at = NULL`.
+  - `POST /admin/api/customers/:id/status` `{status: "active"|"paused"}`: nutzt die
+    **bestehende** `status`-Spalte - "pausiert" sperrt automatisch Login UND Erscheinen in
+    `list_customers` (beide Stellen filtern schon auf `status = 'active'`), ohne neue Spalte.
+  - **Kein** Lösch-Endpunkt - wie gefordert nur über die Kunden-Selbstbedienung (Aufgabe 11).
+- `public/panel/admin.html`: eigene Seite im selben Look (Schibsted Grotesk, Schwarz/Weiß,
+  eckige Buttons), Login-Formular + Dashboard mit Kennzahlen-Kacheln, Kundentabelle (wird am
+  Handy zu gestapelten Karten, `@media max-width:900px`), Aktions-Buttons pro Zeile, Detail-
+  Modal mit Briefing + Post-Verlauf.
+- Manuell gegen Staging durchgespielt: Login, `extend-trial`, `unlimited`, `status` (pausieren
+  + reaktivieren, inkl. Check, dass der pausierte Testkunde aus der aktiven Liste verschwindet)
+  - alles funktioniert, Staging-DB danach wieder in den Ausgangszustand zurückgesetzt.
+- `npm run test:panel` erweitert: Admin-Endpunkte ohne Auth → 401, falsches Passwort → 401,
+  vollständiger Login→Overview→Logout-Roundtrip mit dem echten (nie geloggten) Passwort aus
+  `.env`. **28 passed, 0 failed.**
+
+**Entscheidungen:**
+- "Pausieren" ist kein neues Feld, sondern die schon vorhandene `customers.status`-Spalte -
+  minimal-invasiv und automatisch an zwei bestehenden Stellen wirksam (Login, `list_customers`).
+- Admin-Session getrennt von Kunden-Session (eigener Cookie-Name `pp_admin`, eigene DB-Tabelle),
+  damit ein Kunde niemals versehentlich Admin-Rechte über einen geteilten Cookie-Namen bekommen
+  kann.
+
+**Für Paul:** `PANEL_ADMIN_PASSWORD` in `.env` nachsehen für den Admin-Login unter
+`https://mcp.pipebot.at/panel/admin` (erst nach dem finalen Deploy in Aufgabe 12 live).
 
 ---
 *(wird fortgesetzt)*

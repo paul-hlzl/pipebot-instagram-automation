@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig } from "./config.js";
 import { generateImageUrl, type ImageBranding } from "./fal.js";
-import { ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
+import { ensureAdminPassword, ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
 import {
   getPublishingLimit,
@@ -600,6 +600,7 @@ function createServer(): McpServer {
 
 async function main(): Promise<void> {
   const { token: authToken, generated } = ensureAuthToken();
+  const { generated: adminPasswordGenerated } = ensureAdminPassword();
 
   let port: number;
   try {
@@ -620,6 +621,10 @@ async function main(): Promise<void> {
     console.error(`Health check: http://localhost:${port}/health (no auth required)`);
     if (generated) {
       console.error(`Generated new MCP_AUTH_TOKEN and saved it to .env: ${authToken}`);
+    }
+    if (adminPasswordGenerated) {
+      // Deliberately not logging the password value itself - check .env for it.
+      console.error("Generated new PANEL_ADMIN_PASSWORD and saved it to .env (value not logged - check .env).");
     }
   });
 }

@@ -5,6 +5,7 @@ import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
 import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
+import { createAdminRouter } from "./admin.js";
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
@@ -157,6 +158,8 @@ export function createPanelRouter(): Router {
     next();
   });
   router.use(express.json({ limit: "50kb" }));
+
+  router.use("/admin", createAdminRouter());
 
   router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
