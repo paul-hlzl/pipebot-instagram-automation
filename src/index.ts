@@ -43,6 +43,16 @@ const customerIdSchema = z
       "Tokens selbst werden nie zurückgegeben.",
   );
 
+const pillarTitleSchema = z
+  .string()
+  .optional()
+  .describe(
+    "Optional: exact `title` of the content pillar (from `list_customers`' `contentPillars`/`suggestedPillar`) this " +
+      "post covers, if the customer uses content pillars. Only stored in the post history so future " +
+      "`suggestedPillar` picks avoid repeating the same pillar twice in a row - has no effect on publishing itself. " +
+      "Omit if the customer has no content pillars configured.",
+  );
+
 /** Lädt die Instagram-Zugangsdaten eines Kunden. undefined = eigener .env-Account (Standardverhalten). */
 async function resolveInstagramCredentials(customerId?: string): Promise<InstagramCredentials | undefined> {
   if (!customerId) return undefined;
@@ -220,15 +230,16 @@ function createServer(): McpServer {
             "Optional: the headline used on the image (from `generate_post_image`). Only used to label this " +
               "post in a customer's history in the panel (`logPost`, requires customer_id) - has no effect on publishing itself.",
           ),
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ imageUrl, caption, customer_id, headline }) => {
+    async ({ imageUrl, caption, customer_id, headline, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl, pillarTitle: pillar_title });
         }
         return textResult(result);
       } catch (error) {
@@ -254,9 +265,10 @@ function createServer(): McpServer {
         headline: headlineSchema,
         caption: z.string().min(1).max(2200).describe("Instagram caption (max 2200 characters)."),
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ topic, headline, caption, customer_id }) => {
+    async ({ topic, headline, caption, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
         const creds = await resolveInstagramCredentials(customer_id);
@@ -268,6 +280,7 @@ function createServer(): McpServer {
             headline,
             caption,
             imageUrl: generated.imageUrl,
+            pillarTitle: pillar_title,
           });
         }
         return textResult({
@@ -356,15 +369,16 @@ function createServer(): McpServer {
             "Optional: the headline used on the image (from `generate_story_image`). Only used to label this " +
               "post in a customer's history in the panel (`logPost`, requires customer_id) - has no effect on publishing itself.",
           ),
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ imageUrl, customer_id, headline }) => {
+    async ({ imageUrl, customer_id, headline, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_story");
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl, pillarTitle: pillar_title });
         }
         return textResult(result);
       } catch (error) {
@@ -389,9 +403,10 @@ function createServer(): McpServer {
         topic: topicSchema,
         headline: headlineSchema,
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ topic, headline, customer_id }) => {
+    async ({ topic, headline, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_story");
         const creds = await resolveInstagramCredentials(customer_id);
@@ -402,6 +417,7 @@ function createServer(): McpServer {
             externalPostId: published.postId,
             headline,
             imageUrl: generated.imageUrl,
+            pillarTitle: pillar_title,
           });
         }
         return textResult({
@@ -479,15 +495,16 @@ function createServer(): McpServer {
           .max(3000)
           .describe("LinkedIn post text (plain commentary, hashtags at the end). Max 3000 characters."),
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ text, customer_id }) => {
+    async ({ text, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "linkedin");
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
-          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text });
+          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text, pillarTitle: pillar_title });
         }
         return textResult(result);
       } catch (error) {
@@ -513,9 +530,10 @@ function createServer(): McpServer {
           .describe("JPEG or PNG as base64, optionally a data URL."),
         alt_text: z.string().optional().describe("Alt text for the image (accessibility)."),
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ text, image_url, image_base64, alt_text, customer_id }) => {
+    async ({ text, image_url, image_base64, alt_text, customer_id, pillar_title }) => {
       try {
         const hasUrl = Boolean(image_url?.trim());
         const hasB64 = Boolean(image_base64?.trim());
@@ -535,6 +553,7 @@ function createServer(): McpServer {
             externalPostId: result.postId ?? undefined,
             caption: text,
             imageUrl: hasUrl ? image_url : undefined,
+            pillarTitle: pillar_title,
           });
         }
         return textResult(result);
@@ -649,6 +668,13 @@ function createServer(): McpServer {
         "format/channel that is false; the publish tools refuse it anyway, but check first to avoid a wasted " +
         "generation) and caption style preferences `hashtagPreference` (keine/wenige/viele), `emojisEnabled` " +
         "(boolean), and `language` (de/en) - write the caption to match these. " +
+        "Each customer also has `contentPillars` (array of {title, description, weight} - recurring content " +
+        "themes the customer defined, e.g. \"Tipps\", \"Hinter den Kulissen\") and `suggestedPillar` (one pillar " +
+        "from that array, or null): if `suggestedPillar` is not null, base this post's topic/headline/caption on " +
+        "that pillar's title+description instead of guessing from `about`; pass its exact `title` as the " +
+        "`pillar_title` argument on the publish tool so future picks keep rotating pillars instead of repeating. " +
+        "If `suggestedPillar` is null (customer has no pillars configured), fall back to `about` as before and " +
+        "omit `pillar_title`. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },

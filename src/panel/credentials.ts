@@ -2,7 +2,7 @@
  * Schnittstelle zwischen Kunden-Panel und MCP-Tools.
  * MCP-Tools holen sich Tokens NUR über diese Datei – nie direkt aus der DB.
  */
-import { db, nowIso, cleanupExpired, type ConnectionRow, type CustomerRow, type PostRow } from "./db.js";
+import { db, nowIso, cleanupExpired, type ConnectionRow, type ContentPillarRow, type CustomerRow, type PostRow } from "./db.js";
 import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
@@ -74,6 +74,10 @@ export interface CustomerOverview {
   language: "de" | "en";
   /** The customer's own pause toggle from their dashboard - distinct from `status` (admin lock). */
   customerPaused: boolean;
+  /** Content pillars this customer configured (empty = feature unused, fall back to `about`). */
+  contentPillars: ContentPillar[];
+  /** This call's weighted pick among contentPillars, avoiding whatever pillar the last post used. Null when contentPillars is empty. */
+  suggestedPillar: ContentPillar | null;
   channels: ChannelOverview[];
 }
 
@@ -116,6 +120,8 @@ function overview(c: CustomerRow): CustomerOverview {
     emojisEnabled: Boolean(c.emojis_enabled),
     language: (c.language as CustomerOverview["language"]) || "de",
     customerPaused: Boolean(c.customer_paused),
+    contentPillars: listContentPillars(c.id),
+    suggestedPillar: pickPillarForToday(c.id),
     channels: channelsFor(c.id),
   };
 }
@@ -281,11 +287,11 @@ export interface LoggedPost {
 export function logPost(
   customerId: string,
   provider: string,
-  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string },
+  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string; pillarTitle?: string },
 ): void {
   db.prepare(
-    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     `post_${randomToken(9)}`,
     customerId,
@@ -295,6 +301,7 @@ export function logPost(
     post.caption ?? null,
     post.imageUrl ?? null,
     nowIso(),
+    post.pillarTitle ?? null,
   );
 }
 
@@ -312,6 +319,73 @@ export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost
     imageUrl: r.image_url,
     postedAt: r.posted_at,
   }));
+}
+
+export interface ContentPillar {
+  id: string;
+  title: string;
+  description: string | null;
+  weight: number;
+}
+
+const MAX_PILLARS = 6;
+
+/** Active content pillars for a customer, oldest first. Empty array = feature unused (fallback to `about`). */
+export function listContentPillars(customerId: string): ContentPillar[] {
+  const rows = db
+    .prepare("SELECT * FROM content_pillars WHERE customer_id = ? AND active = 1 ORDER BY created_at")
+    .all(customerId) as ContentPillarRow[];
+  return rows.map((r) => ({ id: r.id, title: r.title, description: r.description, weight: r.weight }));
+}
+
+/**
+ * Replaces a customer's whole set of content pillars (the panel edits them together as one
+ * list, so full replace-on-save is simpler and safer than a diff). Capped at 6, weight clamped
+ * to 1-5. Titles must be non-empty; blank/duplicate-only input results in an empty list, which
+ * is a valid "not using this feature" state.
+ */
+export function setContentPillars(customerId: string, pillars: { title: string; description?: string; weight?: number }[]): void {
+  const clean = pillars
+    .map((p) => ({ title: (p.title ?? "").trim().slice(0, 60), description: (p.description ?? "").trim().slice(0, 300), weight: Math.min(5, Math.max(1, Math.round(p.weight ?? 1))) }))
+    .filter((p) => p.title)
+    .slice(0, MAX_PILLARS);
+  const now = nowIso();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM content_pillars WHERE customer_id = ?").run(customerId);
+    for (const p of clean) {
+      db.prepare(
+        `INSERT INTO content_pillars (id, customer_id, title, description, weight, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      ).run(`pillar_${randomToken(9)}`, customerId, p.title, p.description || null, p.weight, now, now);
+    }
+  });
+  tx();
+}
+
+/**
+ * Weighted-random pick among a customer's active pillars, avoiding whichever pillar their most
+ * recent logged post used (so the routine doesn't hit the same pillar twice in a row). Returns
+ * null when the customer has no pillars set up - callers should fall back to `about`.
+ */
+export function pickPillarForToday(customerId: string): ContentPillar | null {
+  const pillars = listContentPillars(customerId);
+  if (!pillars.length) return null;
+  if (pillars.length === 1) return pillars[0];
+
+  const lastPost = db
+    .prepare("SELECT pillar_title FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 1")
+    .get(customerId) as { pillar_title: string | null } | undefined;
+  const lastTitle = lastPost?.pillar_title ?? null;
+  const pool = lastTitle ? pillars.filter((p) => p.title !== lastTitle) : pillars;
+  const candidates = pool.length ? pool : pillars; // everything filtered out is only possible with 1 active pillar, handled above, but stay safe
+
+  const totalWeight = candidates.reduce((sum, p) => sum + p.weight, 0);
+  let r = Math.random() * totalWeight;
+  for (const p of candidates) {
+    r -= p.weight;
+    if (r <= 0) return p;
+  }
+  return candidates[candidates.length - 1];
 }
 
 const STYLE_CACHE_HOURS = 24;

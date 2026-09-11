@@ -6,7 +6,7 @@ import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
+import { connectionStatus, isTrialExpired, listContentPillars, listPostsForCustomer, setContentPillars, trialDaysLeft } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
 import { isDue, nextPostAt } from "./schedule.js";
 import { anthropicAvailable, improveBriefing } from "../anthropic.js";
@@ -92,6 +92,21 @@ interface BriefingInput {
   accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string;
   igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
   hashtagPreference: string; emojisEnabled: boolean; language: string;
+  contentPillars: { title: string; description?: string; weight?: number }[];
+}
+
+/** Content pillars come from the JSON body as an array - validate shape defensively, drop anything malformed instead of erroring the whole save. */
+function parsePillarsInput(raw: unknown): { title: string; description?: string; weight?: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
+    .map((p) => ({
+      title: str(p.title, 60),
+      description: str(p.description, 300),
+      weight: Number.isFinite(Number(p.weight)) ? Number(p.weight) : 1,
+    }))
+    .filter((p) => p.title)
+    .slice(0, 6);
 }
 
 function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; errors: Record<string, string> } {
@@ -115,6 +130,7 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     hashtagPreference: str(body.hashtagPreference, 20) || "wenige",
     emojisEnabled: bool(body.emojisEnabled, true),
     language: str(body.language, 5) || "de",
+    contentPillars: parsePillarsInput(body.contentPillars),
   };
   const errors: Record<string, string> = {};
   if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
@@ -147,6 +163,7 @@ function publicState(c: CustomerRow) {
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
       customerPaused: Boolean(c.customer_paused),
+      contentPillars: listContentPillars(c.id),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -284,6 +301,7 @@ export function createPanelRouter(): Router {
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
       sha256(randomToken()), now, now, now);
+    setContentPillars(id, data.contentPillars);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
     const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
@@ -311,6 +329,7 @@ export function createPanelRouter(): Router {
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
       nowIso(), c.id);
+    setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   }));
 

@@ -132,6 +132,7 @@ async function main() {
     ok("trialExpired ist false fuer neuen Kunden", body.customer?.trialExpired === false);
     ok("nextPostAt ist ein gueltiges ISO-Datum", !Number.isNaN(Date.parse(body.customer?.nextPostAt ?? "")), `nextPostAt=${body.customer?.nextPostAt}`);
     ok("dueNow ist ein boolean", typeof body.customer?.dueNow === "boolean");
+    ok("contentPillars ist ein leeres Array ohne Angabe", Array.isArray(body.customer?.contentPillars) && body.customer.contentPillars.length === 0);
   }
 
   // --- 3. /api/me ---
@@ -175,6 +176,50 @@ async function main() {
     customerId = row?.id ?? "";
   } catch (e) {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
+  }
+
+  // --- 3b. Content-Saeulen (v4) ---
+  console.log("\nContent-Saeulen:");
+  {
+    const email = `pillars-${Date.now()}@example.invalid`;
+    const res = await fetch(`${BASE}${MOUNT}/api/signup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        consent: true, company: "Pillars GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        contentPillars: [
+          { title: "Tipps", description: "Praktische Ratschläge", weight: 3 },
+          { title: "Hinter den Kulissen", weight: 1 },
+          { title: "", weight: 2 }, // leerer Titel muss verworfen werden
+        ],
+      }),
+    });
+    const body = await res.json();
+    const pillars = body.customer?.contentPillars ?? [];
+    ok("2 gueltige Saeulen gespeichert (leerer Titel verworfen)", pillars.length === 2, `got ${pillars.length}`);
+    ok("erste Saeule korrekt", pillars[0]?.title === "Tipps" && pillars[0]?.weight === 3, JSON.stringify(pillars[0]));
+    const pillarCookie = cookieHeader(res.headers.get("set-cookie"));
+
+    // Ueberschreiben (replace-all) via PATCH
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: pillarCookie },
+      body: JSON.stringify({
+        company: "Pillars GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        contentPillars: [{ title: "Nur noch eine", weight: 1 }],
+      }),
+    });
+    const patchBody = await patchRes.json();
+    ok("PATCH ersetzt Saeulen komplett", patchBody.customer?.contentPillars?.length === 1 && patchBody.customer.contentPillars[0].title === "Nur noch eine", JSON.stringify(patchBody.customer?.contentPillars));
+
+    try {
+      const { default: Database } = await import("better-sqlite3");
+      const db = new Database(STAGING_DB);
+      const row = db.prepare("SELECT id FROM customers WHERE email = ?").get(email);
+      if (row) db.prepare("DELETE FROM customers WHERE id = ?").run(row.id);
+    } catch (e) {
+      console.log(`  (Cleanup fehlgeschlagen: ${e.message})`);
+    }
   }
 
   // --- 4a. POST /api/pause (customer's own pause toggle) ---

@@ -83,14 +83,34 @@ CREATE TABLE IF NOT EXISTS style_cache (
   samples_json TEXT NOT NULL,
   fetched_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS content_pillars (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  weight INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS content_pillars_customer ON content_pillars(customer_id);
 `);
 
-// Migration: add columns to a customers table that existed before this version.
-// SQLite has no "ADD COLUMN IF NOT EXISTS", so check pragma table_info first.
-const existingColumns = new Set(
-  (db.prepare("PRAGMA table_info(customers)").all() as { name: string }[]).map((c) => c.name),
-);
-for (const [column, def] of [
+// Migration: add columns to a table that existed before this version. SQLite has no
+// "ADD COLUMN IF NOT EXISTS", so check pragma table_info first. Reused across v3/v4 for every
+// additive column change - always idempotent, always keeps existing rows' behavior unchanged
+// via the DEFAULT given here (or NULL/"nullable" when a feature is opt-in).
+function migrateColumns(table: string, columns: readonly (readonly [string, string])[]): void {
+  const existing = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+  for (const [column, def] of columns) {
+    if (!existing.has(column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+    }
+  }
+}
+
+migrateColumns("customers", [
   ["accent_color", "TEXT"],
   ["watermark_text", "TEXT"],
   ["avoid_topics", "TEXT"],
@@ -108,11 +128,14 @@ for (const [column, def] of [
   // admin's status column: a paused customer can still log in and see their dashboard, they
   // just stop being posted for until they resume it themselves.
   ["customer_paused", "INTEGER NOT NULL DEFAULT 0"],
-] as const) {
-  if (!existingColumns.has(column)) {
-    db.exec(`ALTER TABLE customers ADD COLUMN ${column} ${def}`);
-  }
-}
+]);
+
+migrateColumns("posts", [
+  // Which content pillar (if any) this post was generated for - lets pickPillarForToday avoid
+  // repeating the same pillar twice in a row. Nullable: posts made before pillars existed, or
+  // for customers without pillars, simply have no pillar.
+  ["pillar_title", "TEXT"],
+]);
 
 export interface CustomerRow {
   id: string;
@@ -166,6 +189,18 @@ export interface PostRow {
   caption: string | null;
   image_url: string | null;
   posted_at: string;
+  pillar_title: string | null;
+}
+
+export interface ContentPillarRow {
+  id: string;
+  customer_id: string;
+  title: string;
+  description: string | null;
+  weight: number;
+  active: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export const nowIso = (): string => new Date().toISOString();

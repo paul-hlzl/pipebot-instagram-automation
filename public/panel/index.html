@@ -187,6 +187,10 @@
   .colorrow { display: flex; align-items: center; gap: 14px; }
   .colorrow input[type=text] { flex: 1; }
   .swatches { display: flex; gap: 8px; margin-top: 10px; }
+
+  .pillar-row { display: grid; grid-template-columns: 1fr 1.4fr 64px auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .pillar-row input, .pillar-row select { height: 40px; padding: 0 10px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; }
+  @media (max-width: 640px) { .pillar-row { grid-template-columns: 1fr; } }
   .swatch { width: 28px; height: 28px; border: 1px solid var(--rule); cursor: pointer; padding: 0; }
   .swatch[aria-pressed=true] { outline: 2px solid var(--ink); outline-offset: 2px; }
 
@@ -342,6 +346,36 @@
     }).join("");
   }
 
+  /* ================= Content-Säulen ================= */
+  function renderPillarsSection() {
+    const rows = S.pillarsDraft.map((p, i) => `
+      <div class="pillar-row" data-pillar-index="${i}">
+        <input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">
+        <input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">
+        <select data-pillar-weight aria-label="Gewichtung">${[1, 2, 3, 4, 5].map((w) => `<option value="${w}" ${p.weight === w ? "selected" : ""}>${w}×</option>`).join("")}</select>
+        <button type="button" class="link" data-pillar-remove="${i}">Entfernen</button>
+      </div>`).join("");
+    return `
+      <label>Content-Säulen <span class="opt">(optional)</span></label>
+      <p class="hint">Wiederkehrende Themen, zwischen denen automatisch abgewechselt wird (z. B. "Tipps", "Hinter den Kulissen", "Kundenstimmen"). Gewicht = wie oft im Vergleich zu den anderen dran. Ohne Säulen nutzen wir einfach Ihre Beschreibung oben.</p>
+      <div id="pillars-list">${rows}</div>
+      ${S.pillarsDraft.length < 6 ? `<button type="button" class="link" id="pillar-add">+ Säule hinzufügen</button>` : `<p class="hint">Maximal 6 Säulen.</p>`}`;
+  }
+
+  function syncPillarsDraftFromDom() {
+    const rows = document.querySelectorAll(".pillar-row");
+    if (!rows.length && !S.pillarsDraft.length) return;
+    const next = [];
+    rows.forEach((row) => {
+      next.push({
+        title: row.querySelector("[data-pillar-title]")?.value || "",
+        description: row.querySelector("[data-pillar-desc]")?.value || "",
+        weight: Number(row.querySelector("[data-pillar-weight]")?.value) || 1,
+      });
+    });
+    S.pillarsDraft = next;
+  }
+
   /* ================= Rendering: Schritte ================= */
   function bannerHtml() {
     if (!S.banner) return "";
@@ -352,7 +386,9 @@
     const c = S.customer || {
       tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
       igFeedEnabled: true, igStoryEnabled: true, linkedinEnabled: true, hashtagPreference: "wenige", emojisEnabled: true, language: "de",
+      contentPillars: [],
     };
+    S.pillarsDraft = (c.contentPillars || []).map((p) => ({ title: p.title || "", description: p.description || "", weight: p.weight || 1 }));
     const edit = !!S.customer;
     const twoPart = !edit; // Beim Bearbeiten alles auf einer Seite - der Kunde kennt das Formular schon.
     const part = twoPart ? S.formPart : 1;
@@ -385,7 +421,8 @@
           <textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>
           <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
           <div id="ai-suggestion" hidden></div>
-        </div>`;
+        </div>
+        <div class="field" id="pillars-section">${renderPillarsSection()}</div>`;
 
     const partBHtml = `
         <div class="field">
@@ -811,6 +848,21 @@
     const formPartBtn = e.target.closest("[data-formpart]");
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("#pillar-add")) {
+      syncPillarsDraftFromDom();
+      if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: "", description: "", weight: 1 });
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      return;
+    }
+    const pillarRemove = e.target.closest("[data-pillar-remove]");
+    if (pillarRemove) {
+      syncPillarsDraftFromDom();
+      S.pillarsDraft.splice(Number(pillarRemove.dataset.pillarRemove), 1);
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      return;
+    }
     if (e.target.closest("[data-ai-accept]")) {
       const box = $("#ai-suggestion");
       $("#f-about").value = box.dataset.suggestion;
@@ -912,6 +964,8 @@
     body.igStoryEnabled = !!form.igStoryEnabled?.checked;
     body.linkedinEnabled = !!form.linkedinEnabled?.checked;
     body.emojisEnabled = !!form.emojisEnabled?.checked;
+    syncPillarsDraftFromDom();
+    body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
 
     form.querySelectorAll(".err").forEach((n) => n.remove());
     form.querySelectorAll("[aria-invalid]").forEach((n) => n.removeAttribute("aria-invalid"));
