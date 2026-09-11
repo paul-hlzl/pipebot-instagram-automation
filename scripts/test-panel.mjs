@@ -313,6 +313,27 @@ async function main() {
     ok("Freigeben einer nicht existierenden Anfrage -> 404", approveRes.status === 404, `status=${approveRes.status}`);
   }
 
+  // --- 3g. /api/suggest-topics (v5) - braucht eine Session (anders als improve-briefing/
+  // analyze-website, die auch beim Signup laufen). KEIN echter Anthropic-Aufruf in dieser
+  // Suite - nur Auth-Gate und (falls kein ANTHROPIC_API_KEY gesetzt ist) den 503-Fall.
+  console.log("\nThemenvorschläge (Jetzt posten):");
+  {
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/suggest-topics`, { method: "POST", headers: { "content-type": "application/json" } });
+    ok("suggest-topics ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const providersRes = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const { aiAvailable } = await providersRes.json();
+    if (!aiAvailable) {
+      const res = await fetch(`${BASE}${MOUNT}/api/suggest-topics`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: sessionCookie },
+      });
+      ok("suggest-topics ohne ANTHROPIC_API_KEY -> 503", res.status === 503, `status=${res.status}`);
+    } else {
+      console.log("  skip - ANTHROPIC_API_KEY ist gesetzt, 503-Check nicht anwendbar (kein echter Aufruf in dieser Suite)");
+    }
+  }
+
   // --- 3f. Mehrere Farbthemen (v4) ---
   console.log("\nFarbthemen:");
   {

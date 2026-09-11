@@ -31,7 +31,7 @@ import {
 } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
 import { isDue, isDueForChannel, nextPostAt } from "./schedule.js";
-import { anthropicAvailable, improveBriefing } from "../anthropic.js";
+import { anthropicAvailable, improveBriefing, suggestTopics } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
 
 const VERSION: string = (() => {
@@ -437,6 +437,44 @@ export function createPanelRouter(): Router {
       } catch (err) {
         console.error("[panel] analyze-website fehlgeschlagen:", err);
         res.status(502).json({ error: err instanceof Error ? err.message : "Die Website konnte nicht analysiert werden." });
+      }
+    }),
+  );
+
+  // Themenvorschlaege fuer das "Jetzt posten"-Feld (Panel v5, Aufgabe 2). Braucht eine Session
+  // (im Gegensatz zu improve-briefing/analyze-website, die auch waehrend des Signups laufen) -
+  // die Vorschlaege basieren auf diesem Kunden's eigenen Content-Saeulen/letzten Beitraegen.
+  router.post(
+    "/api/suggest-topics",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      if (rateLimited(`suggest-topics:${c.id}`, 6, 10 * 60_000)) {
+        res.status(429).json({ error: "Zu viele Anfragen. Bitte in ein paar Minuten erneut versuchen." });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
+        return;
+      }
+      try {
+        const recentHeadlines = listPostsForCustomer(c.id, 5)
+          .map((p) => p.headline)
+          .filter((h): h is string => Boolean(h));
+        const topics = await suggestTopics({
+          industry: c.industry ?? "",
+          about: c.about ?? "",
+          tone: c.tone ?? "sachlich",
+          contentPillars: listContentPillars(c.id),
+          recentHeadlines,
+        });
+        res.json({ topics });
+      } catch (err) {
+        console.error("[panel] suggest-topics fehlgeschlagen:", err);
+        res.status(502).json({ error: "Die Vorschläge konnten gerade nicht erstellt werden. Bitte später erneut versuchen." });
       }
     }),
   );

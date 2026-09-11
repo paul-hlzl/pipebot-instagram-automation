@@ -114,6 +114,10 @@
   .approval-card .approval-body { flex: 1; min-width: 0; }
   .approval-card .approval-body p { color: var(--stone); font-size: 14px; }
   .channel-badge { display: inline-block; margin-bottom: 6px; padding: 2px 10px; border: 1px solid var(--ink); border-radius: 20px; font-size: 11.5px; font-weight: 500; letter-spacing: .02em; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .chip { min-height: 32px; padding: 4px 14px; border: 1px solid var(--ink); border-radius: 20px; background: var(--paper); color: var(--ink); cursor: pointer; font-size: 13.5px; text-align: left; }
+  .chip:hover { background: var(--wash); }
   .approval-card .actions { margin-top: 10px; }
   @media (max-width: 480px) { .approval-card { flex-direction: column; } .approval-card img, .approval-card .ph { width: 100%; height: auto; aspect-ratio: 1; } }
 
@@ -749,6 +753,8 @@
         <label for="f-postNowTopic" class="vh">Thema (optional)</label>
         <input id="f-postNowTopic" type="text" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${hasOpenPostRequest(c) ? "disabled" : ""}>
       </div>
+      ${S.aiAvailable && !hasOpenPostRequest(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
+      <div id="topic-suggestions" class="chips" hidden></div>` : ""}
       <div class="actions">
         <button class="btn" id="post-now-btn" ${hasOpenPostRequest(c) ? "disabled" : ""}>Jetzt zu diesem Thema posten</button>
       </div>
@@ -1044,6 +1050,27 @@
     }
   }
 
+  async function suggestTopicsUi() {
+    const btn = $("#suggest-topics");
+    const box = $("#topic-suggestions");
+    if (!btn || !box) return;
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = "Wird erstellt …";
+    box.hidden = true;
+    try {
+      const { topics } = await api("POST", "/api/suggest-topics", {});
+      box.hidden = false;
+      box.innerHTML = topics.map((t) => `<button type="button" class="chip" data-topic-chip="${esc(t)}">${esc(t)}</button>`).join("");
+    } catch (err) {
+      box.hidden = false;
+      box.innerHTML = `<p style="color:var(--stop)">${esc(err.message || "Die Vorschläge konnten gerade nicht erstellt werden.")}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+    }
+  }
+
   /* ================= Events ================= */
   document.addEventListener("click", async (e) => {
     const swatch = e.target.closest("[data-swatch]");
@@ -1059,6 +1086,13 @@
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
     if (e.target.closest("#analyze-website")) return analyzeWebsiteSuggestion();
+    if (e.target.closest("#suggest-topics")) return suggestTopicsUi();
+    const topicChip = e.target.closest("[data-topic-chip]");
+    if (topicChip) {
+      const input = $("#f-postNowTopic");
+      if (input) { input.value = topicChip.dataset.topicChip; input.focus(); }
+      return;
+    }
     if (e.target.closest("[data-website-accept]")) {
       const box = $("#website-suggestion");
       const suggestion = JSON.parse(box.dataset.suggestion || "{}");
@@ -1413,6 +1447,9 @@
       return {
         suggestion: `${company}${industry} richtet sich an lokale Kundinnen und Kunden, die auf der Suche nach einem verlässlichen Ansprechpartner sind. Im Mittelpunkt der Beiträge stehen konkrete Tipps aus dem Alltag, Einblicke hinter die Kulissen und die Themen, die die Zielgruppe wirklich bewegen. Ziel ist es, Vertrauen aufzubauen und neue Anfragen zu gewinnen. (Vorschau-Beispiel)`,
       };
+    }
+    if (url === "/api/suggest-topics") {
+      return { topics: ["Ein Kundenerfolg aus der letzten Woche", "Ein häufiges Missverständnis in Ihrer Branche aufklären", "Ein kurzer Tipp, den Sie sonst nur persönlich weitergeben"] };
     }
     if (url === "/api/analyze-website") {
       return {

@@ -153,3 +153,86 @@ export async function suggestFromWebsite(input: { title: string; description: st
     hashtags,
   };
 }
+
+/**
+ * Suggests 3 short topic ideas for the "Jetzt posten" theme field - a single Anthropic call,
+ * no tool loop, same pattern as improveBriefing/suggestFromWebsite. Told about recent post
+ * headlines specifically so it doesn't re-suggest something already covered recently.
+ */
+export async function suggestTopics(input: {
+  industry: string;
+  about: string;
+  tone: string;
+  contentPillars: { title: string; description: string | null }[];
+  recentHeadlines: string[];
+}): Promise<string[]> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+
+  const system =
+    "Du hilfst Kleinunternehmern, ein konkretes Thema für ihren nächsten Social-Media-Beitrag zu finden. " +
+    "Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - kein einleitender Satz, kein Markdown-Codeblock, kein " +
+    'Text davor oder danach - nach genau diesem Schema: {"topics": ["Thema 1", "Thema 2", "Thema 3"]}. ' +
+    "Genau 3 Themenvorschläge, je EIN kurzer, konkreter Satz auf Deutsch (kein Hashtag, keine Anführungszeichen, " +
+    "keine Nummerierung) - konkret genug, dass er direkt als Briefing für einen Beitrag dienen kann, nicht nur " +
+    "ein Schlagwort. Schlage nichts vor, das den kürzlich veröffentlichten Themen inhaltlich zu ähnlich ist.";
+  const pillarLines = input.contentPillars.length
+    ? input.contentPillars.map((p) => `- ${p.title}${p.description ? `: ${p.description}` : ""}`).join("\n")
+    : "(keine festgelegt)";
+  const recentLines = input.recentHeadlines.length ? input.recentHeadlines.map((h) => `- ${h}`).join("\n") : "(keine)";
+  const user =
+    `Branche: ${input.industry || "(unbekannt)"}\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `Tonalität: ${input.tone || "sachlich"}\n` +
+    `Content-Säulen:\n${pillarLines}\n\n` +
+    `Zuletzt veröffentlichte Themen (nicht wiederholen):\n${recentLines}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 300,
+          system,
+          messages: [{ role: "user", content: user }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic suggest-topics",
+  );
+
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) {
+    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  }
+
+  let parsed: unknown;
+  try {
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  const obj = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const topics = Array.isArray(obj.topics)
+    ? obj.topics
+        .map((t) => String(t).trim())
+        .filter(Boolean)
+        .slice(0, 3)
+    : [];
+  if (!topics.length) {
+    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  }
+  return topics;
+}
