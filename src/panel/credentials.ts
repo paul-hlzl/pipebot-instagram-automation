@@ -10,6 +10,7 @@ import {
   type ContentPillarRow,
   type CustomerRow,
   type PendingApprovalRow,
+  type PlannedPostRow,
   type PostRequestRow,
   type PostRow,
   type SavedThemeRow,
@@ -643,6 +644,139 @@ export function listApprovedPendingPosts(): PendingApproval[] {
 export function markPendingApprovalPublished(id: string): boolean {
   const result = db.prepare("UPDATE pending_approvals SET status = 'published', updated_at = ? WHERE id = ? AND status = 'approved'").run(nowIso(), id);
   return result.changes > 0;
+}
+
+export interface PlannedPost {
+  id: string;
+  customerId: string;
+  channel: string;
+  scheduledFor: string;
+  status: string;
+  headline: string | null;
+  caption: string | null;
+  imageUrl: string | null;
+  pillarTitle: string | null;
+  accentColorUsed: string | null;
+  regenerateCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toPlannedPost(r: PlannedPostRow): PlannedPost {
+  return {
+    id: r.id,
+    customerId: r.customer_id,
+    channel: r.channel,
+    scheduledFor: r.scheduled_for,
+    status: r.status,
+    headline: r.headline,
+    caption: r.caption,
+    imageUrl: r.image_url,
+    pillarTitle: r.pillar_title,
+    accentColorUsed: r.accent_color_used,
+    regenerateCount: r.regenerate_count,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** Above this many "Mit dieser Farbe neu erstellen" regenerations, the panel hides the button (cost control, task 8). */
+export const PLANNED_POST_MAX_REGENERATE = 3;
+
+/** Creates one planned_posts row (planning.ts, one per due customer/channel/day). */
+export function createPlannedPost(input: {
+  customerId: string;
+  channel: string;
+  scheduledFor: string;
+  headline?: string;
+  caption?: string;
+  imageUrl?: string;
+  pillarTitle?: string;
+  accentColorUsed?: string;
+}): PlannedPost {
+  const id = `plan_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 0, ?, ?)`,
+  ).run(
+    id,
+    input.customerId,
+    input.channel,
+    input.scheduledFor,
+    input.headline ?? null,
+    input.caption ?? null,
+    input.imageUrl ?? null,
+    input.pillarTitle ?? null,
+    input.accentColorUsed ?? null,
+    now,
+    now,
+  );
+  return toPlannedPost(db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow);
+}
+
+/** One customer's planned post for one channel/day, or null - planning.ts's idempotency check and the
+ *  `get_planned_post` MCP tool (K0 in the routine, task 6) both use this exact lookup shape. */
+export function getPlannedPostByChannelDate(customerId: string, channel: string, scheduledFor: string): PlannedPost | null {
+  const row = db
+    .prepare("SELECT * FROM planned_posts WHERE customer_id = ? AND channel = ? AND scheduled_for = ?")
+    .get(customerId, channel, scheduledFor) as PlannedPostRow | undefined;
+  return row ? toPlannedPost(row) : null;
+}
+
+/** A customer's planned posts in a date range (both ends inclusive, YYYY-MM-DD), earliest first - the panel's "Vorschau" tab. */
+export function listPlannedPosts(customerId: string, fromDate: string, toDate: string): PlannedPost[] {
+  const rows = db
+    .prepare("SELECT * FROM planned_posts WHERE customer_id = ? AND scheduled_for >= ? AND scheduled_for <= ? ORDER BY scheduled_for, channel")
+    .all(customerId, fromDate, toDate) as PlannedPostRow[];
+  return rows.map(toPlannedPost);
+}
+
+export function getPlannedPost(id: string): PlannedPost | null {
+  const row = db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow | undefined;
+  return row ? toPlannedPost(row) : null;
+}
+
+/** customer_id-scoped lookup for the panel's own endpoints - never lets a customer read/edit another's row. */
+export function getPlannedPostForCustomer(customerId: string, id: string): PlannedPost | null {
+  const row = db.prepare("SELECT * FROM planned_posts WHERE id = ? AND customer_id = ?").get(id, customerId) as PlannedPostRow | undefined;
+  return row ? toPlannedPost(row) : null;
+}
+
+/**
+ * Edits headline/caption on a planned post (customer edit in the "Vorschau" tab). Moves a plain
+ * 'planned' row to 'edited' so the routine/panel can tell it was customer-touched; a row already
+ * past that (approved/rejected/published) keeps its status - editing text after approval doesn't
+ * silently un-approve it.
+ */
+export function updatePlannedPostText(id: string, fields: { headline?: string; caption?: string }): PlannedPost | null {
+  const row = db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow | undefined;
+  if (!row) return null;
+  const headline = fields.headline !== undefined ? fields.headline : row.headline;
+  const caption = fields.caption !== undefined ? fields.caption : row.caption;
+  const nextStatus = row.status === "planned" ? "edited" : row.status;
+  db.prepare("UPDATE planned_posts SET headline = ?, caption = ?, status = ?, updated_at = ? WHERE id = ?").run(headline, caption, nextStatus, nowIso(), id);
+  return getPlannedPost(id);
+}
+
+/** Sets a planned post's status directly (approve/reject, or the routine marking it published) - no text/image change. */
+export function markPlannedPostStatus(id: string, status: string): PlannedPost | null {
+  const result = db.prepare("UPDATE planned_posts SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
+}
+
+/**
+ * Replaces a planned post's image (customer's "Mit dieser Farbe neu erstellen") and increments
+ * regenerate_count. Caller (the router) is responsible for checking PLANNED_POST_MAX_REGENERATE
+ * against the current count BEFORE calling generation - this function only records the result.
+ */
+export function updatePlannedPostImage(id: string, imageUrl: string, accentColorUsed: string): PlannedPost | null {
+  const result = db
+    .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = ?, regenerate_count = regenerate_count + 1, updated_at = ? WHERE id = ?")
+    .run(imageUrl, accentColorUsed, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
 }
 
 export interface SavedTheme {
