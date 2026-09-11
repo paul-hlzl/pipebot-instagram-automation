@@ -23,7 +23,7 @@ export const linkedin: Provider = {
     },
     {
       title: "Verbinden und Freigabe bestätigen",
-      text: "LinkedIn fragt, ob Pipeline in Ihrem Namen Beiträge teilen darf. Bestätigen Sie, danach landen Sie automatisch wieder hier.",
+      text: "LinkedIn fragt, ob Pipeflow in Ihrem Namen Beiträge teilen darf. Bestätigen Sie, danach landen Sie automatisch wieder hier.",
     },
     {
       title: "Alle 60 Tage kurz erneuern",

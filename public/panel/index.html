@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Pipeline – Kanäle verbinden</title>
+<title>Pipeflow – Kanäle verbinden</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -266,18 +266,68 @@
     .formpart-nav { flex-direction: column; }
     dl.sum div { grid-template-columns: 1fr; gap: 2px; }
   }
-  @media (prefers-reduced-motion: reduce) { .pipe i { transition: none; } }
+
+  /* ---------- Intro-Splash ---------- */
+  /* pointer-events:none from the start (not just after JS cleanup) - the splash is purely
+     decorative and must never be able to block the panel underneath, even if JS fails to run
+     the cleanup below for any reason. The panels/text still visually cover the screen via CSS
+     animation alone (no JS needed for that part). */
+  #splash { position: fixed; inset: 0; z-index: 9999; pointer-events: none; }
+  #splash.splash-done { opacity: 0; transition: opacity .3s ease; pointer-events: none; }
+  .splash-panel { position: fixed; top: 0; bottom: 0; width: 50%; background: var(--paper); }
+  .splash-left { left: 0; animation: splashOpenLeft 1.4s cubic-bezier(.6,0,.2,1) both; }
+  .splash-right { right: 0; animation: splashOpenRight 1.4s cubic-bezier(.6,0,.2,1) both; }
+  .splash-content { position: fixed; top: 50%; left: 50%; z-index: 2; text-align: center; pointer-events: none; animation: splashText 1.4s cubic-bezier(.2,.8,.2,1) both; }
+  .splash-word { font: 700 clamp(2.4rem, 11vw, 4.75rem)/1 var(--font); letter-spacing: -.01em; color: var(--ink); }
+  .splash-sub { margin-top: 10px; font-size: clamp(.7rem, 2.6vw, .95rem); color: var(--stone); letter-spacing: .02em; }
+  @keyframes splashOpenLeft { 0%, 60% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+  @keyframes splashOpenRight { 0%, 60% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+  @keyframes splashText {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(.85); }
+    20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    55% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    68%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.04); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pipe i { transition: none; }
+    .splash-panel, .splash-content { animation: none; }
+    .splash-content { opacity: 1; transform: translate(-50%, -50%); }
+  }
 </style>
 </head>
 <body>
 
+<div id="splash" aria-hidden="true">
+  <div class="splash-panel splash-left"></div>
+  <div class="splash-panel splash-right"></div>
+  <div class="splash-content">
+    <div class="splash-word">Pipeflow</div>
+    <div class="splash-sub">Powered by Pipeline AI Solutions</div>
+  </div>
+</div>
+<script>
+  (function () {
+    // Runs on every full load/reload, on purpose (no sessionStorage flag) - purely visual, never
+    // delays or blocks the real page/app below it (init() further down runs independently).
+    var splash = document.getElementById("splash");
+    if (!splash) return;
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var holdMs = reduced ? 300 : 1500;
+    setTimeout(function () {
+      splash.classList.add("splash-done");
+      setTimeout(function () { splash.remove(); }, 350);
+    }, holdMs);
+  })();
+</script>
+
 <header class="top">
-  <a class="brand" href="https://pipebot.at" aria-label="Pipeline Startseite">
+  <a class="brand" href="https://pipebot.at" aria-label="Pipeflow Startseite">
     <svg width="22" height="22" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">
       <rect x="0" y="0" width="3" height="3"/><rect x="3" y="1" width="5" height="1"/><rect x="8" y="0" width="3" height="3"/>
       <rect x="9" y="3" width="1" height="5"/><rect x="8" y="8" width="3" height="3"/><rect x="3" y="9" width="5" height="1"/><rect x="0" y="8" width="3" height="3"/>
     </svg>
-    Pipeline
+    Pipeflow
   </a>
   <p class="help" style="margin:0">
     <span class="long">Fragen? <a href="mailto:office@pipeline-solutions.at">office@pipeline-solutions.at</a></span>
@@ -935,7 +985,7 @@
     return `
       ${bannerHtml()}
       <h1>Vorschau - die nächsten 7 Tage</h1>
-      <p class="lede">Diese Beiträge hat Pipeline für Sie vorbereitet. Passen Sie Text oder Bild-Farbe an oder überspringen Sie einen Beitrag, bevor er automatisch veröffentlicht wird.${c.approvalMode ? " Da Sie Beiträge vor Veröffentlichung freigeben, können Sie das hier schon vorab tun." : ""}</p>
+      <p class="lede">Diese Beiträge hat Pipeflow für Sie vorbereitet. Passen Sie Text oder Bild-Farbe an oder überspringen Sie einen Beitrag, bevor er automatisch veröffentlicht wird.${c.approvalMode ? " Da Sie Beiträge vor Veröffentlichung freigeben, können Sie das hier schon vorab tun." : ""}</p>
       <div id="preview-strip"><p class="empty">Wird geladen …</p></div>
       <div id="preview-detail"></div>
       <div class="actions">
@@ -1641,14 +1691,14 @@
       guide: [
         { title: "Professionelles Konto einrichten", text: "Automatisches Posten funktioniert nur mit einem Business- oder Creator-Konto. Das Umstellen ist kostenlos und dauert rund zwei Minuten. Haben Sie schon eines, können Sie diesen Punkt überspringen.", link: { label: "Anleitung von Instagram öffnen", url: "https://help.instagram.com/502981923235522" } },
         { title: "Zugangsdaten bereithalten", text: "Sie melden sich gleich direkt bei Instagram an. Ihr Passwort geben Sie nur dort ein, nie bei uns.", link: { label: "Passwort vergessen?", url: "https://www.instagram.com/accounts/password/reset/" } },
-        { title: "Verbinden und Freigabe bestätigen", text: "Instagram zeigt Ihnen, welche Rechte Pipeline bekommt: Profil lesen und Beiträge veröffentlichen. Bestätigen Sie, danach landen Sie automatisch wieder hier." },
+        { title: "Verbinden und Freigabe bestätigen", text: "Instagram zeigt Ihnen, welche Rechte Pipeflow bekommt: Profil lesen und Beiträge veröffentlichen. Bestätigen Sie, danach landen Sie automatisch wieder hier." },
       ] },
     { id: "linkedin", name: "LinkedIn", available: true,
       tagline: "Ihre Beiträge erscheinen automatisch auf Ihrem LinkedIn-Profil.",
       notice: "Gepostet wird auf Ihrem persönlichen Profil, nicht auf einer Unternehmensseite.",
       guide: [
         { title: "Mit dem richtigen Profil eingeloggt sein", text: "Die Beiträge erscheinen auf dem Profil, mit dem Sie sich gleich anmelden. Prüfen Sie kurz, ob im Browser das richtige Profil offen ist.", link: { label: "LinkedIn öffnen", url: "https://www.linkedin.com/feed/" } },
-        { title: "Verbinden und Freigabe bestätigen", text: "LinkedIn fragt, ob Pipeline in Ihrem Namen Beiträge teilen darf. Bestätigen Sie, danach landen Sie automatisch wieder hier." },
+        { title: "Verbinden und Freigabe bestätigen", text: "LinkedIn fragt, ob Pipeflow in Ihrem Namen Beiträge teilen darf. Bestätigen Sie, danach landen Sie automatisch wieder hier." },
         { title: "Alle 60 Tage kurz erneuern", text: "LinkedIn begrenzt die Freigabe auf 60 Tage. Das Panel zeigt Ihnen rechtzeitig an, wann Sie mit einem Klick neu verbinden sollten." },
       ] },
   ];
