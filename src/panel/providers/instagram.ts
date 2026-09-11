@@ -30,7 +30,7 @@ export const instagram: Provider = {
     },
     {
       title: "Verbinden und Freigabe bestätigen",
-      text: "Instagram zeigt Ihnen, welche Rechte Pipeline bekommt: Profil lesen und Beiträge veröffentlichen. Bestätigen Sie, danach landen Sie automatisch wieder hier.",
+      text: "Instagram zeigt Ihnen, welche Rechte Pipeflow bekommt: Profil lesen und Beiträge veröffentlichen. Bestätigen Sie, danach landen Sie automatisch wieder hier.",
     },
   ],
   isConfigured: () => Boolean(appId() && appSecret()),
