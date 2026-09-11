@@ -463,10 +463,15 @@
     const partAHtml = `
         <div class="grid2">
           ${f("company", "Firmenname", "text", { ac: "organization" })}
-          ${f("website", "Website", "url", { optional: true, ac: "url", ph: "https://" })}
+          <div class="field">
+            <label for="f-website">Website <span class="opt">(optional)</span></label>
+            <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://">
+            ${S.aiAvailable ? `<p class="hint"><button type="button" class="link" id="analyze-website">Vorschlag aus meiner Website holen</button></p>` : ""}
+          </div>
           ${f("contactName", "Ihr Name", "text", { ac: "name" })}
           ${f("email", "E-Mail", "email", { ac: "email" })}
         </div>
+        <div id="website-suggestion" hidden></div>
         ${f("industry", "Branche", "text", { optional: true, ph: "z. B. Physiotherapie, Tischlerei, Steuerberatung" })}
         <div class="field">
           <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
@@ -989,6 +994,41 @@
     }
   }
 
+  async function analyzeWebsiteSuggestion() {
+    const btn = $("#analyze-website");
+    const website = $("#f-website")?.value || "";
+    if (!website.trim()) {
+      $("#f-website").focus();
+      return;
+    }
+    const box = $("#website-suggestion");
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = "Wird analysiert …";
+    box.hidden = true;
+    try {
+      const { suggestion } = await api("POST", "/api/analyze-website", { website });
+      box.dataset.suggestion = JSON.stringify(suggestion);
+      box.hidden = false;
+      box.className = "ai-box";
+      box.innerHTML = `<p><strong>Branche:</strong> ${esc(suggestion.industry || "–")}</p>
+        <p><strong>Beschreibung:</strong> ${esc(suggestion.about || "–")}</p>
+        <p><strong>Tonalität:</strong> ${esc(TONES[suggestion.tone] || suggestion.tone || "–")}</p>
+        <p><strong>Hashtag-Vorschläge:</strong> ${suggestion.hashtags?.length ? suggestion.hashtags.map((h) => `#${esc(h)}`).join(" ") : "–"}</p>
+        <div class="row">
+          <button type="button" data-website-accept>Übernehmen</button>
+          <button type="button" class="ghost" data-website-discard>Verwerfen</button>
+        </div>`;
+    } catch (err) {
+      box.hidden = false;
+      box.className = "ai-box";
+      box.innerHTML = `<p style="color:var(--stop)">${esc(err.message || "Die Website konnte gerade nicht analysiert werden.")}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+    }
+  }
+
   /* ================= Events ================= */
   document.addEventListener("click", async (e) => {
     const swatch = e.target.closest("[data-swatch]");
@@ -1003,6 +1043,26 @@
     const formPartBtn = e.target.closest("[data-formpart]");
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("#analyze-website")) return analyzeWebsiteSuggestion();
+    if (e.target.closest("[data-website-accept]")) {
+      const box = $("#website-suggestion");
+      const suggestion = JSON.parse(box.dataset.suggestion || "{}");
+      if (suggestion.industry) $("#f-industry").value = suggestion.industry;
+      if (suggestion.about) {
+        const hashtagLine = suggestion.hashtags?.length ? `\n\nHashtag-Vorschläge: ${suggestion.hashtags.map((h) => `#${h}`).join(" ")}` : "";
+        $("#f-about").value = suggestion.about + hashtagLine;
+      }
+      if (suggestion.tone && $("#f-tone")) $("#f-tone").value = suggestion.tone;
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    if (e.target.closest("[data-website-discard]")) {
+      const box = $("#website-suggestion");
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
     if (e.target.closest("#logo-upload")) {
       const btn = e.target.closest("#logo-upload");
       if (!pendingLogoDataUrl) return;
@@ -1337,6 +1397,16 @@
       const industry = body?.industry ? ` in der Branche ${body.industry}` : "";
       return {
         suggestion: `${company}${industry} richtet sich an lokale Kundinnen und Kunden, die auf der Suche nach einem verlässlichen Ansprechpartner sind. Im Mittelpunkt der Beiträge stehen konkrete Tipps aus dem Alltag, Einblicke hinter die Kulissen und die Themen, die die Zielgruppe wirklich bewegen. Ziel ist es, Vertrauen aufzubauen und neue Anfragen zu gewinnen. (Vorschau-Beispiel)`,
+      };
+    }
+    if (url === "/api/analyze-website") {
+      return {
+        suggestion: {
+          industry: "Dienstleistung",
+          about: "Ein lokales Unternehmen, das auf persönlichen Service und Qualität setzt. Die Zielgruppe sind Menschen in der Region, die einen verlässlichen Ansprechpartner suchen. (Vorschau-Beispiel, aus der Website-Adresse geraten)",
+          tone: "sachlich",
+          hashtags: ["lokal", "qualitaet", "service"],
+        },
       };
     }
     if (url === "/api/me" && method === "GET") {

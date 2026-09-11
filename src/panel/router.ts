@@ -32,6 +32,7 @@ import {
 import { createAdminRouter } from "./admin.js";
 import { isDue, isDueForChannel, nextPostAt } from "./schedule.js";
 import { anthropicAvailable, improveBriefing } from "../anthropic.js";
+import { analyzeWebsite } from "../website-analyze.js";
 
 const VERSION: string = (() => {
   try {
@@ -403,6 +404,35 @@ export function createPanelRouter(): Router {
       } catch (err) {
         console.error("[panel] improve-briefing fehlgeschlagen:", err);
         res.status(502).json({ error: "Der Vorschlag konnte gerade nicht erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
+
+  // Gleiche Absicherung wie /api/improve-briefing, aber strenger (1/Minute statt 6/10min) -
+  // ruft eine vom Kunden eingegebene URL ab (SSRF-Schutz in website-analyze.ts/
+  // ssrf-safe-fetch.ts), daher zusaetzlich kostspieliger/riskanter pro Aufruf.
+  router.post(
+    "/api/analyze-website",
+    safe(async (req, res) => {
+      if (rateLimited(`analyze-website:${clientIp(req)}`, 1, 60_000)) {
+        res.status(429).json({ error: "Bitte warten Sie eine Minute, bevor Sie es erneut versuchen." });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
+        return;
+      }
+      const website = str(req.body?.website, 300);
+      if (!website) {
+        res.status(400).json({ error: "Bitte geben Sie zuerst Ihre Website-Adresse ein." });
+        return;
+      }
+      try {
+        const suggestion = await analyzeWebsite(website);
+        res.json({ suggestion });
+      } catch (err) {
+        console.error("[panel] analyze-website fehlgeschlagen:", err);
+        res.status(502).json({ error: err instanceof Error ? err.message : "Die Website konnte nicht analysiert werden." });
       }
     }),
   );
