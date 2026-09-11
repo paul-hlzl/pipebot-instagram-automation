@@ -55,6 +55,10 @@ export interface CustomerOverview {
   ctaPreference: string | null;
   /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
   trialEndsAt: string | null;
+  /** True once trialEndsAt is in the past. Routines must skip these customers instead of posting. */
+  trialExpired: boolean;
+  /** Whole days left in the trial (0 once expired), or null when trialEndsAt is unset (unlimited / pre-trial customer). */
+  trialDaysLeft: number | null;
   channels: ChannelOverview[];
 }
 
@@ -84,6 +88,8 @@ function overview(c: CustomerRow): CustomerOverview {
     avoidTopics: c.avoid_topics,
     ctaPreference: c.cta_preference,
     trialEndsAt: c.trial_ends_at,
+    trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
+    trialDaysLeft: trialDaysLeft(c.trial_ends_at),
     channels: channelsFor(c.id),
   };
 }
@@ -91,6 +97,13 @@ function overview(c: CustomerRow): CustomerOverview {
 /** True if this customer has a trial end date in the past. Routines should skip these instead of posting. */
 export function isTrialExpired(c: Pick<CustomerOverview, "trialEndsAt">): boolean {
   return Boolean(c.trialEndsAt) && new Date(c.trialEndsAt as string).getTime() < Date.now();
+}
+
+/** Whole days left in the trial (clamped to 0 once past), or null when there is no trial end date at all. */
+export function trialDaysLeft(trialEndsAt: string | null): number | null {
+  if (!trialEndsAt) return null;
+  const diff = new Date(trialEndsAt).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / DAY));
 }
 
 /** Alle aktiven Kunden inkl. Briefing – für die Content-Routine. Enthält KEINE Tokens. */
@@ -139,6 +152,16 @@ export async function getCredentials(
 ): Promise<{ accountId: string; accountName: string | null; accessToken: string }> {
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Unbekannte Plattform: ${providerId}`);
+
+  const customerRow = db.prepare("SELECT trial_ends_at FROM customers WHERE id = ?").get(customerId) as
+    | { trial_ends_at: string | null }
+    | undefined;
+  if (customerRow && isTrialExpired({ trialEndsAt: customerRow.trial_ends_at })) {
+    // Second line of defense - list_customers already exposes trialExpired so a well-behaved
+    // routine skips these customers on its own, but this check makes it impossible to
+    // publish for an expired trial even if that gets missed.
+    throw new Error(`Kunde ${customerId}: Probezeitraum abgelaufen. Keine Veröffentlichung möglich, bis der Kunde freigeschaltet wird.`);
+  }
 
   const row = db
     .prepare("SELECT * FROM connections WHERE customer_id = ? AND provider = ?")

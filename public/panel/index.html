@@ -157,8 +157,10 @@
   .history time { font-size: 13px; color: var(--stone); white-space: nowrap; }
   .empty { padding: 40px 0; color: var(--stone); font-size: 15px; }
 
-  .trialbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 20px; background: var(--ink); color: var(--paper); font-size: 14px; margin-bottom: 8px; }
+  .trialbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 20px; background: var(--ink); color: var(--paper); font-size: 14px; margin-bottom: 8px; flex-wrap: wrap; }
   .trialbar.ended { background: var(--stop); }
+  .trialbar a.btn2 { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; padding: 0 16px; border: 1px solid var(--paper); border-radius: 2px; background: transparent; color: var(--paper); font-size: 13px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+  .trialbar a.btn2:hover { background: var(--paper); color: var(--ink); }
 
   .overlay { position: fixed; inset: 0; background: rgba(255,255,255,.94); display: grid; place-items: center; font-size: 18px; font-weight: 500; z-index: 10; }
   .loading { color: var(--stone); padding: 40px 0; }
@@ -205,6 +207,7 @@
   </p>
 </header>
 <div id="demo" class="demo" hidden>Vorschau: Hier wird nichts gespeichert und keine echte Verbindung aufgebaut.</div>
+<div id="trialbar" class="trialbar" style="display:none" role="status"></div>
 
 <div class="shell">
   <nav class="rail" aria-label="Fortschritt"><ol id="rail"></ol></nav>
@@ -494,7 +497,23 @@
     }
   }
 
+  function renderTrialBar() {
+    const bar = $("#trialbar");
+    const c = S.customer;
+    if (!c || c.trialDaysLeft == null) { bar.style.display = "none"; return; }
+    bar.style.display = "flex";
+    bar.classList.toggle("ended", c.trialExpired);
+    if (c.trialExpired) {
+      const subject = encodeURIComponent(`Jetzt freischalten - ${c.company || ""}`);
+      bar.innerHTML = `<span>Ihr kostenloser Probezeitraum ist abgelaufen. Es werden vorübergehend keine neuen Beiträge veröffentlicht.</span>
+        <a class="btn2" href="mailto:office@pipeline-solutions.at?subject=${subject}">Jetzt freischalten</a>`;
+    } else {
+      bar.innerHTML = `<span>Probezeitraum: noch ${c.trialDaysLeft} ${c.trialDaysLeft === 1 ? "Tag" : "Tage"}</span>`;
+    }
+  }
+
   function render(focus) {
+    renderTrialBar();
     renderRail();
     const stage = $("#stage");
     if (S.step === "company") stage.innerHTML = companyHtml();
@@ -678,7 +697,13 @@
     }
     if (url === "/api/signup" || (url === "/api/me" && method === "PATCH")) {
       const { consent, ...data } = body;
-      MOCK.customer = { ...MOCK.customer, ...data };
+      const isSignup = url === "/api/signup";
+      MOCK.customer = {
+        trialDaysLeft: 7, trialExpired: false,
+        ...MOCK.customer,
+        ...data,
+        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false } : {}),
+      };
       return mockState();
     }
     if (url.startsWith("/api/disconnect/")) {

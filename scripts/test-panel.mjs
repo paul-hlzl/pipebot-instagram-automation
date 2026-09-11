@@ -102,6 +102,12 @@ async function main() {
     ok("Firma im Response", body.customer?.company === "Test GmbH");
     sessionCookie = cookieHeader(res.headers.get("set-cookie"));
     ok("Session-Cookie gesetzt", sessionCookie.includes("pp_session="));
+    ok(
+      "trialDaysLeft gesetzt (1..PANEL_TRIAL_DAYS)",
+      typeof body.customer?.trialDaysLeft === "number" && body.customer.trialDaysLeft > 0,
+      `trialDaysLeft=${body.customer?.trialDaysLeft}`,
+    );
+    ok("trialExpired ist false fuer neuen Kunden", body.customer?.trialExpired === false);
   }
 
   // --- 3. /api/me ---

@@ -11,7 +11,7 @@ um zu sehen, wo der Stand ist.
 | # | Aufgabe | Status |
 |---|---------|--------|
 | 1 | Sicherheitsnetz (Tag/Branch/Staging/Testskript) | ✅ erledigt |
-| 2 | Probekonto (Trial) | ⏳ offen |
+| 2 | Probekonto (Trial) | ✅ erledigt |
 | 3 | Admin-Dashboard | ⏳ offen |
 | 4 | Posting-Rhythmus (isDue) | ⏳ offen |
 | 5 | "Mit KI verbessern" | ⏳ offen |
@@ -66,6 +66,37 @@ um zu sehen, wo der Stand ist.
   IP. Statt die Produktions-Sicherheitslogik fürs Testen aufzuweichen, startet
   `pretest:panel` die Staging-Instanz vor jedem Lauf neu (frischer In-Memory-Zustand). Auf
   Produktion bleibt der Rate-Limiter unverändert scharf.
+
+**Für Paul:** nichts zu tun.
+
+## Aufgabe 2 – Probekonto (Trial) ✅
+
+**Erledigt:**
+- `.env`: neue Variable `PANEL_TRIAL_DAYS=7` angehängt (bestehende Werte unverändert).
+  Code-seitiger Default bleibt zusätzlich 7, falls die Variable fehlt.
+- `POST /panel/api/signup` setzt jetzt `trial_ends_at = jetzt + PANEL_TRIAL_DAYS`.
+  Bestehende Kunden in der DB wurden **nicht** angefasst (`trial_ends_at` bleibt bei ihnen
+  `NULL` = unbefristet) - `PATCH /api/me` ändert `trial_ends_at` ebenfalls nie.
+- `CustomerOverview` (und damit `list_customers`) liefert pro Kunde zusätzlich
+  `trialExpired: boolean` und `trialDaysLeft: number | null` (null = unbefristet).
+  Tool-Beschreibung von `list_customers` weist die Routine explizit an, Kunden mit
+  `trialExpired: true` zu überspringen.
+- **Doppelte Absicherung:** `getCredentials()` (der einzige Weg, wie alle Publish-Tools an
+  Zugangsdaten kommen) prüft `trial_ends_at` selbst und bricht mit der Fehlermeldung
+  "Probezeitraum abgelaufen" ab, bevor überhaupt ein Token zurückgegeben wird - unabhängig
+  davon, ob die Routine `trialExpired` beachtet. Mit einem synthetischen Testkunden
+  (abgelaufener Trial + Fake-Connection) gegen die Staging-DB verifiziert.
+- Panel-UI: schwarze Leiste "Probezeitraum: noch X Tage" über der gesamten Pipeline-Ansicht
+  (neues `#trialbar`-Element, nutzt die schon vorhandene `.trialbar`/`.trialbar.ended`-CSS),
+  nach Ablauf rot mit Text + "Jetzt freischalten"-Button (`mailto:office@pipeline-solutions.at`,
+  vorausgefüllter Betreff mit Firmenname). Kunden ohne Trial-Limit (bestehende Kunden) sehen
+  gar keine Leiste. Auch im Demo-/Vorschau-Modus (`?demo`) nachgebildet.
+- `npm run test:panel` erweitert: prüft nach Signup, dass `trialDaysLeft` gesetzt und
+  `trialExpired` false ist.
+
+**Entscheidungen:**
+- Trial-Ablauf blockt nur das *Veröffentlichen* (`getCredentials`), nicht das Generieren von
+  Vorschaubildern - unkritisch und im Aufgabentext nicht verlangt.
 
 **Für Paul:** nichts zu tun.
 

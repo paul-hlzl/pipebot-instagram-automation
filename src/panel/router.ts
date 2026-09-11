@@ -4,7 +4,7 @@ import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus, listPostsForCustomer } from "./credentials.js";
+import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
@@ -13,6 +13,13 @@ const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
 const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** Trial length for newly signed-up customers. Existing customers are never retroactively limited. */
+function trialDays(): number {
+  const raw = process.env.PANEL_TRIAL_DAYS?.trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 7;
+}
 
 const baseUrl = (): string => {
   const url = (process.env.PANEL_BASE_URL ?? "").replace(/\/$/, "");
@@ -106,6 +113,8 @@ function publicState(c: CustomerRow) {
       accentColor: c.accent_color ?? "", watermarkText: c.watermark_text ?? "",
       avoidTopics: c.avoid_topics ?? "", ctaPreference: c.cta_preference ?? "link_bio",
       trialEndsAt: c.trial_ends_at,
+      trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
+      trialDaysLeft: trialDaysLeft(c.trial_ends_at),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -184,14 +193,15 @@ export function createPanelRouter(): Router {
     }
     const id = `cus_${randomToken(9)}`;
     const now = nowIso();
+    const trialEndsAt = new Date(Date.now() + trialDays() * 86_400_000).toISOString();
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
-         accent_color, watermark_text, avoid_topics, cta_preference,
+         accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
-      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       sha256(randomToken()), now, now, now);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);

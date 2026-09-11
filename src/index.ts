@@ -578,6 +578,10 @@ function createServer(): McpServer {
       description:
         "List all active customers from the customer panel: briefing (company, industry, description, " +
         "tone, posting frequency, posting time) and connected channels with status (ok/renew-soon/expired). " +
+        "Each customer also has `trialExpired` (boolean) and `trialDaysLeft` (number, or null when the " +
+        "customer has no trial limit). SKIP any customer with `trialExpired: true` - do not generate or " +
+        "publish a post for them; the publish tools will also refuse with an error for these customers as " +
+        "a backstop, but check `trialExpired` first so you don't waste a generation call. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },
