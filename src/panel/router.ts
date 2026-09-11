@@ -189,6 +189,7 @@ export function createPanelRouter(): Router {
         id: p.id, name: p.name, tagline: p.tagline, notice: p.notice ?? null, guide: p.guide, available: p.isConfigured(),
       })),
       aiAvailable: anthropicAvailable(),
+      trialDays: trialDays(),
     });
   });
 

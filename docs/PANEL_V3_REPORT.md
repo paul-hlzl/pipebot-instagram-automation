@@ -17,7 +17,7 @@ um zu sehen, wo der Stand ist.
 | 5 | "Mit KI verbessern" | ✅ Code fertig, ⚠️ ANTHROPIC_API_KEY fehlt (Feature bleibt bis dahin ausgeblendet) |
 | 6 | Stil aus Instagram-Posts lernen | ✅ erledigt |
 | 7 | Kanal-/Formateinstellungen | ✅ erledigt |
-| 8 | Onboarding aufwerten | ⏳ offen |
+| 8 | Onboarding aufwerten | ✅ Code fertig, ⚠️ nicht in echtem Browser getestet (siehe unten) |
 | 9 | Kunden-Dashboard ausbauen | ⏳ offen |
 | 10 | Betrieb absichern (Backup/Health) | ⏳ offen |
 | 11 | Meta App Review Vorbereitung | ⏳ offen |
@@ -310,6 +310,41 @@ Feature sauber ausgeblendet, keine Fehler im laufenden Betrieb.
   direkt wiederverwendet - kein neues Risiko.
 
 **Für Paul:** nichts zu tun.
+
+## Aufgabe 8 – Onboarding-Erlebnis aufwerten ✅ Code / ⚠️ Browser-Test steht aus
+
+**Erledigt:**
+- Kurzer Einstieg oberhalb des Formulars (nur beim ersten Ausfüllen, nicht beim Bearbeiten):
+  3 nummerierte Schritte ("Angaben machen" → "Kanäle verbinden" → "Fertig") + Trial-Hinweis
+  mit dem echten `PANEL_TRIAL_DAYS`-Wert (neu über `GET /api/providers` ans Panel geliefert)
+  + "Keine Kreditkarte nötig". Kein Marketing-Text, gleicher Schwarz/Weiß-Stil.
+- Live-Vorschau: kleines quadratisches Beispielbild neben dem Wasserzeichen-Feld, reines
+  CSS/HTML (kein fal.ai-Aufruf) - aktualisiert sich sofort bei Farbwahl (Picker + Swatch-Klick)
+  und beim Tippen von Wasserzeichen-Text/Firmenname.
+- Formular in zwei Unterschritte geteilt ("Über Sie" / "Ihr Stil") - **nur beim Signup**, beim
+  Bearbeiten bleibt es eine Seite. Die Pipeline-Navigation (`steps()`/Schienen-Anzeige links)
+  wurde dafür **nicht angerührt** - der Split passiert rein innerhalb des bestehenden
+  "company"-Schritts per Ein-/Ausblenden zweier DOM-Bereiche, kein Re-Render (sonst gingen
+  unbestätigte Eingaben beim Wechseln zwischen den Seiten verloren).
+- **Zwei Bugs beim Bauen gefunden und behoben, bevor sie live gegangen wären:**
+  1. Pflichtfelder (Firmenname, Name, E-Mail) auf Seite 1 sind per HTML5-Spezifikation von der
+     Validierung befreit, solange ihr Container `hidden` ist - ein Klick auf "Weiter zu
+     Instagram" auf Seite 2 hätte bei leeren Seite-1-Feldern sonst lautlos gar nichts getan.
+     Fix: JS-Validierung erkennt Seite-1-Fehler und springt automatisch zurück auf Seite 1,
+     bevor die Fehlermeldung angezeigt wird.
+  2. Die neuen "Weiter"/"Zurück"-Buttons hätten auf dem Handy nebeneinander gequetscht statt
+     saubar untereinander gestanden (bestehende `.btn { width:100% }`-Regel + `display:flex`
+     ohne Richtungsangabe) - `.formpart-nav` bekommt in der Mobil-Media-Query jetzt
+     `flex-direction: column` wie die bestehende `.actions`-Leiste.
+- Inline-Skript nach jeder Änderung mit `node --check` auf Syntaxfehler geprüft.
+
+**⚠️ Wichtige Einschränkung:** Diese Sitzung läuft ohne echten Browser (kein Display, kein
+Claude-in-Chrome verfügbar - Werkzeug wurde probiert, ist in dieser Umgebung nicht verbunden).
+Ich konnte den neuen Formular-Flow nur durch sorgfältige Code-Durchsicht, einen JS-Syntax-Check
+und HTTP-Ebenen-Tests prüfen, **nicht** durch tatsächliches Klicken im Browser. Die Logik ist
+so weit ich sehen kann korrekt, aber bitte einmal `https://mcp.pipebot.at/panel?demo` nach dem
+Deploy kurz manuell durchklicken (Seite 1 → Seite 2 → zurück → Farbe wählen → Vorschau prüfen),
+bevor du dich darauf verlässt.
 
 ---
 *(wird fortgesetzt)*

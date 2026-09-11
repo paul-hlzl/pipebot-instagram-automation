@@ -86,6 +86,20 @@
   .ai-box button { min-height: 36px; padding: 0 14px; border: 1px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--paper); cursor: pointer; font-size: 13.5px; }
   .ai-box button.ghost { background: var(--paper); color: var(--ink); }
   .ai-box button[disabled] { opacity: .6; pointer-events: none; }
+
+  .intro { margin: 0 0 40px; padding: 24px 0 32px; border-bottom: 1px solid var(--rule); }
+  .intro-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 0 0 20px; }
+  .intro-steps div { font-size: 14.5px; line-height: 1.4; }
+  .intro-steps .n { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-bottom: 10px; border: 2px solid var(--ink); font-weight: 700; font-size: 13px; }
+  .intro-trial { margin: 0; font-size: 15px; font-weight: 500; }
+  @media (max-width: 640px) { .intro-steps { grid-template-columns: 1fr; } }
+
+  .lp-square { width: 140px; height: 140px; border-radius: 2px; position: relative; overflow: hidden; margin: 10px 0; background: #0a0e1a; }
+  .lp-headline { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); max-width: 68%; color: #fff; font-family: Georgia, "Times New Roman", serif; font-size: 13px; line-height: 1.3; }
+  .lp-watermark { position: absolute; right: 5px; bottom: 6px; writing-mode: vertical-rl; color: rgba(255,255,255,.45); font-family: Georgia, "Times New Roman", serif; font-size: 9px; letter-spacing: .05em; max-height: 110px; overflow: hidden; }
+
+  .formpart-nav { display: flex; gap: 12px; margin-top: 32px; }
+  .steplabel { font-size: 13px; color: var(--stone); margin: 0 0 6px; text-transform: uppercase; letter-spacing: .04em; }
   input[type=text], input[type=email], input[type=url], input[type=time], select, textarea {
     width: 100%; height: 48px; padding: 0 14px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; color: inherit;
   }
@@ -192,6 +206,7 @@
     .grid2 { grid-template-columns: 1fr; }
     .btn { width: 100%; }
     .actions { flex-direction: column; align-items: stretch; text-align: center; }
+    .formpart-nav { flex-direction: column; }
     dl.sum div { grid-template-columns: 1fr; gap: 2px; }
   }
   @media (prefers-reduced-motion: reduce) { .pipe i { transition: none; } }
@@ -249,7 +264,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, customer: null, connections: [], step: "company", banner: null, skipped: new Set() };
+  const S = { providers: [], aiAvailable: false, trialDays: 7, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set() };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -317,16 +332,25 @@
       igFeedEnabled: true, igStoryEnabled: true, linkedinEnabled: true, hashtagPreference: "wenige", emojisEnabled: true, language: "de",
     };
     const edit = !!S.customer;
+    const twoPart = !edit; // Beim Bearbeiten alles auf einer Seite - der Kunde kennt das Formular schon.
+    const part = twoPart ? S.formPart : 1;
     const f = (name, label, type, opts = {}) => `
       <div class="field">
         <label for="f-${name}">${label}${opts.optional ? ' <span class="opt">(optional)</span>' : ""}</label>
         <input id="f-${name}" name="${name}" type="${type}" value="${esc(c[name])}" ${opts.optional ? "" : "required"} autocomplete="${opts.ac || "off"}" ${opts.ph ? `placeholder="${esc(opts.ph)}"` : ""}>
       </div>`;
-    return `
-      ${bannerHtml()}
-      <h1>${edit ? "Ihr Unternehmen" : "Social Media, das von selbst läuft."}</h1>
-      <p class="lede">${edit ? "Ändern Sie hier, worüber wir für Sie posten." : "Erzählen Sie uns, worum es bei Ihnen geht, und verbinden Sie Ihre Kanäle. Danach erscheinen regelmäßig Beiträge, ohne dass Sie etwas tun müssen."}</p>
-      <form id="company" novalidate>
+
+    const introHtml = !edit ? `
+      <div class="intro" id="intro-block" ${part !== 1 ? "hidden" : ""}>
+        <div class="intro-steps">
+          <div><span class="n">1</span>Angaben zu Ihrem Unternehmen machen</div>
+          <div><span class="n">2</span>Instagram und/oder LinkedIn verbinden</div>
+          <div><span class="n">3</span>Fertig - Beiträge erscheinen von selbst</div>
+        </div>
+        <p class="intro-trial">${S.trialDays} Tage kostenlos testen. Keine Kreditkarte nötig.</p>
+      </div>` : "";
+
+    const partAHtml = `
         <div class="grid2">
           ${f("company", "Firmenname", "text", { ac: "organization" })}
           ${f("website", "Website", "url", { optional: true, ac: "url", ph: "https://" })}
@@ -339,7 +363,9 @@
           <textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>
           <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
           <div id="ai-suggestion" hidden></div>
-        </div>
+        </div>`;
+
+    const partBHtml = `
         <div class="field">
           <label for="f-tone">Tonalität</label>
           <select id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
@@ -360,6 +386,11 @@
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
             <input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">
             <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
+            <p class="hint">So ungefähr sehen Ihre Bilder aus (Beispiel, kein echtes Bild):</p>
+            <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
+              <span class="lp-headline" id="lp-headline">Ihr Beitrag</span>
+              <span class="lp-watermark" id="lp-watermark">${esc(c.watermarkText || c.company || "Pipeline")}</span>
+            </div>
           </div>
         </div>
         <div class="grid2">
@@ -403,11 +434,53 @@
         ${edit ? "" : `
         <label class="check"><input type="checkbox" name="consent" id="f-consent">
           <span>Ich stimme zu, dass Pipeline AI Solutions meine Angaben und die Freigaben der verbundenen Konten speichert, um in meinem Namen Beiträge zu veröffentlichen. Ich kann das jederzeit widerrufen. <a href="${esc(CONFIG.privacyUrl)}" target="_blank" rel="noopener">Datenschutzerklärung</a></span>
-        </label>`}
-        <div class="actions" style="margin-top:${edit ? 32 : 0}px">
-          <button class="btn" type="submit">${edit ? "Speichern und weiter" : `Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}`}</button>
-        </div>
+        </label>`}`;
+
+    const actionsHtml = !twoPart
+      ? `<div class="actions" style="margin-top:${edit ? 32 : 0}px"><button class="btn" type="submit">${edit ? "Speichern und weiter" : `Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}`}</button></div>`
+      : formPartActionsHtml(part);
+
+    return `
+      ${introHtml}
+      ${bannerHtml()}
+      <h1>${edit ? "Ihr Unternehmen" : "Social Media, das von selbst läuft."}</h1>
+      ${!edit && twoPart ? `<p class="steplabel" id="steplabel">${formPartLabel(part)}</p>` : ""}
+      <p class="lede" id="lede">${edit ? "Ändern Sie hier, worüber wir für Sie posten." : formPartLede(part)}</p>
+      <form id="company" novalidate>
+        ${twoPart ? `<div id="formpart-a" ${part !== 1 ? "hidden" : ""}>${partAHtml}</div><div id="formpart-b" ${part !== 2 ? "hidden" : ""}>${partBHtml}</div>` : partAHtml + partBHtml}
+        <div id="formpart-actions">${actionsHtml}</div>
       </form>`;
+  }
+
+  function formPartLabel(part) {
+    return `Schritt ${part} von 2 · ${part === 1 ? "Über Sie" : "Ihr Stil"}`;
+  }
+  function formPartLede(part) {
+    return part === 1 ? "Erzählen Sie uns, worum es bei Ihnen geht." : "Wie sollen Ihre Beiträge aussehen und klingen?";
+  }
+  function formPartActionsHtml(part) {
+    return part === 1
+      ? `<div class="formpart-nav"><button class="btn" type="button" data-formpart="2">Weiter: Ihr Stil</button></div>`
+      : `<div class="formpart-nav"><button class="btn ghost" type="button" data-formpart="1">Zurück</button><button class="btn" type="submit">Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}</button></div>`;
+  }
+
+  /** Switches between the two signup form pages without re-rendering (would wipe unsaved input in the other page). */
+  function switchFormPart(n) {
+    S.formPart = n;
+    const intro = document.getElementById("intro-block");
+    if (intro) intro.hidden = n !== 1;
+    const a = document.getElementById("formpart-a");
+    const b = document.getElementById("formpart-b");
+    if (a) a.hidden = n !== 1;
+    if (b) b.hidden = n !== 2;
+    const label = document.getElementById("steplabel");
+    if (label) label.textContent = formPartLabel(n);
+    const lede = document.getElementById("lede");
+    if (lede) lede.textContent = formPartLede(n);
+    const actions = document.getElementById("formpart-actions");
+    if (actions) actions.innerHTML = formPartActionsHtml(n);
+    window.scrollTo({ top: 0 });
+    $("#stage")?.focus({ preventScroll: true });
   }
 
   function providerHtml(p) {
@@ -576,6 +649,23 @@
     return open ? open.id : "done";
   }
 
+  function updateLivePreview() {
+    const square = document.getElementById("lp-square");
+    if (!square) return;
+    const hex = document.getElementById("f-accentColor")?.value || "#0a0e1a";
+    square.style.background = hex;
+    const wm = document.getElementById("lp-watermark");
+    const company = document.querySelector('#formpart-a [name=company]')?.value || document.querySelector('[name=company]')?.value || "";
+    const watermarkText = document.getElementById("f-watermarkText")?.value || "";
+    if (wm) wm.textContent = watermarkText || company || "Pipeline";
+  }
+
+  document.addEventListener("input", (e) => {
+    if (e.target.id === "f-accentColor" || e.target.id === "f-watermarkText" || e.target.name === "company") {
+      updateLivePreview();
+    }
+  });
+
   async function improveBriefing() {
     const btn = $("#ai-improve");
     const form = $("#company");
@@ -619,8 +709,11 @@
       const picker = document.getElementById("f-accentColor");
       if (picker) picker.value = hex;
       document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === swatch)));
+      updateLivePreview();
       return;
     }
+    const formPartBtn = e.target.closest("[data-formpart]");
+    if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
     if (e.target.closest("[data-ai-accept]")) {
       const box = $("#ai-suggestion");
@@ -698,7 +791,15 @@
     if (!body.contactName?.trim()) errors.contactName = "Bitte geben Sie Ihren Namen ein.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(body.email || "")) errors.email = "Bitte geben Sie eine gültige E-Mail-Adresse ein.";
     if (!edit && !body.consent) errors.consent = "Ohne Ihre Zustimmung können wir nicht für Sie posten.";
-    if (Object.keys(errors).length) return showFieldErrors(form, errors);
+    if (Object.keys(errors).length) {
+      // Required fields on page 1 are exempt from HTML5 validation while hidden behind page 2 -
+      // jump back so the error is actually visible instead of failing silently.
+      const part1Fields = ["company", "contactName", "email"];
+      if (!edit && S.formPart !== 1 && Object.keys(errors).some((k) => part1Fields.includes(k))) {
+        switchFormPart(1);
+      }
+      return showFieldErrors(form, errors);
+    }
 
     const btn = form.querySelector("button[type=submit]");
     btn.classList.add("busy");
@@ -737,6 +838,7 @@
       const p = await api("GET", "/api/providers");
       S.providers = p.providers;
       S.aiAvailable = Boolean(p.aiAvailable);
+      S.trialDays = Number(p.trialDays) || 7;
     } catch {
       $("#stage").innerHTML = `<div class="banner bad" role="alert">Das Panel ist gerade nicht erreichbar. Bitte laden Sie die Seite in ein paar Minuten neu.</div>`;
       return;
@@ -787,7 +889,7 @@
 
   async function mockApi(method, url, body) {
     await sleep(250);
-    if (url === "/api/providers") return { providers: DEMO_PROVIDERS, aiAvailable: true };
+    if (url === "/api/providers") return { providers: DEMO_PROVIDERS, aiAvailable: true, trialDays: 7 };
     if (url === "/api/improve-briefing") {
       const company = body?.company || "Ihr Unternehmen";
       const industry = body?.industry ? ` in der Branche ${body.industry}` : "";
