@@ -37,6 +37,25 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+function hexToHsl(hex: string): [h: number, s: number, l: number] {
+  const [r0, g0, b0] = hexToRgb(hex).map((v) => v / 255);
+  const max = Math.max(r0, g0, b0);
+  const min = Math.min(r0, g0, b0);
+  const l = (max + min) / 2;
+  const d = max - min;
+  let h = 0;
+  let s = 0;
+  if (d !== 0) {
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (max === r0) h = ((g0 - b0) / d) % 6;
+    else if (max === g0) h = (b0 - r0) / d + 2;
+    else h = (r0 - g0) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, s, l];
+}
+
 /**
  * Hand-written descriptions for the panel's 6 predefined accent-color swatches (see
  * PALETTE in public/panel/index.html). Written by hand rather than derived algorithmically
@@ -89,13 +108,43 @@ const NAMED_COLORS: [hex: string, name: string][] = [
   ["#301934", "deep plum purple, near black"],
 ];
 
+/** The 7 achromatic entries in NAMED_COLORS - names, not hexes, since that's how nearestNamedColor's candidate filter works. */
+const ACHROMATIC_NAMES = new Set([
+  "black",
+  "near-black charcoal",
+  "dark charcoal gray",
+  "medium gray",
+  "light gray",
+  "pale gray",
+  "white",
+]);
+
+/**
+ * Matches by hue (in HSL), not raw RGB distance - verified 2026-09-11: a muted brand color
+ * like #626147 (a dark, desaturated khaki/olive - not visually gray to a human) used to land
+ * on "medium gray" under plain RGB Euclidean distance, because desaturated colors sit
+ * numerically close to gray regardless of hue. FLUX then rendered a literal gray background,
+ * losing the customer's accent color entirely (the accompanying hex code in the prompt isn't
+ * reliably followed on its own - see buildImageStylePrompt's doc comment).
+ * Below ~10% saturation a color reads as genuinely gray/black/white to the eye too, so only
+ * then is it matched against the achromatic entries (by lightness); above that threshold the
+ * achromatic entries are excluded entirely so any hue, however muted, keeps its color family.
+ */
 function nearestNamedColor(hex: string): string {
-  const [r, g, b] = hexToRgb(hex);
-  let best = NAMED_COLORS[0];
+  const [h, s, l] = hexToHsl(hex);
+  const wantAchromatic = s < 0.1;
+  const candidates = NAMED_COLORS.filter(([, name]) => ACHROMATIC_NAMES.has(name) === wantAchromatic);
+  let best = candidates[0];
   let bestDist = Infinity;
-  for (const entry of NAMED_COLORS) {
-    const [er, eg, eb] = hexToRgb(entry[0]);
-    const dist = (r - er) ** 2 + (g - eg) ** 2 + (b - eb) ** 2;
+  for (const entry of candidates) {
+    const [eh, , el] = hexToHsl(entry[0]);
+    let dist: number;
+    if (wantAchromatic) {
+      dist = Math.abs(l - el);
+    } else {
+      const hueDist = Math.min(Math.abs(h - eh), 360 - Math.abs(h - eh)) / 180;
+      dist = hueDist ** 2 + 0.25 * (l - el) ** 2;
+    }
     if (dist < bestDist) {
       bestDist = dist;
       best = entry;

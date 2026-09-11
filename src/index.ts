@@ -736,8 +736,15 @@ function createServer(): McpServer {
     async ({ customer_id, channel, headline, caption, image_url, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, channel);
-        assertNoBannedWords(customer_id, headline, caption);
-        assertRequiredElements(customer_id, headline, caption);
+        // ig_story is published via publish_generated_story, which has no caption parameter at
+        // all (Instagram Stories don't have a caption) and so only ever checks the headline -
+        // checking headline+caption here too would let a post through review that then fails
+        // every single publish attempt once approved (the required element/banned word only
+        // present in the discarded caption), stuck retrying forever. Match exactly what will
+        // actually be checked at publish time for each channel.
+        const checkTexts = channel === "ig_story" ? [headline] : [headline, caption];
+        assertNoBannedWords(customer_id, ...checkTexts);
+        assertRequiredElements(customer_id, ...checkTexts);
         const provider = channel === "linkedin" ? "linkedin" : "instagram";
         const approval = savePendingApproval({
           customerId: customer_id,
