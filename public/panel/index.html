@@ -568,7 +568,10 @@
         <button class="btn" data-go="company">Angaben bearbeiten</button>
         <button class="link" data-go="history">Bisherige Beiträge ansehen</button>
         <button class="link" id="logout">Abmelden</button>
-      </div>`;
+      </div>
+      <h2>Konto</h2>
+      <p style="color:var(--stone)">Konto und alle gespeicherten Daten (Angaben, verbundene Kanäle, Beitrags-Verlauf) endgültig löschen. Das kann nicht rückgängig gemacht werden.</p>
+      <div class="actions"><button class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button></div>`;
   }
 
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
@@ -726,6 +729,29 @@
       const box = $("#ai-suggestion");
       box.hidden = true;
       box.innerHTML = "";
+      return;
+    }
+
+    if (e.target.closest("#delete-account")) {
+      const company = S.customer?.company || "Ihr Konto";
+      if (!confirm(`"${company}" inkl. aller verbundenen Kanäle und des Beitrags-Verlaufs endgültig löschen? Das kann nicht rückgängig gemacht werden.`)) return;
+      if (prompt(`Zur Bestätigung: tippen Sie den Firmennamen ein (${company})`) !== company) {
+        alert("Firmenname stimmt nicht überein. Nichts wurde gelöscht.");
+        return;
+      }
+      try {
+        if (DEMO) {
+          MOCK.customer = null; MOCK.connections = [];
+        } else {
+          await api("DELETE", "/api/me", { confirm: true });
+        }
+        S.customer = null; S.connections = []; S.formPart = 1;
+        go("company");
+        S.banner = { kind: "ok", text: "Konto und alle Daten wurden gelöscht." };
+        render(true);
+      } catch (err) {
+        alert(err.message || "Löschen fehlgeschlagen.");
+      }
       return;
     }
 

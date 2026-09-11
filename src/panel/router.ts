@@ -341,6 +341,26 @@ export function createPanelRouter(): Router {
     res.json({ ok: true });
   });
 
+  // Die EINZIGE Loeschfunktion im ganzen Panel - nur der eingeloggte Kunde kann sein eigenes
+  // Konto loeschen, nie ein anderer Kunde und nie ein Admin ueber die Oberflaeche (Meta
+  // verlangt so einen Selbstbedienungs-Weg fuer instagram_business_basic/-content_publish).
+  // ON DELETE CASCADE auf connections/sessions/oauth_states/posts/style_cache raeumt alles auf.
+  router.delete("/api/me", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (req.body?.confirm !== true) {
+      res.status(400).json({ error: "Bestätigung erforderlich." });
+      return;
+    }
+    db.prepare("DELETE FROM customers WHERE id = ?").run(c.id);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    console.log(`[panel] Kunde ${c.id} (${c.company}) hat sein Konto inkl. aller Daten gelöscht.`);
+    res.json({ ok: true });
+  }));
+
   // Der Kunde sieht nur seine eigenen Posts - nie die anderer Kunden oder Pauls eigenen Account.
   router.get("/api/posts", (req, res) => {
     const c = currentCustomer(req);

@@ -20,7 +20,7 @@ um zu sehen, wo der Stand ist.
 | 8 | Onboarding aufwerten | ✅ Code fertig, ⚠️ nicht in echtem Browser getestet (siehe unten) |
 | 9 | Kunden-Dashboard ausbauen | ⏳ offen |
 | 10 | Betrieb absichern (Backup/Health) | ✅ erledigt |
-| 11 | Meta App Review Vorbereitung | ⏳ offen |
+| 11 | Meta App Review Vorbereitung | ✅ erledigt |
 | 12 | Abschluss & Deploy | ⏳ offen |
 
 ## Aufgabe 1 – Sicherheitsnetz ✅
@@ -373,6 +373,36 @@ alle gespeicherten Instagram-/LinkedIn-Tokens beim Zurückspielen eines Backups 
 sicherst du den aktuellen Wert aus `.env` (`PANEL_ENCRYPTION_KEY=...`) selbst extern ab, z. B.
 in einem Passwort-Manager - das ist der einzige Ort außerhalb dieses Servers, an dem er dann
 noch existiert.
+
+## Aufgabe 11 – Meta App Review Vorbereitung ✅
+
+**Erledigt:**
+- `docs/META_APP_REVIEW.md`: Nutzungsbeschreibungen (Deutsch + Englisch) für
+  `instagram_business_basic` und `instagram_business_content_publish`, Schritt-für-Schritt-
+  Skript fürs Screencast-Video (Signup → Instagram verbinden → Beitrag wird veröffentlicht →
+  Verlauf → Verbindung trennen, plus optionaler Löschungs-Hinweis), Checkliste der
+  Voraussetzungen (Datenschutz-URL, Datenlöschungs-Anleitung, App-Icon,
+  Unternehmensverifizierung, Testzugang). Nichts eingereicht.
+- `docs/DATENSCHUTZ_ENTWURF.md`: Entwurf einer Datenschutzerklärung, basierend auf dem, was der
+  Code tatsächlich speichert (Stammdaten, Briefing, verschlüsselte OAuth-Token, Post-Verlauf) -
+  mit Zweck, Rechtsgrundlage, eingesetzten Dienstleistern (Meta/LinkedIn/fal.ai/R2/Anthropic),
+  Speicherdauer, Betroffenenrechten. **Deutlich als Entwurf markiert, nirgends verlinkt oder
+  veröffentlicht**, mehrere Platzhalter markiert, die rechtlich geprüft/ausgefüllt werden
+  müssen (Firmenanschrift, AVV-Verträge, Zuständigkeit der Aufsichtsbehörde, maximale
+  Aufbewahrungsfrist für inaktive Konten).
+- **Selbstbedienungs-Datenlöschung** (von Meta für solche Berechtigungen verlangt):
+  `DELETE /panel/api/me` (Session + `{confirm:true}` nötig) löscht den eigenen Kunden inkl.
+  Verbindungen, Sessions und Post-Verlauf (alles über bestehende `ON DELETE CASCADE`-Regeln).
+  Im Panel: neuer Abschnitt "Konto" auf der Fertig-Seite mit rotem "Konto und Daten löschen"-
+  Link - doppelte Bestätigung (Dialog + Firmennamen eintippen), das ist die **einzige**
+  Löschfunktion im gesamten Panel und nur für den eingeloggten Kunden selbst nutzbar.
+  `npm run test:panel` deckt Auth-Check, fehlendes `confirm`, erfolgreiche Löschung und
+  tatsächliche Entfernung aus der DB ab. **38 passed, 0 failed.**
+
+**Für Paul:** Vor dem echten Einreichen bei Meta: Checkliste in `META_APP_REVIEW.md`
+abarbeiten (App-Icon fehlt noch, Unternehmensverifizierung, echtes Screencast aufnehmen), und
+`DATENSCHUTZ_ENTWURF.md` juristisch prüfen lassen, bevor daraus eine echte, verlinkte
+Datenschutzerklärung wird.
 
 ---
 *(wird fortgesetzt)*

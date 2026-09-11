@@ -177,6 +177,39 @@ async function main() {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
   }
 
+  // --- 4b. DELETE /api/me (self-service account deletion) ---
+  console.log("\nKonto löschen:");
+  {
+    const email = `delete-test-${Date.now()}@example.invalid`;
+    const signupRes = await fetch(`${BASE}${MOUNT}/api/signup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ consent: true, company: "Delete Me GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00" }),
+    });
+    const delCookie = cookieHeader(signupRes.headers.get("set-cookie"));
+
+    const noConfirmRes = await fetch(`${BASE}${MOUNT}/api/me`, { method: "DELETE", headers: { cookie: delCookie, "content-type": "application/json" }, body: JSON.stringify({}) });
+    ok("DELETE /api/me ohne confirm -> 400", noConfirmRes.status === 400, `status=${noConfirmRes.status}`);
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/me`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    ok("DELETE /api/me ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const delRes = await fetch(`${BASE}${MOUNT}/api/me`, { method: "DELETE", headers: { cookie: delCookie, "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    ok("DELETE /api/me mit confirm -> 200", delRes.status === 200, `status=${delRes.status}`);
+
+    const afterDelRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: delCookie } });
+    ok("Kunde nach Löschen nicht mehr eingeloggt -> 401", afterDelRes.status === 401, `status=${afterDelRes.status}`);
+
+    try {
+      const { default: Database } = await import("better-sqlite3");
+      const db = new Database(STAGING_DB, { readonly: true });
+      const row = db.prepare("SELECT id FROM customers WHERE email = ?").get(email);
+      ok("Kunde wirklich aus der DB entfernt", !row);
+    } catch (e) {
+      console.log(`  (Hinweis: DB-Check fehlgeschlagen: ${e.message})`);
+    }
+  }
+
   // --- 5. /api/posts ohne Login ---
   console.log("\n/api/posts:");
   {
