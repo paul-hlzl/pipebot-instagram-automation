@@ -2,7 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig } from "./config.js";
-import { generateImageUrl } from "./fal.js";
+import { generateImageUrl, type ImageBranding } from "./fal.js";
 import { ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
 import {
@@ -14,7 +14,7 @@ import {
 } from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
-import { getCredentials, listCustomers, startTokenRefreshSchedule } from "./panel/credentials.js";
+import { getCredentials, getCustomerOverview, listCustomers, logPost, startTokenRefreshSchedule } from "./panel/credentials.js";
 import {
   checkLinkedInToken,
   publishLinkedInImagePost,
@@ -45,6 +45,21 @@ async function resolveLinkedInCredentials(customerId?: string): Promise<LinkedIn
   if (!customerId) return undefined;
   const cred = await getCredentials(customerId, "linkedin");
   return { accessToken: cred.accessToken, personUrn: cred.accountId };
+}
+
+/**
+ * Lädt Bild-Branding (Akzentfarbe, Wasserzeichen-Text) eines Kunden für die generate_*-Tools.
+ * Ohne customer_id oder für einen unbekannten Kunden: {} -> generateImageUrl fällt auf das
+ * Standard-Styleguide-Aussehen zurück (Navy, "Pipeline"-Wasserzeichen), exakt wie bisher.
+ */
+function resolveImageBranding(customerId?: string): ImageBranding {
+  if (!customerId) return {};
+  const customer = getCustomerOverview(customerId);
+  if (!customer) return {};
+  return {
+    accentColor: customer.accentColor ?? undefined,
+    watermarkText: customer.watermarkText || customer.company || undefined,
+  };
 }
 
 function textResult(data: unknown) {
@@ -149,7 +164,7 @@ function createServer(): McpServer {
     },
     async ({ topic, headline, customer_id }) => {
       try {
-        const generated = await generateImageUrl(headline);
+        const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         return {
           content: [
             {
@@ -188,12 +203,22 @@ function createServer(): McpServer {
           .describe("Image URL, typically from `generate_post_image`. Must be publicly reachable."),
         caption: z.string().min(1).max(2200).describe("Instagram caption (max 2200 characters)."),
         customer_id: customerIdSchema,
+        headline: z
+          .string()
+          .optional()
+          .describe(
+            "Optional: the headline used on the image (from `generate_post_image`). Only used to label this " +
+              "post in a customer's history in the panel (`logPost`, requires customer_id) - has no effect on publishing itself.",
+          ),
       },
     },
-    async ({ imageUrl, caption, customer_id }) => {
+    async ({ imageUrl, caption, customer_id, headline }) => {
       try {
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
+        if (customer_id) {
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl });
+        }
         return textResult(result);
       } catch (error) {
         console.error("publish_generated_post:", toToolMessage(error));
@@ -223,8 +248,16 @@ function createServer(): McpServer {
     async ({ topic, headline, caption, customer_id }) => {
       try {
         const creds = await resolveInstagramCredentials(customer_id);
-        const generated = await generateImageUrl(headline);
+        const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
+        if (customer_id) {
+          logPost(customer_id, "instagram", {
+            externalPostId: published.postId,
+            headline,
+            caption,
+            imageUrl: generated.imageUrl,
+          });
+        }
         return textResult({
           postId: published.postId,
           topic,
@@ -264,7 +297,7 @@ function createServer(): McpServer {
     },
     async ({ topic, headline, customer_id }) => {
       try {
-        const generated = await generateImageUrl(headline, "story");
+        const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         return {
           content: [
             {
@@ -304,12 +337,22 @@ function createServer(): McpServer {
           .min(1)
           .describe("Image URL, typically from `generate_story_image`. Must be publicly reachable."),
         customer_id: customerIdSchema,
+        headline: z
+          .string()
+          .optional()
+          .describe(
+            "Optional: the headline used on the image (from `generate_story_image`). Only used to label this " +
+              "post in a customer's history in the panel (`logPost`, requires customer_id) - has no effect on publishing itself.",
+          ),
       },
     },
-    async ({ imageUrl, customer_id }) => {
+    async ({ imageUrl, customer_id, headline }) => {
       try {
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
+        if (customer_id) {
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl });
+        }
         return textResult(result);
       } catch (error) {
         console.error("publish_generated_story:", toToolMessage(error));
@@ -338,8 +381,15 @@ function createServer(): McpServer {
     async ({ topic, headline, customer_id }) => {
       try {
         const creds = await resolveInstagramCredentials(customer_id);
-        const generated = await generateImageUrl(headline, "story");
+        const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         const published = await publishStoryToInstagram(generated.imageUrl, creds);
+        if (customer_id) {
+          logPost(customer_id, "instagram", {
+            externalPostId: published.postId,
+            headline,
+            imageUrl: generated.imageUrl,
+          });
+        }
         return textResult({
           postId: published.postId,
           topic,
@@ -421,6 +471,9 @@ function createServer(): McpServer {
       try {
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
+        if (customer_id) {
+          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text });
+        }
         return textResult(result);
       } catch (error) {
         console.error("publish_linkedin_post:", toToolMessage(error));
@@ -461,6 +514,13 @@ function createServer(): McpServer {
           : image_url!.trim();
 
         const result = await publishLinkedInImagePost({ text, imageSource, altText: alt_text }, creds);
+        if (customer_id) {
+          logPost(customer_id, "linkedin", {
+            externalPostId: result.postId ?? undefined,
+            caption: text,
+            imageUrl: hasUrl ? image_url : undefined,
+          });
+        }
         return textResult(result);
       } catch (error) {
         console.error("publish_linkedin_image_post:", toToolMessage(error));

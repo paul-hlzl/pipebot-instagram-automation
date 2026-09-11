@@ -2,7 +2,8 @@
  * Schnittstelle zwischen Kunden-Panel und MCP-Tools.
  * MCP-Tools holen sich Tokens NUR über diese Datei – nie direkt aus der DB.
  */
-import { db, nowIso, cleanupExpired, type ConnectionRow, type CustomerRow } from "./db.js";
+import { db, nowIso, cleanupExpired, type ConnectionRow, type CustomerRow, type PostRow } from "./db.js";
+import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
@@ -44,6 +45,16 @@ export interface CustomerOverview {
   tone: string | null;
   frequency: string | null;
   postTime: string | null;
+  /** Hex color (e.g. "#0a0e1a") to steer this customer's image background. Falls back to the default styleguide color when empty. */
+  accentColor: string | null;
+  /** Text stamped on generated images instead of "Pipeline" (e.g. the customer's own brand name). Falls back to company name when empty. */
+  watermarkText: string | null;
+  /** Free-text topics/phrasing this customer wants avoided. */
+  avoidTopics: string | null;
+  /** Preferred call-to-action slug: link_bio | anrufen | nachricht | termin | keiner */
+  ctaPreference: string | null;
+  /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
+  trialEndsAt: string | null;
   channels: ChannelOverview[];
 }
 
@@ -68,8 +79,18 @@ function overview(c: CustomerRow): CustomerOverview {
     tone: c.tone,
     frequency: c.frequency,
     postTime: c.post_time,
+    accentColor: c.accent_color,
+    watermarkText: c.watermark_text,
+    avoidTopics: c.avoid_topics,
+    ctaPreference: c.cta_preference,
+    trialEndsAt: c.trial_ends_at,
     channels: channelsFor(c.id),
   };
+}
+
+/** True if this customer has a trial end date in the past. Routines should skip these instead of posting. */
+export function isTrialExpired(c: Pick<CustomerOverview, "trialEndsAt">): boolean {
+  return Boolean(c.trialEndsAt) && new Date(c.trialEndsAt as string).getTime() < Date.now();
 }
 
 /** Alle aktiven Kunden inkl. Briefing – für die Content-Routine. Enthält KEINE Tokens. */
@@ -157,6 +178,59 @@ export async function refreshExpiringTokens(): Promise<{ refreshed: string[]; fa
     }
   }
   return { refreshed, failed };
+}
+
+export interface LoggedPost {
+  id: string;
+  provider: string;
+  externalPostId: string | null;
+  headline: string | null;
+  caption: string | null;
+  imageUrl: string | null;
+  postedAt: string;
+}
+
+/**
+ * Record a post that was just published for a customer, so the panel's
+ * "Verlauf" tab can show it. Call this from the publish_* MCP tools right
+ * after a successful publish, whenever a customer_id was given. Never call
+ * this for your own (non-customer) posts - the panel only shows customer
+ * history.
+ */
+export function logPost(
+  customerId: string,
+  provider: string,
+  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string },
+): void {
+  db.prepare(
+    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `post_${randomToken(9)}`,
+    customerId,
+    provider,
+    post.externalPostId ?? null,
+    post.headline ?? null,
+    post.caption ?? null,
+    post.imageUrl ?? null,
+    nowIso(),
+  );
+}
+
+/** Most recent posts for one customer, newest first - used by the panel's own "Verlauf" tab. */
+export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost[] {
+  const rows = db
+    .prepare("SELECT * FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT ?")
+    .all(customerId, limit) as PostRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    provider: r.provider,
+    externalPostId: r.external_post_id,
+    headline: r.headline,
+    caption: r.caption,
+    imageUrl: r.image_url,
+    postedAt: r.posted_at,
+  }));
 }
 
 export function startTokenRefreshSchedule(intervalHours = 12): NodeJS.Timeout {

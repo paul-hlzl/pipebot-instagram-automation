@@ -124,7 +124,11 @@ export async function addHeadlineText(
  * stays proportionally centered and correctly sized on the 9:16 story canvas as well as
  * the square feed canvas without needing separate story-specific logic.
  */
-export async function addPipelineWatermark(imageBuffer: Buffer, format: PostFormat = "feed"): Promise<Buffer> {
+export async function addPipelineWatermark(
+  imageBuffer: Buffer,
+  format: PostFormat = "feed",
+  watermarkText: string = "Pipeline",
+): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
   const height = meta.height ?? 1024;
@@ -146,7 +150,7 @@ export async function addPipelineWatermark(imageBuffer: Buffer, format: PostForm
       dominant-baseline="middle"
       letter-spacing="${Math.round(fontSize * 0.06)}"
       transform="rotate(-90 ${cx} ${cy})"
-    >Pipeline</text>
+    >${escapeXml(watermarkText)}</text>
   </svg>`;
 
   return sharp(imageBuffer)

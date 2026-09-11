@@ -88,12 +88,12 @@
   [aria-invalid=true] { border-color: var(--stop) !important; }
   .err { color: var(--stop); font-size: 13px; margin: 6px 0 0; }
   fieldset { border: 0; padding: 0; margin: 0; }
-  .seg { display: flex; border: 1px solid #C9C9C9; border-radius: 2px; }
+  .seg { display: flex; gap: 8px; }
   .seg label { flex: 1; margin: 0; position: relative; }
   .seg input { position: absolute; opacity: 0; inset: 0; }
-  .seg span { display: block; text-align: center; padding: 12px 8px; font-size: 15px; cursor: pointer; border-left: 1px solid #C9C9C9; }
-  .seg label:first-child span { border-left: 0; }
-  .seg input:checked + span { background: var(--ink); color: var(--paper); }
+  .seg span { display: block; text-align: center; padding: 13px 8px; font-size: 15px; cursor: pointer; border: 1px solid #C9C9C9; border-radius: 2px; transition: border-color .15s, background .15s; }
+  .seg span:hover { border-color: var(--ink); }
+  .seg input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
   .check { display: grid; grid-template-columns: 22px 1fr; gap: 12px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; }
   .check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--ink); }
@@ -138,6 +138,27 @@
   .copyrow { display: flex; gap: 8px; margin-top: 12px; }
   .copyrow input { font-size: 14px; }
   .copyrow .btn { min-height: 48px; padding: 0 18px; flex: none; }
+
+  input[type=color] { -webkit-appearance: none; appearance: none; width: 48px; height: 48px; padding: 0; border: 1px solid #C9C9C9; border-radius: 2px; cursor: pointer; background: none; }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 4px; }
+  input[type=color]::-webkit-color-swatch { border: 0; border-radius: 1px; }
+  .colorrow { display: flex; align-items: center; gap: 14px; }
+  .colorrow input[type=text] { flex: 1; }
+  .swatches { display: flex; gap: 8px; margin-top: 10px; }
+  .swatch { width: 28px; height: 28px; border: 1px solid var(--rule); cursor: pointer; padding: 0; }
+  .swatch[aria-pressed=true] { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .history { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .history li { display: grid; grid-template-columns: 64px 1fr auto; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+  .history img { width: 64px; height: 64px; object-fit: cover; background: var(--wash); }
+  .history .cap { font-size: 15px; }
+  .history .cap strong { display: block; margin-bottom: 2px; }
+  .history .cap span { color: var(--stone); font-size: 13px; }
+  .history time { font-size: 13px; color: var(--stone); white-space: nowrap; }
+  .empty { padding: 40px 0; color: var(--stone); font-size: 15px; }
+
+  .trialbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 20px; background: var(--ink); color: var(--paper); font-size: 14px; margin-bottom: 8px; }
+  .trialbar.ended { background: var(--stop); }
 
   .overlay { position: fixed; inset: 0; background: rgba(255,255,255,.94); display: grid; place-items: center; font-size: 18px; font-weight: 500; z-index: 10; }
   .loading { color: var(--stone); padding: 40px 0; }
@@ -202,6 +223,8 @@
 
   const TONES = { sachlich: "Sachlich und kompetent", locker: "Locker und nahbar", inspirierend: "Inspirierend", humorvoll: "Mit Humor" };
   const FREQ = { "3x-woche": "3× pro Woche", werktags: "Werktags", taeglich: "Täglich" };
+  const CTAS = { link_bio: "Link in der Bio", anrufen: "Anrufen", nachricht: "Nachricht senden", termin: "Termin buchen", keiner: "Kein Aufruf" };
+  const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
 
   const ERRORS = {
     cancelled: (n) => `Sie haben die Verbindung mit ${n} abgebrochen. Sie können es jederzeit erneut versuchen.`,
@@ -221,7 +244,7 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const conn = (id) => S.connections.find((c) => c.provider === id);
   const prov = (id) => S.providers.find((p) => p.id === id);
-  const steps = () => ["company", ...S.providers.map((p) => p.id), "done"];
+  const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "history"];
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
 
   /* ================= API ================= */
@@ -242,15 +265,15 @@
   function renderRail() {
     const list = steps();
     const cur = list.indexOf(S.step);
-    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : prov(id).name;
+    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "history" ? "Verlauf" : prov(id).name;
     const meta = (id) => {
       if (id === "company") return S.customer ? S.customer.company : "Angaben machen";
-      if (id === "done") return "";
+      if (id === "done" || id === "history") return "";
       const c = conn(id);
       if (c) return c.status === "expired" ? "Abgelaufen" : c.accountName;
       return S.skipped.has(id) ? "Übersprungen" : "Nicht verbunden";
     };
-    const isDone = (id) => id === "company" ? !!S.customer : id === "done" ? false : !!conn(id) && conn(id).status !== "expired";
+    const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "history") ? false : !!conn(id) && conn(id).status !== "expired";
 
     $("#rail").innerHTML = list.map((id, i) => {
       const state = id === S.step ? "is-current" : isDone(id) ? "is-done" : "is-todo";
@@ -271,7 +294,7 @@
   }
 
   function companyHtml() {
-    const c = S.customer || { tone: "sachlich", frequency: "werktags", postTime: "15:00" };
+    const c = S.customer || { tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio" };
     const edit = !!S.customer;
     const f = (name, label, type, opts = {}) => `
       <div class="field">
@@ -300,6 +323,24 @@
           <select id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
         </div>
         <div class="grid2">
+          <div class="field">
+            <label for="f-accentColor">Akzentfarbe für Ihre Bilder <span class="opt">(optional)</span></label>
+            <div class="colorrow">
+              <input id="f-accentColor" name="accentColor" type="color" value="${esc(c.accentColor || "#0a0e1a")}">
+              <input type="text" value="${esc(c.accentColor || "")}" placeholder="Standard" readonly aria-hidden="true" tabindex="-1">
+            </div>
+            <div class="swatches" role="group" aria-label="Vorschläge">
+              ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
+            </div>
+            <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.</p>
+          </div>
+          <div class="field">
+            <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
+            <input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">
+            <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
+          </div>
+        </div>
+        <div class="grid2">
           <fieldset class="field">
             <legend>Wie oft posten?</legend>
             <div class="seg">${Object.entries(FREQ).map(([k, v]) => `<label><input type="radio" name="frequency" value="${k}" ${c.frequency === k ? "checked" : ""}><span>${v}</span></label>`).join("")}</div>
@@ -307,6 +348,16 @@
           <div class="field">
             <label for="f-postTime">Um wie viel Uhr?</label>
             <input id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900">
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label for="f-ctaPreference">Bevorzugter Aufruf am Ende des Beitrags</label>
+            <select id="f-ctaPreference" name="ctaPreference">${Object.entries(CTAS).map(([k, v]) => `<option value="${k}" ${(c.ctaPreference || "link_bio") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+          </div>
+          <div class="field">
+            <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
+            <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
           </div>
         </div>
         ${edit ? "" : `
@@ -391,6 +442,8 @@
         }).join("")}
         <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
         <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
+        <div><dt>Bild-Akzentfarbe</dt><dd>${c.accentColor ? `<span style="display:inline-block;width:14px;height:14px;background:${esc(c.accentColor)};vertical-align:middle;margin-right:8px;border:1px solid var(--rule)"></span>${esc(c.accentColor)}` : "Standard"}</dd></div>
+        <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
       </dl>
       <h2>Wie es weitergeht</h2>
       <p>${esc(CONFIG.nextSteps)}</p>
@@ -399,8 +452,46 @@
       <div id="linkbox"><button class="link" id="mklink">Persönlichen Link erzeugen</button></div>
       <div class="actions">
         <button class="btn" data-go="company">Angaben bearbeiten</button>
+        <button class="link" data-go="history">Bisherige Beiträge ansehen</button>
         <button class="link" id="logout">Abmelden</button>
       </div>`;
+  }
+
+  const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
+  const PLATFORM_LABEL = (p) => prov(p)?.name || p;
+
+  function historyHtml() {
+    return `
+      ${bannerHtml()}
+      <h1>Ihre bisherigen Beiträge</h1>
+      <p class="lede">Hier sehen Sie, was in Ihrem Namen veröffentlicht wurde.</p>
+      <div id="historylist"><p class="empty">Wird geladen …</p></div>
+      <div class="actions">
+        <button class="btn" data-go="done">Zurück zur Übersicht</button>
+      </div>`;
+  }
+
+  async function loadHistory() {
+    const box = $("#historylist");
+    if (!box) return;
+    try {
+      const { posts } = await api("GET", "/api/posts");
+      if (!posts.length) {
+        box.innerHTML = `<p class="empty">Noch keine Beiträge veröffentlicht. Sobald der erste online geht, erscheint er hier.</p>`;
+        return;
+      }
+      box.innerHTML = `<ul class="history">${posts.map((post) => `
+        <li>
+          ${post.imageUrl ? `<img src="${esc(post.imageUrl)}" alt="">` : `<div style="width:64px;height:64px;background:var(--wash)"></div>`}
+          <div class="cap">
+            <strong>${esc(post.headline || PLATFORM_LABEL(post.provider))}</strong>
+            <span>${esc(PLATFORM_LABEL(post.provider))}${post.caption ? " · " + esc(post.caption.slice(0, 80)) + (post.caption.length > 80 ? "…" : "") : ""}</span>
+          </div>
+          <time>${esc(fmtDate(post.postedAt))}</time>
+        </li>`).join("")}</ul>`;
+    } catch {
+      box.innerHTML = `<p class="empty">Verlauf konnte gerade nicht geladen werden.</p>`;
+    }
   }
 
   function render(focus) {
@@ -408,6 +499,7 @@
     const stage = $("#stage");
     if (S.step === "company") stage.innerHTML = companyHtml();
     else if (S.step === "done") stage.innerHTML = doneHtml();
+    else if (S.step === "history") { stage.innerHTML = historyHtml(); loadHistory(); }
     else stage.innerHTML = providerHtml(prov(S.step));
     if (focus) { stage.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
   }
@@ -428,6 +520,14 @@
 
   /* ================= Events ================= */
   document.addEventListener("click", async (e) => {
+    const swatch = e.target.closest("[data-swatch]");
+    if (swatch) {
+      const hex = swatch.dataset.swatch;
+      const picker = document.getElementById("f-accentColor");
+      if (picker) picker.value = hex;
+      document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === swatch)));
+      return;
+    }
     const t = e.target.closest("[data-go],[data-connect],[data-disconnect],#mklink,#logout,[data-copy]");
     if (!t) return;
 
@@ -546,7 +646,9 @@
   }
 
   /* ================= Vorschau-Modus (ohne Server) ================= */
-  const MOCK = { customer: null, connections: [] };
+  const MOCK = { customer: null, connections: [], posts: [
+    { id: "p1", provider: "instagram", headline: "Automate With Confidence", caption: "Weniger Klicks, mehr Zeit für das Wesentliche.", imageUrl: "", postedAt: new Date(Date.now() - 86400000).toISOString() },
+  ] };
   const DEMO_PROVIDERS = [
     { id: "instagram", name: "Instagram", available: true, notice: null,
       tagline: "Ihre Beiträge erscheinen automatisch in Ihrem Instagram-Feed.",
@@ -584,6 +686,7 @@
       return mockState();
     }
     if (url === "/api/access-link") return { link: "https://mcp.pipebot.at/panel/login?key=vorschau-beispiel" };
+    if (url === "/api/posts") return { posts: MOCK.posts };
     if (url === "/api/logout") { MOCK.customer = null; MOCK.connections = []; return { ok: true }; }
     throw new Error("Unbekannt");
   }

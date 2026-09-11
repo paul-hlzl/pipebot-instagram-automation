@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS customers (
   tone TEXT,
   frequency TEXT,
   post_time TEXT,
+  accent_color TEXT,
+  watermark_text TEXT,
+  avoid_topics TEXT,
+  cta_preference TEXT,
+  trial_ends_at TEXT,
   login_key_hash TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   consent_at TEXT NOT NULL,
@@ -55,7 +60,36 @@ CREATE TABLE IF NOT EXISTS oauth_states (
   provider TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS posts (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  external_post_id TEXT,
+  headline TEXT,
+  caption TEXT,
+  image_url TEXT,
+  posted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS posts_customer ON posts(customer_id, posted_at DESC);
 `);
+
+// Migration: add columns to a customers table that existed before this version.
+// SQLite has no "ADD COLUMN IF NOT EXISTS", so check pragma table_info first.
+const existingColumns = new Set(
+  (db.prepare("PRAGMA table_info(customers)").all() as { name: string }[]).map((c) => c.name),
+);
+for (const [column, def] of [
+  ["accent_color", "TEXT"],
+  ["watermark_text", "TEXT"],
+  ["avoid_topics", "TEXT"],
+  ["cta_preference", "TEXT"],
+  ["trial_ends_at", "TEXT"],
+] as const) {
+  if (!existingColumns.has(column)) {
+    db.exec(`ALTER TABLE customers ADD COLUMN ${column} ${def}`);
+  }
+}
 
 export interface CustomerRow {
   id: string;
@@ -68,6 +102,11 @@ export interface CustomerRow {
   tone: string | null;
   frequency: string | null;
   post_time: string | null;
+  accent_color: string | null;
+  watermark_text: string | null;
+  avoid_topics: string | null;
+  cta_preference: string | null;
+  trial_ends_at: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;
@@ -86,6 +125,17 @@ export interface ConnectionRow {
   scopes: string | null;
   connected_at: string;
   updated_at: string;
+}
+
+export interface PostRow {
+  id: string;
+  customer_id: string;
+  provider: string;
+  external_post_id: string | null;
+  headline: string | null;
+  caption: string | null;
+  image_url: string | null;
+  posted_at: string;
 }
 
 export const nowIso = (): string => new Date().toISOString();

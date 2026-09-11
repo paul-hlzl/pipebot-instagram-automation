@@ -4,13 +4,15 @@ import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus } from "./credentials.js";
+import { connectionStatus, listPostsForCustomer } from "./credentials.js";
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
 const SESSION_DAYS = 90;
 const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
+const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 const baseUrl = (): string => {
   const url = (process.env.PANEL_BASE_URL ?? "").replace(/\/$/, "");
@@ -64,6 +66,7 @@ const str = (v: unknown, max: number): string => (typeof v === "string" ? v.trim
 interface BriefingInput {
   company: string; contactName: string; email: string; website: string; industry: string;
   about: string; tone: string; frequency: string; postTime: string;
+  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string;
 }
 
 function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; errors: Record<string, string> } {
@@ -77,6 +80,10 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     tone: str(body.tone, 30),
     frequency: str(body.frequency, 30),
     postTime: str(body.postTime, 5),
+    accentColor: str(body.accentColor, 7),
+    watermarkText: str(body.watermarkText, 40),
+    avoidTopics: str(body.avoidTopics, 500),
+    ctaPreference: str(body.ctaPreference, 30),
   };
   const errors: Record<string, string> = {};
   if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
@@ -85,6 +92,8 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
   if (!TONES.includes(data.tone)) data.tone = "sachlich";
   if (!FREQUENCIES.includes(data.frequency)) data.frequency = "werktags";
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(data.postTime)) data.postTime = "15:00";
+  if (data.accentColor && !HEX_COLOR.test(data.accentColor)) data.accentColor = "";
+  if (!CTAS.includes(data.ctaPreference)) data.ctaPreference = "link_bio";
   return { data, errors };
 }
 
@@ -94,6 +103,9 @@ function publicState(c: CustomerRow) {
     customer: {
       company: c.company, contactName: c.contact_name, email: c.email, website: c.website ?? "",
       industry: c.industry ?? "", about: c.about ?? "", tone: c.tone, frequency: c.frequency, postTime: c.post_time,
+      accentColor: c.accent_color ?? "", watermarkText: c.watermark_text ?? "",
+      avoidTopics: c.avoid_topics ?? "", ctaPreference: c.cta_preference ?? "link_bio",
+      trialEndsAt: c.trial_ends_at,
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -174,10 +186,13 @@ export function createPanelRouter(): Router {
     const now = nowIso();
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
+         accent_color, watermark_text, avoid_topics, cta_preference,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
-      data.tone, data.frequency, data.postTime, sha256(randomToken()), now, now, now);
+      data.tone, data.frequency, data.postTime,
+      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+      sha256(randomToken()), now, now, now);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
     const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
@@ -196,10 +211,13 @@ export function createPanelRouter(): Router {
       return;
     }
     db.prepare(
-      `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?, updated_at=?
+      `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
+         accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
-      data.tone, data.frequency, data.postTime, nowIso(), c.id);
+      data.tone, data.frequency, data.postTime,
+      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+      nowIso(), c.id);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   }));
 
@@ -229,6 +247,16 @@ export function createPanelRouter(): Router {
     if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
     res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
     res.json({ ok: true });
+  });
+
+  // Der Kunde sieht nur seine eigenen Posts - nie die anderer Kunden oder Pauls eigenen Account.
+  router.get("/api/posts", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    res.json({ posts: listPostsForCustomer(c.id) });
   });
 
   router.post("/api/disconnect/:provider", (req, res) => {
