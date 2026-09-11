@@ -7,6 +7,7 @@ import { ensureAdminPassword, ensureAuthToken, writeAccessToken, writeLinkedInTo
 import { toToolMessage, ToolError } from "./errors.js";
 import {
   getPublishingLimit,
+  getRecentMedia,
   publishImageToInstagram,
   publishStoryToInstagram,
   refreshAccessToken,
@@ -14,7 +15,15 @@ import {
 } from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
-import { getCredentials, getCustomerOverview, listCustomers, logPost, startTokenRefreshSchedule } from "./panel/credentials.js";
+import {
+  getCachedStyleSamples,
+  getCredentials,
+  getCustomerOverview,
+  listCustomers,
+  logPost,
+  setCachedStyleSamples,
+  startTokenRefreshSchedule,
+} from "./panel/credentials.js";
 import {
   checkLinkedInToken,
   publishLinkedInImagePost,
@@ -567,6 +576,48 @@ function createServer(): McpServer {
         });
       } catch (error) {
         console.error("refresh_linkedin_token:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_customer_style_samples",
+    {
+      description:
+        "Fetch up to 10 of a customer's most recent OWN Instagram posts (caption, media type, date) via the " +
+        "Instagram Graph API. Read-only - publishes or changes nothing. Call this BEFORE writing a caption or " +
+        "headline for a customer, so you can match their existing tone of voice, emoji usage, hashtag style, " +
+        "and recurring topics instead of guessing from the briefing alone. Results are cached for 24h per " +
+        "customer (repeated calls the same day return instantly, no extra API usage). Returns an empty list " +
+        "if the customer has no Instagram connected or has no posts yet - fall back to the briefing in that case.",
+      inputSchema: { customer_id: z.string().describe("customerId eines Kunden aus `list_customers`.") },
+    },
+    async ({ customer_id }) => {
+      try {
+        const cached = getCachedStyleSamples(customer_id);
+        if (cached) {
+          return textResult({ samples: cached, cached: true });
+        }
+        let creds: InstagramCredentials | undefined;
+        try {
+          creds = await resolveInstagramCredentials(customer_id);
+        } catch (credError) {
+          // Nothing to learn from yet (not connected) is a normal, expected case here -
+          // unlike a real trial/token error, don't surface it as a tool failure.
+          if (credError instanceof Error && credError.message.includes("nicht verbunden")) {
+            return textResult({ samples: [], cached: false });
+          }
+          throw credError;
+        }
+        if (!creds) {
+          return textResult({ samples: [], cached: false });
+        }
+        const samples = await getRecentMedia(creds, 10);
+        setCachedStyleSamples(customer_id, samples);
+        return textResult({ samples, cached: false });
+      } catch (error) {
+        console.error("get_customer_style_samples:", toToolMessage(error));
         return errorResult(error);
       }
     },

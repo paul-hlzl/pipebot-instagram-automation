@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   token_hash TEXT PRIMARY KEY,
   expires_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS style_cache (
+  customer_id TEXT PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+  samples_json TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
 `);
 
 // Migration: add columns to a customers table that existed before this version.

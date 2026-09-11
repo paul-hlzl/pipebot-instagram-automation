@@ -15,7 +15,7 @@ um zu sehen, wo der Stand ist.
 | 3 | Admin-Dashboard | ✅ erledigt |
 | 4 | Posting-Rhythmus (isDue) | ✅ erledigt (Code) – Routine-Umstellung durch Paul nötig |
 | 5 | "Mit KI verbessern" | ✅ Code fertig, ⚠️ ANTHROPIC_API_KEY fehlt (Feature bleibt bis dahin ausgeblendet) |
-| 6 | Stil aus Instagram-Posts lernen | ⏳ offen |
+| 6 | Stil aus Instagram-Posts lernen | ✅ erledigt |
 | 7 | Kanal-/Formateinstellungen | ⏳ offen |
 | 8 | Onboarding aufwerten | ⏳ offen |
 | 9 | Kunden-Dashboard ausbauen | ⏳ offen |
@@ -214,14 +214,18 @@ Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Be
       Ton passend).
    d. Wiederhole das für jeden Kanal, den der Kunde verbunden hat (`channels`), sofern für
       LinkedIn ein eigenes Text-Tool nötig ist statt eines Bild-Posts.
+
+   Bevor du Headline und Caption formulierst: rufe `get_customer_style_samples` für diesen
+   Kunden auf. Wenn dort bisherige Posts zurückkommen, orientiere dich an Tonfall, Emoji-
+   Nutzung, Hashtag-Stil und wiederkehrenden Themen daraus, statt nur aus dem Briefing zu
+   raten. Kommt eine leere Liste zurück (noch keine Posts oder kein Instagram verbunden),
+   nutze wie bisher nur das Briefing.
 4. Poste NIE für einen Kunden mit `trialExpired: true` oder `dueNow: false` - auch nicht
    "vorsorglich" oder weil gerade sonst nichts zu tun ist.
 5. Bei einem Fehler für einen Kunden (z. B. abgelaufene Verbindung): den Kunden überspringen,
    kurz notieren welcher Fehler auftrat, und mit dem nächsten Kunden weitermachen - ein
    einzelner fehlerhafter Kunde darf den Lauf für alle anderen nicht abbrechen.
 ```
-
-*(wird nach Aufgabe 6 um einen Absatz zu `get_customer_style_samples` ergänzt - siehe dort.)*
 
 ## Aufgabe 5 – "Mit KI verbessern" ✅ Code fertig / ⚠️ Key fehlt
 
@@ -255,6 +259,25 @@ Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Be
 **Für Paul:** `ANTHROPIC_API_KEY` (und optional `ANTHROPIC_MODEL`) in `.env` eintragen -
 danach erscheint der Button automatisch, ohne weiteren Deploy-Schritt. Bis dahin bleibt das
 Feature sauber ausgeblendet, keine Fehler im laufenden Betrieb.
+
+## Aufgabe 6 – Stil aus bestehenden Instagram-Posts lernen ✅
+
+**Erledigt:**
+- `src/instagram.ts`: neue Funktion `getRecentMedia()` liest über die `/media`-Edge der
+  Instagram Graph API die letzten Posts (Felder `caption`, `media_type`, `timestamp` - genau
+  das, was `instagram_business_basic` abdeckt). Rein lesend, kein Schreibzugriff.
+- Neue Tabelle `style_cache` (additive Migration): ein JSON-Blob + Zeitstempel pro Kunde.
+  `getCachedStyleSamples()`/`setCachedStyleSamples()` in `credentials.ts` - Cache gilt 24h,
+  danach wird neu von Instagram geholt. Mit einem echten Staging-Kunden verifiziert (frisch →
+  `null`, nach dem Setzen da, nach simulierten 25h wieder `null`).
+- Neues MCP-Tool `get_customer_style_samples(customer_id)`: liefert zuerst aus dem Cache,
+  sonst live von Instagram (und cached danach). Kunde ohne verbundenes Instagram → leere
+  Liste statt Fehler (das ist ein normaler, erwarteter Fall hier, kein Tool-Fehler).
+- `npm run test:panel`: weiterhin grün (**32 passed**); ein echter Instagram-API-Aufruf lässt
+  sich ohne echten Kunden-Account nicht sinnvoll automatisiert testen - die Cache-Logik selbst
+  wurde stattdessen direkt gegen die Staging-DB geprüft (siehe oben).
+
+**Für Paul:** nichts zu tun.
 
 ---
 *(wird fortgesetzt)*

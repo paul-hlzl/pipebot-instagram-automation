@@ -263,6 +263,36 @@ export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost
   }));
 }
 
+const STYLE_CACHE_HOURS = 24;
+
+export interface CachedStyleSample {
+  caption: string | null;
+  mediaType: string;
+  timestamp: string;
+}
+
+/** Cached style samples for a customer if fetched within the last 24h, otherwise null (caller should re-fetch). */
+export function getCachedStyleSamples(customerId: string): CachedStyleSample[] | null {
+  const row = db.prepare("SELECT samples_json, fetched_at FROM style_cache WHERE customer_id = ?").get(customerId) as
+    | { samples_json: string; fetched_at: string }
+    | undefined;
+  if (!row) return null;
+  const ageMs = Date.now() - new Date(row.fetched_at).getTime();
+  if (ageMs > STYLE_CACHE_HOURS * 3_600_000) return null;
+  try {
+    return JSON.parse(row.samples_json) as CachedStyleSample[];
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedStyleSamples(customerId: string, samples: CachedStyleSample[]): void {
+  db.prepare(
+    `INSERT INTO style_cache (customer_id, samples_json, fetched_at) VALUES (?, ?, ?)
+     ON CONFLICT(customer_id) DO UPDATE SET samples_json = excluded.samples_json, fetched_at = excluded.fetched_at`,
+  ).run(customerId, JSON.stringify(samples), nowIso());
+}
+
 export function startTokenRefreshSchedule(intervalHours = 12): NodeJS.Timeout {
   const run = () => refreshExpiringTokens().then((r) => {
     if (r.refreshed.length || r.failed.length) console.log("[panel] Token-Refresh:", r);
