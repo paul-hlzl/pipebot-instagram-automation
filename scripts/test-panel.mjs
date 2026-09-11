@@ -54,6 +54,28 @@ async function main() {
   console.log(`Testing panel at ${BASE}${MOUNT} ...\n`);
   await waitForHealth();
 
+  // --- 0. /api/providers + improve-briefing feature flag ---
+  console.log("Feature-Flags:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const body = await res.json();
+    ok("/api/providers liefert aiAvailable", typeof body.aiAvailable === "boolean", JSON.stringify(body.aiAvailable));
+    if (!body.aiAvailable) {
+      const improveRes = await fetch(`${BASE}${MOUNT}/api/improve-briefing`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ company: "Test", industry: "Test", about: "ein paar Stichworte" }),
+      });
+      ok(
+        "improve-briefing ohne ANTHROPIC_API_KEY -> 503",
+        improveRes.status === 503,
+        `status=${improveRes.status} (aiAvailable war false)`,
+      );
+    } else {
+      console.log("  skip - ANTHROPIC_API_KEY ist gesetzt, 503-Check nicht anwendbar");
+    }
+  }
+
   // --- 1. Signup validation errors ---
   console.log("Signup - Validierung:");
   {

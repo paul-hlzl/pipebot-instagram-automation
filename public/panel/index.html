@@ -80,6 +80,12 @@
   .field label, .field legend { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
   .field .opt { color: var(--stone); font-weight: 400; }
   .field .hint { font-size: 13px; color: var(--stone); margin: 6px 0 0; }
+  .ai-box { background: var(--wash); border: 1px solid var(--rule); border-radius: 2px; padding: 14px 16px; margin-top: 10px; font-size: 14.5px; }
+  .ai-box p { margin: 0 0 12px; white-space: pre-wrap; }
+  .ai-box .row { display: flex; gap: 10px; }
+  .ai-box button { min-height: 36px; padding: 0 14px; border: 1px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--paper); cursor: pointer; font-size: 13.5px; }
+  .ai-box button.ghost { background: var(--paper); color: var(--ink); }
+  .ai-box button[disabled] { opacity: .6; pointer-events: none; }
   input[type=text], input[type=email], input[type=url], input[type=time], select, textarea {
     width: 100%; height: 48px; padding: 0 14px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; color: inherit;
   }
@@ -241,7 +247,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], customer: null, connections: [], step: "company", banner: null, skipped: new Set() };
+  const S = { providers: [], aiAvailable: false, customer: null, connections: [], step: "company", banner: null, skipped: new Set() };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -326,7 +332,8 @@
         <div class="field">
           <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
           <textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>
-          <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.</p>
+          <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
+          <div id="ai-suggestion" hidden></div>
         </div>
         <div class="field">
           <label for="f-tone">Tonalität</label>
@@ -546,6 +553,41 @@
     return open ? open.id : "done";
   }
 
+  async function improveBriefing() {
+    const btn = $("#ai-improve");
+    const form = $("#company");
+    const company = form.querySelector("[name=company]")?.value || "";
+    const industry = form.querySelector("[name=industry]")?.value || "";
+    const about = $("#f-about").value || "";
+    if (!about.trim()) {
+      $("#f-about").focus();
+      return;
+    }
+    const box = $("#ai-suggestion");
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = "Wird erstellt …";
+    box.hidden = true;
+    try {
+      const { suggestion } = await api("POST", "/api/improve-briefing", { company, industry, about });
+      box.dataset.suggestion = suggestion;
+      box.hidden = false;
+      box.className = "ai-box";
+      box.innerHTML = `<p>${esc(suggestion)}</p>
+        <div class="row">
+          <button type="button" data-ai-accept>Übernehmen</button>
+          <button type="button" class="ghost" data-ai-discard>Verwerfen</button>
+        </div>`;
+    } catch (err) {
+      box.hidden = false;
+      box.className = "ai-box";
+      box.innerHTML = `<p style="color:var(--stop)">${esc(err.message || "Der Vorschlag konnte gerade nicht erstellt werden.")}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+    }
+  }
+
   /* ================= Events ================= */
   document.addEventListener("click", async (e) => {
     const swatch = e.target.closest("[data-swatch]");
@@ -556,6 +598,21 @@
       document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === swatch)));
       return;
     }
+    if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("[data-ai-accept]")) {
+      const box = $("#ai-suggestion");
+      $("#f-about").value = box.dataset.suggestion;
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    if (e.target.closest("[data-ai-discard]")) {
+      const box = $("#ai-suggestion");
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+
     const t = e.target.closest("[data-go],[data-connect],[data-disconnect],#mklink,#logout,[data-copy]");
     if (!t) return;
 
@@ -648,7 +705,9 @@
   async function init() {
     if (DEMO) $("#demo").hidden = false;
     try {
-      S.providers = (await api("GET", "/api/providers")).providers;
+      const p = await api("GET", "/api/providers");
+      S.providers = p.providers;
+      S.aiAvailable = Boolean(p.aiAvailable);
     } catch {
       $("#stage").innerHTML = `<div class="banner bad" role="alert">Das Panel ist gerade nicht erreichbar. Bitte laden Sie die Seite in ein paar Minuten neu.</div>`;
       return;
@@ -699,7 +758,14 @@
 
   async function mockApi(method, url, body) {
     await sleep(250);
-    if (url === "/api/providers") return { providers: DEMO_PROVIDERS };
+    if (url === "/api/providers") return { providers: DEMO_PROVIDERS, aiAvailable: true };
+    if (url === "/api/improve-briefing") {
+      const company = body?.company || "Ihr Unternehmen";
+      const industry = body?.industry ? ` in der Branche ${body.industry}` : "";
+      return {
+        suggestion: `${company}${industry} richtet sich an lokale Kundinnen und Kunden, die auf der Suche nach einem verlässlichen Ansprechpartner sind. Im Mittelpunkt der Beiträge stehen konkrete Tipps aus dem Alltag, Einblicke hinter die Kulissen und die Themen, die die Zielgruppe wirklich bewegen. Ziel ist es, Vertrauen aufzubauen und neue Anfragen zu gewinnen. (Vorschau-Beispiel)`,
+      };
+    }
     if (url === "/api/me" && method === "GET") {
       if (!MOCK.customer) throw Object.assign(new Error("Nicht angemeldet"), { status: 401 });
       return mockState();

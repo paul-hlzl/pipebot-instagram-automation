@@ -7,6 +7,7 @@ import { ProviderError } from "./providers/types.js";
 import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
 import { isDue, nextPostAt } from "./schedule.js";
+import { anthropicAvailable, improveBriefing } from "../anthropic.js";
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
@@ -171,8 +172,40 @@ export function createPanelRouter(): Router {
       providers: providers.map((p) => ({
         id: p.id, name: p.name, tagline: p.tagline, notice: p.notice ?? null, guide: p.guide, available: p.isConfigured(),
       })),
+      aiAvailable: anthropicAvailable(),
     });
   });
+
+  // Nutzt Kunden-Stichworte + Firmenname/Branche, um einen konkreteren Briefing-Text
+  // vorzuschlagen. Funktioniert auch waehrend des Signups (noch keine Session) - daher kein
+  // currentCustomer()-Zwang, aber ein strenges IP-Rate-Limit gegen Missbrauch/Kosten.
+  router.post(
+    "/api/improve-briefing",
+    safe(async (req, res) => {
+      if (rateLimited(`improve:${clientIp(req)}`, 6, 10 * 60_000)) {
+        res.status(429).json({ error: "Zu viele Anfragen. Bitte in ein paar Minuten erneut versuchen." });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
+        return;
+      }
+      const company = str(req.body?.company, 120);
+      const industry = str(req.body?.industry, 120);
+      const about = str(req.body?.about, 2000);
+      if (!about) {
+        res.status(400).json({ error: "Bitte geben Sie zuerst ein paar Stichworte ein." });
+        return;
+      }
+      try {
+        const suggestion = await improveBriefing({ company, industry, about });
+        res.json({ suggestion });
+      } catch (err) {
+        console.error("[panel] improve-briefing fehlgeschlagen:", err);
+        res.status(502).json({ error: "Der Vorschlag konnte gerade nicht erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
 
   router.get("/api/me", (req, res) => {
     const c = currentCustomer(req);

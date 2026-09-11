@@ -14,7 +14,7 @@ um zu sehen, wo der Stand ist.
 | 2 | Probekonto (Trial) | ✅ erledigt |
 | 3 | Admin-Dashboard | ✅ erledigt |
 | 4 | Posting-Rhythmus (isDue) | ✅ erledigt (Code) – Routine-Umstellung durch Paul nötig |
-| 5 | "Mit KI verbessern" | ⏳ offen |
+| 5 | "Mit KI verbessern" | ✅ Code fertig, ⚠️ ANTHROPIC_API_KEY fehlt (Feature bleibt bis dahin ausgeblendet) |
 | 6 | Stil aus Instagram-Posts lernen | ⏳ offen |
 | 7 | Kanal-/Formateinstellungen | ⏳ offen |
 | 8 | Onboarding aufwerten | ⏳ offen |
@@ -222,6 +222,39 @@ Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Be
 ```
 
 *(wird nach Aufgabe 6 um einen Absatz zu `get_customer_style_samples` ergänzt - siehe dort.)*
+
+## Aufgabe 5 – "Mit KI verbessern" ✅ Code fertig / ⚠️ Key fehlt
+
+**Erledigt:**
+- `src/anthropic.ts`: `improveBriefing({company, industry, about})` ruft die Anthropic Messages
+  API auf (`POST https://api.anthropic.com/v1/messages`), System-Prompt auf Deutsch, liefert
+  einen konkreten 3-5-Satz-Absatz (Zielgruppe, Themen, Nutzen) zum direkten Übernehmen ins
+  Formularfeld - keine Anrede, keine Überschrift, keine Marketing-Floskeln.
+- `config.ts`: `anthropicApiKey`/`anthropicModel` (Default `claude-haiku-4-5-20251001`, über
+  `ANTHROPIC_MODEL` überschreibbar) - **optional**, kein `required()`, damit der Server ohne
+  Key wie bisher normal startet.
+- `.env`: zwei **auskommentierte** Beispielzeilen angehängt (`# ANTHROPIC_API_KEY=`,
+  `# ANTHROPIC_MODEL=...`) als Vorlage - keine echten Werte gesetzt, da mir kein Anthropic-Key
+  vorliegt.
+- `POST /panel/api/improve-briefing`: funktioniert auch **ohne Login** (während des Signups),
+  IP-Rate-Limit 6 Anfragen/10 Minuten, Eingabe `about` max. 2000 Zeichen, liefert `503` wenn
+  kein Key konfiguriert ist (Server-seitige Absicherung zusätzlich zum ausgeblendeten Button).
+- `GET /panel/api/providers` liefert zusätzlich `aiAvailable: boolean` - das Panel blendet den
+  "Mit KI verbessern"-Button beim Feld "Worum soll es in den Beiträgen gehen?" nur ein, wenn
+  dieses Flag `true` ist.
+- Panel-UI: Vorschlag erscheint unter dem Feld in einer eigenen Box mit "Übernehmen" (ersetzt
+  den Textarea-Inhalt) / "Verwerfen" (blendet die Box aus) - **überschreibt nie automatisch**.
+  Arbeitet direkt am DOM (kein Re-Render über `render()`), damit ungespeicherte Eingaben in
+  anderen Feldern währenddessen nicht verloren gehen.
+- Auch im Demo-/Vorschau-Modus nachgebildet (`aiAvailable: true`, realistischer Beispieltext
+  mit Hinweis "(Vorschau-Beispiel)").
+- `npm run test:panel`: prüft, dass `/api/providers` das Flag liefert, und dass
+  `/api/improve-briefing` ohne Key sauber `503` liefert statt eines Serverfehlers.
+  **32 passed, 0 failed.**
+
+**Für Paul:** `ANTHROPIC_API_KEY` (und optional `ANTHROPIC_MODEL`) in `.env` eintragen -
+danach erscheint der Button automatisch, ohne weiteren Deploy-Schritt. Bis dahin bleibt das
+Feature sauber ausgeblendet, keine Fehler im laufenden Betrieb.
 
 ---
 *(wird fortgesetzt)*
