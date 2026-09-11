@@ -132,6 +132,7 @@ async function main() {
     ok("trialExpired ist false fuer neuen Kunden", body.customer?.trialExpired === false);
     ok("nextPostAt ist ein gueltiges ISO-Datum", !Number.isNaN(Date.parse(body.customer?.nextPostAt ?? "")), `nextPostAt=${body.customer?.nextPostAt}`);
     ok("dueNow ist ein boolean", typeof body.customer?.dueNow === "boolean");
+    ok("contentPillars ist ein leeres Array ohne Angabe", Array.isArray(body.customer?.contentPillars) && body.customer.contentPillars.length === 0);
   }
 
   // --- 3. /api/me ---
@@ -175,6 +176,178 @@ async function main() {
     customerId = row?.id ?? "";
   } catch (e) {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
+  }
+
+  // --- 3b. Content-Saeulen (v4) --- reuses the main test customer's session via PATCH
+  // (not a fresh signup) so these extra checks don't eat into the 5/hour signup rate limit.
+  console.log("\nContent-Saeulen:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        contentPillars: [
+          { title: "Tipps", description: "Praktische Ratschläge", weight: 3 },
+          { title: "Hinter den Kulissen", weight: 1 },
+          { title: "", weight: 2 }, // leerer Titel muss verworfen werden
+        ],
+        bannedWords: "billig, Konkurrenzname",
+        requiredElements: "#MeineMarke",
+      }),
+    });
+    const body = await res.json();
+    ok("bannedWords wird gespeichert", body.customer?.bannedWords === "billig, Konkurrenzname", body.customer?.bannedWords);
+    ok("requiredElements wird gespeichert", body.customer?.requiredElements === "#MeineMarke", body.customer?.requiredElements);
+    const pillars = body.customer?.contentPillars ?? [];
+    ok("2 gueltige Saeulen gespeichert (leerer Titel verworfen)", pillars.length === 2, `got ${pillars.length}`);
+    ok("erste Saeule korrekt", pillars[0]?.title === "Tipps" && pillars[0]?.weight === 3, JSON.stringify(pillars[0]));
+
+    // Ueberschreiben (replace-all) via zweites PATCH
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        contentPillars: [{ title: "Nur noch eine", weight: 1 }],
+      }),
+    });
+    const patchBody = await patchRes.json();
+    ok("PATCH ersetzt Saeulen komplett", patchBody.customer?.contentPillars?.length === 1 && patchBody.customer.contentPillars[0].title === "Nur noch eine", JSON.stringify(patchBody.customer?.contentPillars));
+  }
+
+  // --- 3c. Granulare Zeitplanung (v4) --- ebenfalls per PATCH auf denselben Testkunden.
+  console.log("\nGranulare Zeitplanung:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        instagramWeekdays: "1,3,5", linkedinWeekdays: "2,4",
+        pauseFrom: "2099-01-01", pauseUntil: "2099-01-10", // weit in der Zukunft, beeinflusst "jetzt" nicht
+      }),
+    });
+    const body = await res.json();
+    ok("instagramWeekdays gespeichert", body.customer?.instagramWeekdays === "1,3,5", body.customer?.instagramWeekdays);
+    ok("linkedinWeekdays gespeichert", body.customer?.linkedinWeekdays === "2,4", body.customer?.linkedinWeekdays);
+    ok("pauseFrom/pauseUntil gespeichert", body.customer?.pauseFrom === "2099-01-01" && body.customer?.pauseUntil === "2099-01-10");
+    ok("instagramDueNow ist ein boolean", typeof body.customer?.instagramDueNow === "boolean");
+    ok("linkedinDueNow ist ein boolean", typeof body.customer?.linkedinDueNow === "boolean");
+  }
+
+  // --- 3d. POST /api/post-now ("Jetzt posten"-Warteschlange, v4) ---
+  console.log("\nJetzt posten:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ topic: "Herbstaktion" }),
+    });
+    const body = await res.json();
+    ok("post-now -> 200 mit pending request", res.status === 200 && body.request?.status === "pending", JSON.stringify(body));
+
+    const secondRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ topic: "Noch eins" }),
+    });
+    ok("zweite offene Anfrage -> 429 (max 1 gleichzeitig)", secondRes.status === 429, `status=${secondRes.status}`);
+
+    const meRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } });
+    const meBody = await meRes.json();
+    ok("lastPostRequest erscheint in /api/me", meBody.customer?.lastPostRequest?.topic === "Herbstaktion", JSON.stringify(meBody.customer?.lastPostRequest));
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/post-now`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: "x" }) });
+    ok("post-now ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+  }
+
+  // --- 3e. Freigabe-Modus (approval_mode, v4) - HTTP-Seite. Der volle Roundtrip inkl. der 3
+  // neuen MCP-Tools (save_pending_approval/list_approved_pending_posts/
+  // mark_pending_approval_published) wurde manuell gegen Staging verifiziert (siehe Report),
+  // MCP-Tool-Aufrufe lassen sich in diesem reinen HTTP-Testskript nicht sauber abbilden.
+  console.log("\nFreigabe-Modus:");
+  {
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", approvalMode: true }),
+    });
+    const patchBody = await patchRes.json();
+    ok("approvalMode wird gespeichert", patchBody.customer?.approvalMode === true, patchBody.customer?.approvalMode);
+
+    const approvalsRes = await fetch(`${BASE}${MOUNT}/api/approvals`, { headers: { cookie: sessionCookie } });
+    const approvalsBody = await approvalsRes.json();
+    ok("/api/approvals mit Login -> 200, leeres Array", approvalsRes.status === 200 && Array.isArray(approvalsBody.approvals) && approvalsBody.approvals.length === 0);
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/approvals`);
+    ok("/api/approvals ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/approvals/does-not-exist/approve`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Freigeben einer nicht existierenden Anfrage -> 404", approveRes.status === 404, `status=${approveRes.status}`);
+  }
+
+  // --- 3f. Mehrere Farbthemen (v4) ---
+  console.log("\nFarbthemen:");
+  {
+    const createRes = await fetch(`${BASE}${MOUNT}/api/themes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ name: "Sommer-Kampagne", accentColor: "#2e2410", watermarkText: "Sommer" }),
+    });
+    const createBody = await createRes.json();
+    ok("Thema anlegen -> 201", createRes.status === 201, `status=${createRes.status}`);
+    const themeId = createBody.theme?.id;
+    ok("Thema hat eine id", Boolean(themeId));
+
+    const activateRes = await fetch(`${BASE}${MOUNT}/api/themes/${themeId}/activate`, { method: "POST", headers: { cookie: sessionCookie } });
+    const activateBody = await activateRes.json();
+    ok("Aktivieren -> activeThemeId gesetzt", activateBody.customer?.activeThemeId === themeId, activateBody.customer?.activeThemeId);
+    ok("Formular-accentColor bleibt unveraendert (nur Panel-Feld, nicht das Thema)", typeof activateBody.customer?.accentColor === "string");
+
+    const deactivateRes = await fetch(`${BASE}${MOUNT}/api/themes/deactivate`, { method: "POST", headers: { cookie: sessionCookie } });
+    const deactivateBody = await deactivateRes.json();
+    ok("Deaktivieren -> activeThemeId wieder null", deactivateBody.customer?.activeThemeId === null, deactivateBody.customer?.activeThemeId);
+
+    const badActivateRes = await fetch(`${BASE}${MOUNT}/api/themes/does-not-exist/activate`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Aktivieren eines fremden/unbekannten Themas -> 404", badActivateRes.status === 404, `status=${badActivateRes.status}`);
+  }
+
+  // --- 3g. Eigenes Logo (v4) --- ein winziges 2x2-PNG reicht fuer den Roundtrip-Test,
+  // die echte Bild-Kompositing-Logik (Groesse/Platzierung) wurde manuell mit einem echten
+  // 300x300-Test-Logo gegen ein tatsaechlich generiertes Bild verifiziert (siehe Report).
+  console.log("\nLogo:");
+  {
+    const { default: sharp } = await import("sharp");
+    const tinyPngBuffer = await sharp({ create: { width: 4, height: 4, channels: 4, background: { r: 200, g: 30, b: 30, alpha: 1 } } })
+      .png()
+      .toBuffer();
+    const tinyPngBase64 = tinyPngBuffer.toString("base64");
+    const uploadRes = await fetch(`${BASE}${MOUNT}/api/logo`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ imageBase64: `data:image/png;base64,${tinyPngBase64}` }),
+    });
+    const uploadBody = await uploadRes.json();
+    ok("Logo-Upload -> 200, hasLogo true", uploadRes.status === 200 && uploadBody.customer?.hasLogo === true, JSON.stringify(uploadBody.customer?.hasLogo));
+
+    const getRes = await fetch(`${BASE}${MOUNT}/api/logo`, { headers: { cookie: sessionCookie } });
+    ok("GET /api/logo liefert das Bild -> 200", getRes.status === 200, `status=${getRes.status}`);
+    ok("GET /api/logo liefert image/png", (getRes.headers.get("content-type") || "").includes("image/png"), getRes.headers.get("content-type"));
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/logo`);
+    ok("GET /api/logo ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const badUploadRes = await fetch(`${BASE}${MOUNT}/api/logo`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ imageBase64: "data:text/plain;base64,aGVsbG8=" }),
+    });
+    ok("Upload einer Nicht-Bild-Datei -> 400", badUploadRes.status === 400, `status=${badUploadRes.status}`);
+
+    const deleteRes = await fetch(`${BASE}${MOUNT}/api/logo`, { method: "DELETE", headers: { cookie: sessionCookie } });
+    const deleteBody = await deleteRes.json();
+    ok("Logo entfernen -> hasLogo wieder false", deleteBody.customer?.hasLogo === false, deleteBody.customer?.hasLogo);
   }
 
   // --- 4a. POST /api/pause (customer's own pause toggle) ---

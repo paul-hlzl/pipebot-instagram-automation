@@ -3,10 +3,24 @@
  * posting routine can act on. Everything here is evaluated in Europe/Vienna wall-clock time
  * (the timezone customers actually think in when they pick "15:00"), regardless of the
  * server's own timezone.
+ *
+ * v4 adds granular per-weekday and per-channel scheduling plus a pause/vacation range, all
+ * additive and opt-in:
+ * - `isDue`/`nextPostAt` (no channel argument) keep their exact v3 behavior and signature -
+ *   they use `activeWeekdays` (falling back to `frequency` as before) and an any-provider
+ *   "already posted today" check, now also gated by `pauseFrom`/`pauseUntil`. A customer who
+ *   never touches the new fields sees identical results to before.
+ * - `isDueForChannel`/`nextPostAtForChannel` are new: they use `instagramWeekdays`/
+ *   `linkedinWeekdays` when set (falling back to `activeWeekdays`/`frequency` otherwise) and a
+ *   provider-specific "already posted today" check, so e.g. posting to Instagram today doesn't
+ *   falsely mark LinkedIn as done. Keeping these separate from the combined isDue avoids a
+ *   subtle bug: an OR-combined single `dueNow` would stay permanently true for a customer who
+ *   only uses one channel, because the other, never-posted-to channel would look "always due".
  */
 import { db } from "./db.js";
 
 export type Frequency = "taeglich" | "werktags" | "3x-woche";
+export type PostingChannel = "instagram" | "linkedin";
 
 // JS-style weekday numbers as produced by Intl's "short" weekday formatting below: Sun=0..Sat=6.
 const POSTING_DAYS: Record<Frequency, number[]> = {
@@ -68,8 +82,19 @@ function viennaWallClockToUtcIso(dateStr: string, hour: number, minute: number):
   return new Date(utcGuessMs).toISOString();
 }
 
-function postingDaysFor(frequency: string | null): number[] {
+function postingDaysFor(frequency: string | null | undefined): number[] {
   return POSTING_DAYS[(frequency as Frequency) ?? "werktags"] ?? POSTING_DAYS.werktags;
+}
+
+/** Parses a stored "1,3,5" weekday list (1=Monday..7=Sunday, the customer-facing convention) into internal Sun=0..Sat=6 numbers. */
+function parseWeekdayList(raw: string | null | undefined): number[] | null {
+  if (!raw) return null;
+  const days = raw
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
+    .map((n) => n % 7); // 1..6 stay 1..6 (Mon..Sat), 7 (Sun) becomes 0
+  return days.length ? days : null;
 }
 
 function parsePostTime(postTime: string | null): { hour: number; minute: number } {
@@ -77,20 +102,38 @@ function parsePostTime(postTime: string | null): { hour: number; minute: number 
   return m ? { hour: Number(m[1]), minute: Number(m[2]) } : { hour: 15, minute: 0 };
 }
 
-/** True if this customer already has a logged post on the given Vienna calendar date. */
-function hasPostOnViennaDate(customerId: string, dateStr: string): boolean {
+/** True if `dateStr` (Vienna calendar date, YYYY-MM-DD) falls within the customer's pause/vacation range (inclusive). */
+function isPausedOn(customer: ScheduleInput, dateStr: string): boolean {
+  if (!customer.pauseFrom || !customer.pauseUntil) return false;
+  return dateStr >= customer.pauseFrom && dateStr <= customer.pauseUntil;
+}
+
+/** True if this customer already has a logged post on the given Vienna calendar date (optionally restricted to one provider). */
+function hasPostOnViennaDate(customerId: string, dateStr: string, provider?: PostingChannel): boolean {
   // Posts cluster around "today" by definition, so the last handful is always enough to check -
   // avoids scanning the whole table for customers with a long history.
-  const rows = db
-    .prepare("SELECT posted_at FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 10")
-    .all(customerId) as { posted_at: string }[];
+  const rows = (
+    provider
+      ? db
+          .prepare("SELECT posted_at FROM posts WHERE customer_id = ? AND provider = ? ORDER BY posted_at DESC LIMIT 10")
+          .all(customerId, provider)
+      : db.prepare("SELECT posted_at FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 10").all(customerId)
+  ) as { posted_at: string }[];
   return rows.some((r) => viennaParts(new Date(r.posted_at)).dateStr === dateStr);
 }
 
-interface ScheduleInput {
+export interface ScheduleInput {
   customerId: string;
   frequency: string | null;
   postTime: string | null;
+  /** "1,3,5" style, 1=Monday..7=Sunday. Falls back to `frequency` when unset. */
+  activeWeekdays?: string | null;
+  /** Per-channel override of activeWeekdays. Falls back to activeWeekdays (then frequency) when unset. */
+  instagramWeekdays?: string | null;
+  linkedinWeekdays?: string | null;
+  /** Inclusive Vienna-date (YYYY-MM-DD) pause/vacation range. Nothing is due for either channel while "now" falls inside it. */
+  pauseFrom?: string | null;
+  pauseUntil?: string | null;
 }
 
 interface ScheduledSlot {
@@ -100,35 +143,55 @@ interface ScheduledSlot {
   iso: string;
 }
 
-/** The next posting slot (today or a future day) that doesn't have a post logged yet. */
-function nextSlot(customer: ScheduleInput, now: Date): ScheduledSlot {
-  const days = postingDaysFor(customer.frequency);
+const LOOKAHEAD_DAYS = 60; // generous enough to see past a long vacation pause and still find a slot
+
+function nextSlot(customer: ScheduleInput, now: Date, channel: PostingChannel | null): ScheduledSlot {
+  const channelSpecific = channel === "instagram" ? customer.instagramWeekdays : channel === "linkedin" ? customer.linkedinWeekdays : undefined;
+  const days = parseWeekdayList(channelSpecific) ?? parseWeekdayList(customer.activeWeekdays) ?? postingDaysFor(customer.frequency);
   const { hour, minute } = parsePostTime(customer.postTime);
-  for (let offset = 0; offset < 14; offset++) {
+  const provider = channel ?? undefined;
+
+  for (let offset = 0; offset < LOOKAHEAD_DAYS; offset++) {
     const candidate = new Date(now.getTime() + offset * 86_400_000);
     const { dateStr, weekday } = viennaParts(candidate);
+    if (isPausedOn(customer, dateStr)) continue;
     if (!days.includes(weekday)) continue;
-    if (hasPostOnViennaDate(customer.customerId, dateStr)) continue;
+    if (hasPostOnViennaDate(customer.customerId, dateStr, provider)) continue;
     return { dateStr, hour, minute, iso: viennaWallClockToUtcIso(dateStr, hour, minute) };
   }
-  // Should be unreachable (every frequency hits at least one day within a week), but keep a
-  // sane fallback instead of throwing.
+  // Should be unreachable outside of a 60-day-plus pause with no posting days at all, but keep
+  // a sane fallback instead of throwing.
   const { dateStr } = viennaParts(now);
   return { dateStr, hour, minute, iso: viennaWallClockToUtcIso(dateStr, hour, minute) };
 }
 
-/** ISO timestamp of this customer's next planned (not yet posted) slot. */
+function dueFromSlot(slot: ScheduledSlot, now: Date): boolean {
+  const today = viennaParts(now);
+  if (slot.dateStr !== today.dateStr) return false;
+  return today.hour * 60 + today.minute >= slot.hour * 60 + slot.minute;
+}
+
+/** ISO timestamp of this customer's next planned (not yet posted) slot - combined across channels, v3-compatible. */
 export function nextPostAt(customer: ScheduleInput, now: Date = new Date()): string {
-  return nextSlot(customer, now).iso;
+  return nextSlot(customer, now, null).iso;
 }
 
 /**
- * True exactly when: today is one of this customer's posting days, the configured post time
- * has been reached (Europe/Vienna wall clock), and no post has been logged for them today yet.
+ * True exactly when: today is not inside a pause/vacation range, today is one of this
+ * customer's posting days (`activeWeekdays`, falling back to `frequency`), the configured post
+ * time has been reached (Europe/Vienna wall clock), and no post has been logged for them today
+ * yet on any channel. Combined across channels, v3-compatible signature and behavior.
  */
 export function isDue(customer: ScheduleInput, now: Date = new Date()): boolean {
-  const today = viennaParts(now);
-  const slot = nextSlot(customer, now);
-  if (slot.dateStr !== today.dateStr) return false;
-  return today.hour * 60 + today.minute >= slot.hour * 60 + slot.minute;
+  return dueFromSlot(nextSlot(customer, now, null), now);
+}
+
+/** Same as `nextPostAt`, but for one specific channel - respects `instagramWeekdays`/`linkedinWeekdays` and only counts posts on that channel as "already posted". */
+export function nextPostAtForChannel(customer: ScheduleInput, channel: PostingChannel, now: Date = new Date()): string {
+  return nextSlot(customer, now, channel).iso;
+}
+
+/** Same as `isDue`, but for one specific channel - see `nextPostAtForChannel`. */
+export function isDueForChannel(customer: ScheduleInput, channel: PostingChannel, now: Date = new Date()): boolean {
+  return dueFromSlot(nextSlot(customer, now, channel), now);
 }

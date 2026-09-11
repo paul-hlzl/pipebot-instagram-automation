@@ -109,6 +109,13 @@
   .post-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 16px 0 8px; }
   .post-grid img, .post-grid .ph { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--wash); display: block; }
 
+  .approval-card { display: flex; gap: 16px; border: 1px solid var(--rule); border-radius: 2px; padding: 16px; margin-bottom: 12px; }
+  .approval-card img, .approval-card .ph { width: 96px; height: 96px; object-fit: cover; border-radius: 2px; background: var(--wash); flex: none; }
+  .approval-card .approval-body { flex: 1; min-width: 0; }
+  .approval-card .approval-body p { color: var(--stone); font-size: 14px; }
+  .approval-card .actions { margin-top: 10px; }
+  @media (max-width: 480px) { .approval-card { flex-direction: column; } .approval-card img, .approval-card .ph { width: 100%; height: auto; aspect-ratio: 1; } }
+
   .cal { margin: 16px 0 8px; }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   .cal-grid .hd { font-size: 11px; color: var(--stone); text-align: center; padding-bottom: 4px; }
@@ -137,6 +144,8 @@
   .seg span:hover { border-color: var(--ink); }
   .seg input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .seg.wd span { padding: 10px 4px; font-size: 13.5px; }
+  @media (max-width: 480px) { .seg.wd { flex-wrap: wrap; } .seg.wd label { flex: 1 1 40px; } }
   .check { display: grid; grid-template-columns: 22px 1fr; gap: 12px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; }
   .check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--ink); }
 
@@ -187,6 +196,14 @@
   .colorrow { display: flex; align-items: center; gap: 14px; }
   .colorrow input[type=text] { flex: 1; }
   .swatches { display: flex; gap: 8px; margin-top: 10px; }
+
+  .theme-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .theme-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 20px; text-decoration: none !important; }
+  .theme-chip[disabled] { border-color: var(--ink); font-weight: 600; cursor: default; }
+  .theme-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--rule); flex: none; }
+  .pillar-row { display: grid; grid-template-columns: 1fr 1.4fr 64px auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .pillar-row input, .pillar-row select { height: 40px; padding: 0 10px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; }
+  @media (max-width: 640px) { .pillar-row { grid-template-columns: 1fr; } }
   .swatch { width: 28px; height: 28px; border: 1px solid var(--rule); cursor: pointer; padding: 0; }
   .swatch[aria-pressed=true] { outline: 2px solid var(--ink); outline-offset: 2px; }
 
@@ -269,6 +286,21 @@
 
   const TONES = { sachlich: "Sachlich und kompetent", locker: "Locker und nahbar", inspirierend: "Inspirierend", humorvoll: "Mit Humor" };
   const FREQ = { "3x-woche": "3× pro Woche", werktags: "Werktags", taeglich: "Täglich" };
+  const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+  const FREQ_WEEKDAYS = { "3x-woche": [1, 3, 5], werktags: [1, 2, 3, 4, 5], taeglich: [1, 2, 3, 4, 5, 6, 7] };
+  // Pre-fills the weekday picker from an explicit "1,3,5"-style value if the customer already
+  // has one, otherwise derives it from the legacy `frequency` radio choice - so the old and new
+  // controls are never shown/edited at the same time, only one replaces the other on load.
+  const weekdaysFor = (explicit, frequency) => {
+    if (explicit) return explicit.split(",").map(Number).filter((n) => n >= 1 && n <= 7);
+    return FREQ_WEEKDAYS[frequency] || FREQ_WEEKDAYS.werktags;
+  };
+  const classifyFrequency = (days) => {
+    const key = [...days].sort((a, b) => a - b).join(",");
+    if (key === "1,2,3,4,5,6,7") return "taeglich";
+    if (key === "1,3,5") return "3x-woche";
+    return "werktags";
+  };
   const CTAS = { link_bio: "Link in der Bio", anrufen: "Anrufen", nachricht: "Nachricht senden", termin: "Termin buchen", keiner: "Kein Aufruf" };
   const HASHTAGS = { keine: "Keine", wenige: "Wenige (2-3)", viele: "Viele (5+)" };
   const LANGUAGES = { de: "Deutsch", en: "Englisch" };
@@ -342,6 +374,60 @@
     }).join("");
   }
 
+  /* ================= Farbthemen ================= */
+  function themesSectionHtml(c) {
+    const themes = c.savedThemes || [];
+    const activeName = themes.find((t) => t.id === c.activeThemeId)?.name;
+    return `
+      <label>Gespeicherte Farbthemen <span class="opt">(optional)</span></label>
+      ${c.activeThemeId ? `<p class="hint">Aktives Thema: <strong>${esc(activeName || "")}</strong> - <button type="button" class="link" id="theme-deactivate">stattdessen eigene Farbe oben verwenden</button></p>` : ""}
+      ${themes.length ? `<div class="theme-list">${themes.map((t) => `<button type="button" class="link theme-chip" data-theme-activate="${esc(t.id)}" ${c.activeThemeId === t.id ? "disabled" : ""}><span class="theme-dot" style="background:${esc(t.accentColor || "#0a0e1a")}"></span>${esc(t.name)}${c.activeThemeId === t.id ? " (aktiv)" : ""}</button>`).join("")}</div>` : ""}
+      <button type="button" class="link" id="theme-save">+ Aktuelle Farbe/Beschriftung als Thema speichern</button>`;
+  }
+
+  /* ================= Logo ================= */
+  function logoSectionHtml(c) {
+    return `
+      <label for="f-logo">Eigenes Logo <span class="opt">(optional, PNG oder JPG, max. 2 MB)</span></label>
+      <p class="hint">Wird klein am Bildrand angezeigt und ersetzt dort die Text-Beschriftung - kein Vollbild-Logo.</p>
+      <div id="logo-preview">${c.hasLogo ? `<img src="${DEMO && MOCK.logoDataUrl ? MOCK.logoDataUrl : `${CONFIG.mount}/api/logo?t=${Date.now()}`}" alt="Ihr Logo" style="width:64px;height:64px;object-fit:contain;background:var(--wash);border-radius:2px">` : ""}</div>
+      <input type="file" id="f-logo" accept="image/png,image/jpeg">
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="link" id="logo-upload" disabled>Logo hochladen</button>
+        ${c.hasLogo ? `<button type="button" class="link" id="logo-remove" style="color:var(--stop)">Logo entfernen</button>` : ""}
+      </div>`;
+  }
+
+  /* ================= Content-Säulen ================= */
+  function renderPillarsSection() {
+    const rows = S.pillarsDraft.map((p, i) => `
+      <div class="pillar-row" data-pillar-index="${i}">
+        <input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">
+        <input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">
+        <select data-pillar-weight aria-label="Gewichtung">${[1, 2, 3, 4, 5].map((w) => `<option value="${w}" ${p.weight === w ? "selected" : ""}>${w}×</option>`).join("")}</select>
+        <button type="button" class="link" data-pillar-remove="${i}">Entfernen</button>
+      </div>`).join("");
+    return `
+      <label>Content-Säulen <span class="opt">(optional)</span></label>
+      <p class="hint">Wiederkehrende Themen, zwischen denen automatisch abgewechselt wird (z. B. "Tipps", "Hinter den Kulissen", "Kundenstimmen"). Gewicht = wie oft im Vergleich zu den anderen dran. Ohne Säulen nutzen wir einfach Ihre Beschreibung oben.</p>
+      <div id="pillars-list">${rows}</div>
+      ${S.pillarsDraft.length < 6 ? `<button type="button" class="link" id="pillar-add">+ Säule hinzufügen</button>` : `<p class="hint">Maximal 6 Säulen.</p>`}`;
+  }
+
+  function syncPillarsDraftFromDom() {
+    const rows = document.querySelectorAll(".pillar-row");
+    if (!rows.length && !S.pillarsDraft.length) return;
+    const next = [];
+    rows.forEach((row) => {
+      next.push({
+        title: row.querySelector("[data-pillar-title]")?.value || "",
+        description: row.querySelector("[data-pillar-desc]")?.value || "",
+        weight: Number(row.querySelector("[data-pillar-weight]")?.value) || 1,
+      });
+    });
+    S.pillarsDraft = next;
+  }
+
   /* ================= Rendering: Schritte ================= */
   function bannerHtml() {
     if (!S.banner) return "";
@@ -352,7 +438,9 @@
     const c = S.customer || {
       tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
       igFeedEnabled: true, igStoryEnabled: true, linkedinEnabled: true, hashtagPreference: "wenige", emojisEnabled: true, language: "de",
+      contentPillars: [],
     };
+    S.pillarsDraft = (c.contentPillars || []).map((p) => ({ title: p.title || "", description: p.description || "", weight: p.weight || 1 }));
     const edit = !!S.customer;
     const twoPart = !edit; // Beim Bearbeiten alles auf einer Seite - der Kunde kennt das Formular schon.
     const part = twoPart ? S.formPart : 1;
@@ -385,7 +473,8 @@
           <textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>
           <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
           <div id="ai-suggestion" hidden></div>
-        </div>`;
+        </div>
+        <div class="field" id="pillars-section">${renderPillarsSection()}</div>`;
 
     const partBHtml = `
         <div class="field">
@@ -402,7 +491,7 @@
             <div class="swatches" role="group" aria-label="Vorschläge">
               ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
             </div>
-            <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.</p>
+            <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Thema unten verwendet.</strong>" : ""}</p>
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
@@ -415,15 +504,30 @@
             </div>
           </div>
         </div>
+        ${edit ? `<div class="field" id="themes-section">${themesSectionHtml(c)}</div>` : ""}
+        ${edit ? `<div class="field" id="logo-section">${logoSectionHtml(c)}</div>` : ""}
+        <fieldset class="field">
+          <legend>An welchen Tagen posten - Instagram?</legend>
+          <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+        </fieldset>
+        <fieldset class="field">
+          <legend>An welchen Tagen posten - LinkedIn?</legend>
+          <div class="seg wd" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+        </fieldset>
         <div class="grid2">
-          <fieldset class="field">
-            <legend>Wie oft posten?</legend>
-            <div class="seg">${Object.entries(FREQ).map(([k, v]) => `<label><input type="radio" name="frequency" value="${k}" ${c.frequency === k ? "checked" : ""}><span>${v}</span></label>`).join("")}</div>
-          </fieldset>
           <div class="field">
             <label for="f-postTime">Um wie viel Uhr?</label>
             <input id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900">
           </div>
+          <div class="field">
+            <label for="f-pauseFrom">Pause/Urlaub von <span class="opt">(optional)</span></label>
+            <input id="f-pauseFrom" name="pauseFrom" type="date" value="${esc(c.pauseFrom || "")}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-pauseUntil">Pause/Urlaub bis <span class="opt">(optional)</span></label>
+          <input id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}">
+          <p class="hint">In diesem Zeitraum wird für Sie nichts veröffentlicht.</p>
         </div>
         <div class="grid2">
           <div class="field">
@@ -433,7 +537,18 @@
           <div class="field">
             <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
             <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
+            <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
           </div>
+        </div>
+        <div class="field">
+          <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
+          <input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">
+          <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
+        </div>
+        <div class="field">
+          <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
+          <input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">
+          <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
         </div>
         <div class="field">
           <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
@@ -442,6 +557,7 @@
           <label class="check"><input type="checkbox" name="linkedinEnabled" ${c.linkedinEnabled !== false ? "checked" : ""}><span>LinkedIn-Beiträge</span></label>
           <p class="hint">Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.</p>
         </div>
+        <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben - bevor etwas online geht, prüfen Sie es im Dashboard und geben es frei.</span></label>
         <div class="grid2">
           <div class="field">
             <label for="f-hashtagPreference">Hashtags</label>
@@ -559,6 +675,18 @@
     `;
   }
 
+  function hasOpenPostRequest(c) {
+    return c.lastPostRequest && c.lastPostRequest.status === "pending";
+  }
+
+  function postNowStatusHtml(req) {
+    if (!req) return "";
+    const topicPart = req.topic ? `: "${esc(req.topic)}"` : "";
+    return req.status === "pending"
+      ? `<div class="banner" role="status">Ausstehend${topicPart} - angefragt am ${esc(fmtDate(req.createdAt))}.</div>`
+      : `<div class="banner ok" role="status">Erledigt${topicPart}.</div>`;
+  }
+
   function statusHtml(c) {
     if (c.trialExpired) return `<span class="dash-status warn">Trial abgelaufen</span>`;
     if (c.customerPaused) return `<span class="dash-status warn">Pausiert (von Ihnen)</span>`;
@@ -605,6 +733,18 @@
         <button class="btn" data-go="company">Stil bearbeiten</button>
         <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
         <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
+      </div>
+      ${c.approvalMode ? `<h2>Warten auf Ihre Freigabe</h2>
+      <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
+      <h2>Jetzt posten</h2>
+      <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wir übernehmen das beim nächsten Lauf.</p>
+      ${postNowStatusHtml(c.lastPostRequest)}
+      <div class="field">
+        <label for="f-postNowTopic" class="vh">Thema (optional)</label>
+        <input id="f-postNowTopic" type="text" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${hasOpenPostRequest(c) ? "disabled" : ""}>
+      </div>
+      <div class="actions">
+        <button class="btn" id="post-now-btn" ${hasOpenPostRequest(c) ? "disabled" : ""}>Jetzt zu diesem Thema posten</button>
       </div>
       <h2>Letzte Beiträge</h2>
       <div id="dash-posts" class="post-grid"><p class="empty">Wird geladen …</p></div>
@@ -665,6 +805,30 @@
       if (postsBox) postsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
       if (calBox) calBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
     }
+
+    const approvalsBox = $("#dash-approvals");
+    if (approvalsBox) {
+      try {
+        const { approvals } = await api("GET", "/api/approvals");
+        approvalsBox.innerHTML = approvals.length ? approvals.map(approvalCardHtml).join("") : `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch {
+        approvalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
+      }
+    }
+  }
+
+  function approvalCardHtml(a) {
+    return `<div class="approval-card" data-approval-id="${esc(a.id)}">
+      ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : `<div class="ph"></div>`}
+      <div class="approval-body">
+        ${a.headline ? `<strong>${esc(a.headline)}</strong>` : ""}
+        ${a.caption ? `<p>${esc(a.caption)}</p>` : ""}
+        <div class="actions">
+          <button class="btn" data-approve="${esc(a.id)}">Freigeben</button>
+          <button class="link" data-reject="${esc(a.id)}">Ablehnen</button>
+        </div>
+      </div>
+    </div>`;
   }
 
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
@@ -762,6 +926,34 @@
     }
   });
 
+  let pendingLogoDataUrl = null;
+  document.addEventListener("change", (e) => {
+    if (e.target.id !== "f-logo") return;
+    const file = e.target.files?.[0];
+    const uploadBtn = $("#logo-upload");
+    pendingLogoDataUrl = null;
+    if (uploadBtn) uploadBtn.disabled = true;
+    if (!file) return;
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      alert("Bitte eine PNG- oder JPG-Datei wählen.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Datei zu groß - maximal 2 MB.");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      pendingLogoDataUrl = reader.result;
+      const preview = $("#logo-preview");
+      if (preview) preview.innerHTML = `<img src="${pendingLogoDataUrl}" alt="Vorschau" style="width:64px;height:64px;object-fit:contain;background:var(--wash);border-radius:2px">`;
+      if (uploadBtn) uploadBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  });
+
   async function improveBriefing() {
     const btn = $("#ai-improve");
     const form = $("#company");
@@ -811,6 +1003,83 @@
     const formPartBtn = e.target.closest("[data-formpart]");
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("#logo-upload")) {
+      const btn = e.target.closest("#logo-upload");
+      if (!pendingLogoDataUrl) return;
+      btn.classList.add("busy");
+      try {
+        applyState(await api("POST", "/api/logo", { imageBase64: pendingLogoDataUrl }));
+        pendingLogoDataUrl = null;
+        const section = $("#logo-section");
+        if (section) section.innerHTML = logoSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Hochladen fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
+    if (e.target.closest("#logo-remove")) {
+      if (!confirm("Logo entfernen? Danach wird wieder die Text-Beschriftung verwendet.")) return;
+      try {
+        applyState(await api("DELETE", "/api/logo"));
+        const section = $("#logo-section");
+        if (section) section.innerHTML = logoSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht entfernt werden.");
+      }
+      return;
+    }
+    if (e.target.closest("#theme-save")) {
+      const name = prompt("Name für dieses Farbthema (z. B. \"Sommer-Kampagne\"):");
+      if (!name || !name.trim()) return;
+      try {
+        const accentColor = $("#f-accentColor")?.value || "";
+        const watermarkText = $("#f-watermarkText")?.value || "";
+        const result = await api("POST", "/api/themes", { name: name.trim(), accentColor, watermarkText });
+        S.customer.savedThemes = result.savedThemes;
+        const section = $("#themes-section");
+        if (section) section.innerHTML = themesSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht gespeichert werden.");
+      }
+      return;
+    }
+    const activateBtn = e.target.closest("[data-theme-activate]");
+    if (activateBtn) {
+      try {
+        applyState(await api("POST", `/api/themes/${activateBtn.dataset.themeActivate}/activate`));
+        const section = $("#themes-section");
+        if (section) section.innerHTML = themesSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht aktiviert werden.");
+      }
+      return;
+    }
+    if (e.target.closest("#theme-deactivate")) {
+      try {
+        applyState(await api("POST", "/api/themes/deactivate"));
+        const section = $("#themes-section");
+        if (section) section.innerHTML = themesSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht geändert werden.");
+      }
+      return;
+    }
+    if (e.target.closest("#pillar-add")) {
+      syncPillarsDraftFromDom();
+      if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: "", description: "", weight: 1 });
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      return;
+    }
+    const pillarRemove = e.target.closest("[data-pillar-remove]");
+    if (pillarRemove) {
+      syncPillarsDraftFromDom();
+      S.pillarsDraft.splice(Number(pillarRemove.dataset.pillarRemove), 1);
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      return;
+    }
     if (e.target.closest("[data-ai-accept]")) {
       const box = $("#ai-suggestion");
       $("#f-about").value = box.dataset.suggestion;
@@ -825,6 +1094,40 @@
       return;
     }
 
+    const approveBtn = e.target.closest("[data-approve]");
+    const rejectBtn = e.target.closest("[data-reject]");
+    if (approveBtn || rejectBtn) {
+      const btn = approveBtn || rejectBtn;
+      const id = btn.dataset.approve || btn.dataset.reject;
+      const action = approveBtn ? "approve" : "reject";
+      if (action === "reject" && !confirm("Diesen Beitrag ablehnen? Er wird dann nicht veröffentlicht.")) return;
+      btn.classList.add("busy");
+      try {
+        await api("POST", `/api/approvals/${id}/${action}`);
+        btn.closest(".approval-card")?.remove();
+        const box = $("#dash-approvals");
+        if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch (err) {
+        alert(err.message || "Aktion fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
+    if (e.target.closest("#post-now-btn")) {
+      const btn = e.target.closest("#post-now-btn");
+      const topic = $("#f-postNowTopic")?.value || "";
+      btn.classList.add("busy");
+      try {
+        const { request } = await api("POST", "/api/post-now", { topic });
+        S.customer.lastPostRequest = request;
+        S.banner = { kind: "ok", text: "Angefragt - wir kümmern uns beim nächsten Lauf darum." };
+        render(true);
+      } catch (err) {
+        alert(err.message || "Anfrage fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#toggle-pause")) {
       const nextPaused = !S.customer.customerPaused;
       if (nextPaused && !confirm("Posting pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht, bis Sie es wieder fortsetzen.")) return;
@@ -912,6 +1215,15 @@
     body.igStoryEnabled = !!form.igStoryEnabled?.checked;
     body.linkedinEnabled = !!form.linkedinEnabled?.checked;
     body.emojisEnabled = !!form.emojisEnabled?.checked;
+    body.approvalMode = !!form.approvalMode?.checked;
+    syncPillarsDraftFromDom();
+    body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
+    const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
+    const liDays = Array.from(form.querySelectorAll('[data-weekday-channel="linkedin"] input:checked')).map((el) => Number(el.value));
+    body.instagramWeekdays = igDays.join(",");
+    body.linkedinWeekdays = liDays.join(",");
+    body.activeWeekdays = body.instagramWeekdays;
+    body.frequency = classifyFrequency(igDays.length ? igDays : [1, 2, 3, 4, 5]);
 
     form.querySelectorAll(".err").forEach((n) => n.remove());
     form.querySelectorAll("[aria-invalid]").forEach((n) => n.removeAttribute("aria-invalid"));
@@ -1050,6 +1362,37 @@
     if (url === "/api/pause") {
       MOCK.customer = { ...MOCK.customer, customerPaused: body.paused === true, dueNow: body.paused === true ? false : MOCK.customer.dueNow };
       return mockState();
+    }
+    if (url === "/api/approvals") return { approvals: [] };
+    if (url === "/api/logo" && method === "POST") {
+      MOCK.logoDataUrl = body.imageBase64;
+      MOCK.customer = { ...MOCK.customer, hasLogo: true };
+      return mockState();
+    }
+    if (url === "/api/logo" && method === "DELETE") {
+      MOCK.logoDataUrl = null;
+      MOCK.customer = { ...MOCK.customer, hasLogo: false };
+      return mockState();
+    }
+    if (url === "/api/themes") {
+      const theme = { id: `theme_${Date.now()}`, name: body.name, accentColor: body.accentColor || null, watermarkText: body.watermarkText || null, createdAt: new Date().toISOString() };
+      MOCK.customer.savedThemes = [...(MOCK.customer.savedThemes || []), theme];
+      return { ok: true, theme, savedThemes: MOCK.customer.savedThemes };
+    }
+    if (/^\/api\/themes\/.+\/activate$/.test(url)) {
+      const id = url.split("/")[3];
+      MOCK.customer = { ...MOCK.customer, activeThemeId: id };
+      return mockState();
+    }
+    if (url === "/api/themes/deactivate") {
+      MOCK.customer = { ...MOCK.customer, activeThemeId: null };
+      return mockState();
+    }
+    if (/^\/api\/approvals\/.+\/(approve|reject)$/.test(url)) return { ok: true };
+    if (url === "/api/post-now") {
+      const request = { id: "preq_demo", topic: body.topic || "", status: "pending", createdAt: new Date().toISOString() };
+      MOCK.customer = { ...MOCK.customer, lastPostRequest: request };
+      return { ok: true, request };
     }
     if (url === "/api/me" && method === "DELETE") {
       MOCK.customer = null; MOCK.connections = [];

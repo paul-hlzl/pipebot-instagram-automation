@@ -115,6 +115,27 @@ export async function addHeadlineText(
 }
 
 /**
+ * Composites a customer's own uploaded logo, small, in the bottom-right corner - used
+ * INSTEAD of the text watermark when a customer has one (see addPipelineWatermark). Kept
+ * deliberately small and corner-only per the panel's own copy ("kein Vollbild-Logo").
+ */
+async function compositeLogoWatermark(imageBuffer: Buffer, logoPath: string, width: number, height: number): Promise<Buffer> {
+  const maxLogoSize = Math.round(Math.min(width, height) * 0.16);
+  const margin = Math.round(Math.min(width, height) * 0.05);
+  const logoBuffer = await sharp(logoPath)
+    .resize(maxLogoSize, maxLogoSize, { fit: "inside", withoutEnlargement: true })
+    .toBuffer();
+  const logoMeta = await sharp(logoBuffer).metadata();
+  const logoW = logoMeta.width ?? maxLogoSize;
+  const logoH = logoMeta.height ?? maxLogoSize;
+
+  return sharp(imageBuffer)
+    .composite([{ input: logoBuffer, left: Math.max(0, width - margin - logoW), top: Math.max(0, height - margin - logoH) }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+/**
  * Composites a large, rotated, translucent "Pipeline" watermark along the right edge
  * of the image. Done in code rather than via the image-generation prompt because
  * text-to-image models render rotated text and precise opacity unreliably
@@ -128,10 +149,21 @@ export async function addPipelineWatermark(
   imageBuffer: Buffer,
   format: PostFormat = "feed",
   watermarkText: string = "Pipeline",
+  logoPath?: string | null,
 ): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
   const height = meta.height ?? 1024;
+
+  if (logoPath) {
+    try {
+      return await compositeLogoWatermark(imageBuffer, logoPath, width, height);
+    } catch (err) {
+      // Bad/missing/corrupt logo file must never break image generation - fall back to the
+      // text watermark below exactly as if no logo were configured.
+      console.error(`[watermark] Logo ${logoPath} konnte nicht eingefügt werden, falle auf Text-Wasserzeichen zurück:`, err);
+    }
+  }
 
   const fontSize = Math.round(height * 0.11);
   const marginRight = Math.round(width * (format === "story" ? 0.1 : 0.07));

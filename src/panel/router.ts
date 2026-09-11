@@ -1,14 +1,36 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import path from "node:path";
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import sharp from "sharp";
 import { PACKAGE_ROOT } from "../config.js";
 import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
+import {
+  activateSavedTheme,
+  connectionStatus,
+  createPostRequest,
+  createSavedTheme,
+  deactivateTheme,
+  isTrialExpired,
+  lastPostRequestForCustomer,
+  listContentPillars,
+  listPendingApprovalsForCustomer,
+  listPostsForCustomer,
+  listSavedThemes,
+  openPostRequestCount,
+  POST_REQUEST_MAX_OPEN,
+  POST_REQUEST_MAX_PER_DAY,
+  postRequestCountToday,
+  scheduleInputFor,
+  setContentPillars,
+  setPendingApprovalStatus,
+  trialDaysLeft,
+} from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
-import { isDue, nextPostAt } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt } from "./schedule.js";
 import { anthropicAvailable, improveBriefing } from "../anthropic.js";
 
 const VERSION: string = (() => {
@@ -21,6 +43,8 @@ const VERSION: string = (() => {
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
+const LOGO_DIR = path.join(PACKAGE_ROOT, "data/logos");
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const SESSION_DAYS = 90;
 const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
@@ -89,9 +113,37 @@ const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean"
 interface BriefingInput {
   company: string; contactName: string; email: string; website: string; industry: string;
   about: string; tone: string; frequency: string; postTime: string;
-  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string;
+  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string; bannedWords: string; requiredElements: string;
   igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
   hashtagPreference: string; emojisEnabled: boolean; language: string;
+  contentPillars: { title: string; description?: string; weight?: number }[];
+  activeWeekdays: string; instagramWeekdays: string; linkedinWeekdays: string;
+  pauseFrom: string; pauseUntil: string;
+  approvalMode: boolean;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Normalizes a "1,3,5"-style weekday list: valid digits 1-7 only, deduplicated, sorted - empty string if nothing usable survives. */
+function cleanWeekdayList(raw: unknown, max: number): string {
+  const s = str(raw, max);
+  if (!s) return "";
+  const days = [...new Set(s.split(",").map((d) => Number(d.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7))].sort((a, b) => a - b);
+  return days.join(",");
+}
+
+/** Content pillars come from the JSON body as an array - validate shape defensively, drop anything malformed instead of erroring the whole save. */
+function parsePillarsInput(raw: unknown): { title: string; description?: string; weight?: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
+    .map((p) => ({
+      title: str(p.title, 60),
+      description: str(p.description, 300),
+      weight: Number.isFinite(Number(p.weight)) ? Number(p.weight) : 1,
+    }))
+    .filter((p) => p.title)
+    .slice(0, 6);
 }
 
 function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; errors: Record<string, string> } {
@@ -109,14 +161,30 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     watermarkText: str(body.watermarkText, 40),
     avoidTopics: str(body.avoidTopics, 500),
     ctaPreference: str(body.ctaPreference, 30),
+    bannedWords: str(body.bannedWords, 500),
+    requiredElements: str(body.requiredElements, 500),
     igFeedEnabled: bool(body.igFeedEnabled, true),
     igStoryEnabled: bool(body.igStoryEnabled, true),
     linkedinEnabled: bool(body.linkedinEnabled, true),
     hashtagPreference: str(body.hashtagPreference, 20) || "wenige",
     emojisEnabled: bool(body.emojisEnabled, true),
     language: str(body.language, 5) || "de",
+    contentPillars: parsePillarsInput(body.contentPillars),
+    activeWeekdays: cleanWeekdayList(body.activeWeekdays, 20),
+    instagramWeekdays: cleanWeekdayList(body.instagramWeekdays, 20),
+    linkedinWeekdays: cleanWeekdayList(body.linkedinWeekdays, 20),
+    pauseFrom: str(body.pauseFrom, 10),
+    pauseUntil: str(body.pauseUntil, 10),
+    approvalMode: bool(body.approvalMode, false),
   };
   const errors: Record<string, string> = {};
+  if (data.pauseFrom && !ISO_DATE.test(data.pauseFrom)) data.pauseFrom = "";
+  if (data.pauseUntil && !ISO_DATE.test(data.pauseUntil)) data.pauseUntil = "";
+  // A pause end before its start makes no sense - drop both rather than silently misbehaving.
+  if (data.pauseFrom && data.pauseUntil && data.pauseUntil < data.pauseFrom) {
+    data.pauseFrom = "";
+    data.pauseUntil = "";
+  }
   if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
   if (!data.contactName) errors.contactName = "Bitte geben Sie Ihren Namen ein.";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email)) errors.email = "Bitte geben Sie eine gültige E-Mail-Adresse ein.";
@@ -138,15 +206,27 @@ function publicState(c: CustomerRow) {
       industry: c.industry ?? "", about: c.about ?? "", tone: c.tone, frequency: c.frequency, postTime: c.post_time,
       accentColor: c.accent_color ?? "", watermarkText: c.watermark_text ?? "",
       avoidTopics: c.avoid_topics ?? "", ctaPreference: c.cta_preference ?? "link_bio",
+      bannedWords: c.banned_words ?? "",
+      requiredElements: c.required_elements ?? "",
       trialEndsAt: c.trial_ends_at,
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
-      nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
-      dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      nextPostAt: nextPostAt(scheduleInputFor(c)),
+      dueNow: c.customer_paused ? false : isDue(scheduleInputFor(c)),
+      instagramDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
+      linkedinDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
+      activeWeekdays: c.active_weekdays, instagramWeekdays: c.instagram_weekdays, linkedinWeekdays: c.linkedin_weekdays,
+      pauseFrom: c.pause_from, pauseUntil: c.pause_until,
+      approvalMode: Boolean(c.approval_mode),
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
       customerPaused: Boolean(c.customer_paused),
+      contentPillars: listContentPillars(c.id),
+      lastPostRequest: lastPostRequestForCustomer(c.id),
+      savedThemes: listSavedThemes(c.id),
+      activeThemeId: c.active_theme_id,
+      hasLogo: Boolean(c.logo_url),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -188,6 +268,86 @@ export function createPanelRouter(): Router {
     );
     next();
   });
+  // Logo-Upload (Aufgabe 9): eigener, groesserer JSON-Parser NUR fuer diese Route, registriert
+  // VOR dem globalen 50kb-Parser unten - der wuerde ein Base64-Bild sonst schon ablehnen,
+  // bevor der Handler hier ueberhaupt laeuft.
+  router.post(
+    "/api/logo",
+    express.json({ limit: "3mb" }),
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const raw = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64.trim() : "";
+      const match = /^data:image\/(png|jpe?g);base64,([a-z0-9+/=\s]+)$/i.exec(raw);
+      if (!match) {
+        res.status(400).json({ error: "Bitte eine PNG- oder JPG-Datei hochladen." });
+        return;
+      }
+      const buffer = Buffer.from(match[2], "base64");
+      if (buffer.length > LOGO_MAX_BYTES) {
+        res.status(400).json({ error: "Datei zu groß - maximal 2 MB." });
+        return;
+      }
+      let resized: Buffer;
+      try {
+        resized = await sharp(buffer).resize(512, 512, { fit: "inside", withoutEnlargement: true }).png().toBuffer();
+      } catch {
+        res.status(400).json({ error: "Die Datei konnte nicht als Bild gelesen werden." });
+        return;
+      }
+      await fsPromises.mkdir(LOGO_DIR, { recursive: true });
+      const logoPath = path.join(LOGO_DIR, `${c.id}.png`);
+      await fsPromises.writeFile(logoPath, resized);
+      db.prepare("UPDATE customers SET logo_url = ?, updated_at = ? WHERE id = ?").run(logoPath, nowIso(), c.id);
+      res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+    }),
+  );
+
+  // Liefert das eigene Logo zurueck (fuer die Vorschau im Formular) - nie oeffentlich, immer
+  // nur mit gueltiger Kunden-Session, nie der Pfad eines anderen Kunden erratbar.
+  router.get(
+    "/api/logo",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const row = db.prepare("SELECT logo_url FROM customers WHERE id = ?").get(c.id) as { logo_url: string | null } | undefined;
+      if (!row?.logo_url) {
+        res.status(404).end();
+        return;
+      }
+      try {
+        await fsPromises.access(row.logo_url);
+      } catch {
+        res.status(404).end();
+        return;
+      }
+      res.sendFile(row.logo_url);
+    }),
+  );
+
+  router.delete(
+    "/api/logo",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const row = db.prepare("SELECT logo_url FROM customers WHERE id = ?").get(c.id) as { logo_url: string | null } | undefined;
+      if (row?.logo_url) {
+        await fsPromises.unlink(row.logo_url).catch(() => {});
+      }
+      db.prepare("UPDATE customers SET logo_url = NULL, updated_at = ? WHERE id = ?").run(nowIso(), c.id);
+      res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+    }),
+  );
+
   router.use(express.json({ limit: "50kb" }));
 
   router.use("/admin", createAdminRouter());
@@ -276,14 +436,17 @@ export function createPanelRouter(): Router {
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
-         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language,
+         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements,
+         active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
-      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0,
       sha256(randomToken()), now, now, now);
+    setContentPillars(id, data.contentPillars);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
     const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
@@ -304,13 +467,16 @@ export function createPanelRouter(): Router {
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
-         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, updated_at=?
+         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
+         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
-      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0,
       nowIso(), c.id);
+    setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   }));
 
@@ -346,7 +512,7 @@ export function createPanelRouter(): Router {
   // Konto loeschen, nie ein anderer Kunde und nie ein Admin ueber die Oberflaeche (Meta
   // verlangt so einen Selbstbedienungs-Weg fuer instagram_business_basic/-content_publish).
   // ON DELETE CASCADE auf connections/sessions/oauth_states/posts/style_cache raeumt alles auf.
-  router.delete("/api/me", safe((req, res) => {
+  router.delete("/api/me", safe(async (req, res) => {
     const c = currentCustomer(req);
     if (!c) {
       res.status(401).json({ error: "Nicht angemeldet" });
@@ -355,6 +521,10 @@ export function createPanelRouter(): Router {
     if (req.body?.confirm !== true) {
       res.status(400).json({ error: "Bestätigung erforderlich." });
       return;
+    }
+    // Logo liegt als Datei auf der Platte, nicht in der DB - CASCADE raeumt es nicht mit auf.
+    if (c.logo_url) {
+      await fsPromises.unlink(c.logo_url).catch(() => {});
     }
     db.prepare("DELETE FROM customers WHERE id = ?").run(c.id);
     res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
@@ -393,6 +563,111 @@ export function createPanelRouter(): Router {
     const paused = req.body?.paused === true;
     db.prepare("UPDATE customers SET customer_paused = ?, updated_at = ? WHERE id = ?").run(paused ? 1 : 0, nowIso(), c.id);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  });
+
+  // Reine Warteschlange - kein direkter MCP-/KI-Aufruf von hier aus (der Server hat in diesem
+  // Kontext keinen Anthropic-Zugriff). Die naechste Routine-Ausfuehrung holt sich offene
+  // Anfragen ueber das MCP-Tool `list_post_requests` ab.
+  router.post("/api/post-now", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (openPostRequestCount(c.id) >= POST_REQUEST_MAX_OPEN) {
+      res.status(429).json({ error: "Sie haben schon eine offene Anfrage. Bitte warten Sie, bis diese bearbeitet wurde." });
+      return;
+    }
+    if (postRequestCountToday(c.id) >= POST_REQUEST_MAX_PER_DAY) {
+      res.status(429).json({ error: `Maximal ${POST_REQUEST_MAX_PER_DAY} Anfragen pro Tag.` });
+      return;
+    }
+    const topic = str(req.body?.topic, 300);
+    const request = createPostRequest(c.id, topic || null);
+    res.json({ ok: true, request });
+  }));
+
+  // Mehrere Farbthemen (Aufgabe 8): NUR ablegen/umschalten - der eigentliche accentColor/
+  // watermarkText-Wert im Formular bleibt unberuehrt, ein aktives Thema ueberschreibt ihn nur
+  // bei der Bild-Generierung (siehe credentials.ts effectiveBranding()).
+  router.post("/api/themes", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const name = str(req.body?.name, 60);
+    if (!name) {
+      res.status(400).json({ error: "Bitte geben Sie einen Namen für das Thema ein." });
+      return;
+    }
+    const accentColor = str(req.body?.accentColor, 7);
+    const watermarkText = str(req.body?.watermarkText, 40);
+    const theme = createSavedTheme(c.id, name, (accentColor && HEX_COLOR.test(accentColor) ? accentColor : null), watermarkText || null);
+    res.status(201).json({ ok: true, theme, savedThemes: listSavedThemes(c.id) });
+  }));
+
+  router.post("/api/themes/:id/activate", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (!activateSavedTheme(c.id, String(req.params.id))) {
+      res.status(404).json({ error: "Thema nicht gefunden." });
+      return;
+    }
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  });
+
+  router.post("/api/themes/deactivate", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    deactivateTheme(c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  });
+
+  // Freigabe-Modus (Aufgabe 7): eigene ausstehende Beitraege ansehen/freigeben/ablehnen.
+  // Freigeben veroeffentlicht NICHT selbst - das holt sich die Routine ueber
+  // `list_approved_pending_posts`, siehe Report.
+  router.get("/api/approvals", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    res.json({ approvals: listPendingApprovalsForCustomer(c.id) });
+  });
+
+  router.post("/api/approvals/:id/approve", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const approval = setPendingApprovalStatus(c.id, String(req.params.id), "approved");
+    if (!approval) {
+      res.status(404).json({ error: "Beitrag nicht gefunden oder schon bearbeitet." });
+      return;
+    }
+    res.json({ ok: true, approval });
+  });
+
+  router.post("/api/approvals/:id/reject", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const approval = setPendingApprovalStatus(c.id, String(req.params.id), "rejected");
+    if (!approval) {
+      res.status(404).json({ error: "Beitrag nicht gefunden oder schon bearbeitet." });
+      return;
+    }
+    res.json({ ok: true, approval });
   });
 
   // Schritt 1 OAuth: zur Plattform weiterleiten

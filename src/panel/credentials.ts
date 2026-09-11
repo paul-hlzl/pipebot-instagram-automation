@@ -2,12 +2,23 @@
  * Schnittstelle zwischen Kunden-Panel und MCP-Tools.
  * MCP-Tools holen sich Tokens NUR über diese Datei – nie direkt aus der DB.
  */
-import { db, nowIso, cleanupExpired, type ConnectionRow, type CustomerRow, type PostRow } from "./db.js";
+import {
+  db,
+  nowIso,
+  cleanupExpired,
+  type ConnectionRow,
+  type ContentPillarRow,
+  type CustomerRow,
+  type PendingApprovalRow,
+  type PostRequestRow,
+  type PostRow,
+  type SavedThemeRow,
+} from "./db.js";
 import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
-import { isDue, nextPostAt } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, type ScheduleInput } from "./schedule.js";
 
 const DAY = 86_400_000;
 
@@ -50,8 +61,12 @@ export interface CustomerOverview {
   accentColor: string | null;
   /** Text stamped on generated images instead of "Pipeline" (e.g. the customer's own brand name). Falls back to company name when empty. */
   watermarkText: string | null;
-  /** Free-text topics/phrasing this customer wants avoided. */
+  /** Free-text topics/phrasing this customer wants avoided (soft - an AI instruction, not enforced). */
   avoidTopics: string | null;
+  /** Comma-separated words that are HARD-blocked: publish tools refuse a caption/headline containing one of these. */
+  bannedWords: string | null;
+  /** Comma-separated elements that MUST appear somewhere in headline+caption combined, or publish tools refuse. */
+  requiredElements: string | null;
   /** Preferred call-to-action slug: link_bio | anrufen | nachricht | termin | keiner */
   ctaPreference: string | null;
   /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
@@ -64,6 +79,12 @@ export interface CustomerOverview {
   dueNow: boolean;
   /** ISO timestamp of this customer's next planned (not yet posted) slot per their frequency/postTime. */
   nextPostAt: string;
+  /** Per-channel due-ness, respecting instagramWeekdays/linkedinWeekdays when set - use these instead of `dueNow` once acting per channel. */
+  instagramDueNow: boolean;
+  linkedinDueNow: boolean;
+  /** Vacation/pause range (Vienna dates, inclusive) - nothing is due for either channel while "now" falls inside it. */
+  pauseFrom: string | null;
+  pauseUntil: string | null;
   /** Channel/format toggles - publish tools refuse to post when the relevant one is false. */
   igFeedEnabled: boolean;
   igStoryEnabled: boolean;
@@ -74,6 +95,14 @@ export interface CustomerOverview {
   language: "de" | "en";
   /** The customer's own pause toggle from their dashboard - distinct from `status` (admin lock). */
   customerPaused: boolean;
+  /** Content pillars this customer configured (empty = feature unused, fall back to `about`). */
+  contentPillars: ContentPillar[];
+  /** This call's weighted pick among contentPillars, avoiding whatever pillar the last post used. Null when contentPillars is empty. */
+  suggestedPillar: ContentPillar | null;
+  /** When true, the routine must call `save_pending_approval` instead of a publish tool for this customer - see list_customers' tool description. */
+  approvalMode: boolean;
+  /** Absolute local file path to this customer's uploaded logo, or null. Not a public URL - only meaningful server-side (image generation). */
+  logoUrl: string | null;
   channels: ChannelOverview[];
 }
 
@@ -88,7 +117,23 @@ function channelsFor(customerId: string): ChannelOverview[] {
   }));
 }
 
+export function scheduleInputFor(c: CustomerRow): ScheduleInput {
+  return {
+    customerId: c.id,
+    frequency: c.frequency,
+    postTime: c.post_time,
+    activeWeekdays: c.active_weekdays,
+    instagramWeekdays: c.instagram_weekdays,
+    linkedinWeekdays: c.linkedin_weekdays,
+    pauseFrom: c.pause_from,
+    pauseUntil: c.pause_until,
+  };
+}
+
 function overview(c: CustomerRow): CustomerOverview {
+  // Theme-resolved, not the raw columns - a customer with an active saved theme should
+  // generate images with that theme's color/watermark, not their old plain fields.
+  const branding = effectiveBranding(c);
   return {
     customerId: c.id,
     company: c.company,
@@ -98,17 +143,23 @@ function overview(c: CustomerRow): CustomerOverview {
     tone: c.tone,
     frequency: c.frequency,
     postTime: c.post_time,
-    accentColor: c.accent_color,
-    watermarkText: c.watermark_text,
+    accentColor: branding.accentColor,
+    watermarkText: branding.watermarkText,
     avoidTopics: c.avoid_topics,
+    bannedWords: c.banned_words,
+    requiredElements: c.required_elements,
     ctaPreference: c.cta_preference,
     trialEndsAt: c.trial_ends_at,
     trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
     trialDaysLeft: trialDaysLeft(c.trial_ends_at),
     // A customer who paused themselves is never "due", same effect as an unmet schedule -
     // the routine doesn't need a separate flag to remember to check.
-    dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
-    nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    dueNow: c.customer_paused ? false : isDue(scheduleInputFor(c)),
+    nextPostAt: nextPostAt(scheduleInputFor(c)),
+    instagramDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
+    linkedinDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
+    pauseFrom: c.pause_from,
+    pauseUntil: c.pause_until,
     igFeedEnabled: Boolean(c.ig_feed_enabled),
     igStoryEnabled: Boolean(c.ig_story_enabled),
     linkedinEnabled: Boolean(c.linkedin_enabled),
@@ -116,6 +167,10 @@ function overview(c: CustomerRow): CustomerOverview {
     emojisEnabled: Boolean(c.emojis_enabled),
     language: (c.language as CustomerOverview["language"]) || "de",
     customerPaused: Boolean(c.customer_paused),
+    contentPillars: listContentPillars(c.id),
+    suggestedPillar: pickPillarForToday(c.id),
+    approvalMode: Boolean(c.approval_mode),
+    logoUrl: c.logo_url,
     channels: channelsFor(c.id),
   };
 }
@@ -281,11 +336,11 @@ export interface LoggedPost {
 export function logPost(
   customerId: string,
   provider: string,
-  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string },
+  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string; pillarTitle?: string },
 ): void {
   db.prepare(
-    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     `post_${randomToken(9)}`,
     customerId,
@@ -295,6 +350,7 @@ export function logPost(
     post.caption ?? null,
     post.imageUrl ?? null,
     nowIso(),
+    post.pillarTitle ?? null,
   );
 }
 
@@ -312,6 +368,333 @@ export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost
     imageUrl: r.image_url,
     postedAt: r.posted_at,
   }));
+}
+
+export interface ContentPillar {
+  id: string;
+  title: string;
+  description: string | null;
+  weight: number;
+}
+
+const MAX_PILLARS = 6;
+
+/** Active content pillars for a customer, oldest first. Empty array = feature unused (fallback to `about`). */
+export function listContentPillars(customerId: string): ContentPillar[] {
+  const rows = db
+    .prepare("SELECT * FROM content_pillars WHERE customer_id = ? AND active = 1 ORDER BY created_at")
+    .all(customerId) as ContentPillarRow[];
+  return rows.map((r) => ({ id: r.id, title: r.title, description: r.description, weight: r.weight }));
+}
+
+/**
+ * Replaces a customer's whole set of content pillars (the panel edits them together as one
+ * list, so full replace-on-save is simpler and safer than a diff). Capped at 6, weight clamped
+ * to 1-5. Titles must be non-empty; blank/duplicate-only input results in an empty list, which
+ * is a valid "not using this feature" state.
+ */
+export function setContentPillars(customerId: string, pillars: { title: string; description?: string; weight?: number }[]): void {
+  const clean = pillars
+    .map((p) => ({ title: (p.title ?? "").trim().slice(0, 60), description: (p.description ?? "").trim().slice(0, 300), weight: Math.min(5, Math.max(1, Math.round(p.weight ?? 1))) }))
+    .filter((p) => p.title)
+    .slice(0, MAX_PILLARS);
+  const now = nowIso();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM content_pillars WHERE customer_id = ?").run(customerId);
+    for (const p of clean) {
+      db.prepare(
+        `INSERT INTO content_pillars (id, customer_id, title, description, weight, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      ).run(`pillar_${randomToken(9)}`, customerId, p.title, p.description || null, p.weight, now, now);
+    }
+  });
+  tx();
+}
+
+/**
+ * Weighted-random pick among a customer's active pillars, avoiding whichever pillar their most
+ * recent logged post used (so the routine doesn't hit the same pillar twice in a row). Returns
+ * null when the customer has no pillars set up - callers should fall back to `about`.
+ */
+export function pickPillarForToday(customerId: string): ContentPillar | null {
+  const pillars = listContentPillars(customerId);
+  if (!pillars.length) return null;
+  if (pillars.length === 1) return pillars[0];
+
+  const lastPost = db
+    .prepare("SELECT pillar_title FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 1")
+    .get(customerId) as { pillar_title: string | null } | undefined;
+  const lastTitle = lastPost?.pillar_title ?? null;
+  const pool = lastTitle ? pillars.filter((p) => p.title !== lastTitle) : pillars;
+  const candidates = pool.length ? pool : pillars; // everything filtered out is only possible with 1 active pillar, handled above, but stay safe
+
+  const totalWeight = candidates.reduce((sum, p) => sum + p.weight, 0);
+  let r = Math.random() * totalWeight;
+  for (const p of candidates) {
+    r -= p.weight;
+    if (r <= 0) return p;
+  }
+  return candidates[candidates.length - 1];
+}
+
+function splitCommaList(raw: string | null): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((w) => w.trim())
+    .filter(Boolean);
+}
+
+/** Case-insensitive substring check against a customer's hard-blocked words. Returns the matched word, or null. */
+export function containsBannedWord(text: string, customerId: string): string | null {
+  const row = db.prepare("SELECT banned_words FROM customers WHERE id = ?").get(customerId) as
+    | { banned_words: string | null }
+    | undefined;
+  const words = splitCommaList(row?.banned_words ?? null);
+  if (!words.length || !text) return null;
+  const lower = text.toLowerCase();
+  return words.find((w) => lower.includes(w.toLowerCase())) ?? null;
+}
+
+/**
+ * Throws a clear, actionable error if any of the given text fields contains a word this
+ * customer hard-banned. A missing customerId (the operator's own .env account) is never
+ * checked - unchanged behavior. Call this from every publish tool, before the network call.
+ */
+export function assertNoBannedWords(customerId: string | undefined, ...texts: (string | undefined)[]): void {
+  if (!customerId) return;
+  for (const text of texts) {
+    if (!text) continue;
+    const hit = containsBannedWord(text, customerId);
+    if (hit) {
+      throw new Error(`Caption enthält verbotenes Wort: "${hit}" - bitte neu formulieren und erneut versuchen.`);
+    }
+  }
+}
+
+/**
+ * Throws a clear, actionable error if this customer has required elements configured and one
+ * of them is missing across ALL of the given texts combined (e.g. a required hashtag can be
+ * in either the headline or the caption - it just has to be somewhere). A missing customerId
+ * is never checked - unchanged behavior. Call this from every publish tool, before the
+ * network call, alongside assertNoBannedWords.
+ */
+export function assertRequiredElements(customerId: string | undefined, ...texts: (string | undefined)[]): void {
+  if (!customerId) return;
+  const row = db.prepare("SELECT required_elements FROM customers WHERE id = ?").get(customerId) as
+    | { required_elements: string | null }
+    | undefined;
+  const required = splitCommaList(row?.required_elements ?? null);
+  if (!required.length) return;
+  const combined = texts.filter(Boolean).join(" \n ").toLowerCase();
+  const missing = required.find((el) => !combined.includes(el.toLowerCase()));
+  if (missing) {
+    throw new Error(`Caption fehlt ein Pflicht-Element: "${missing}" - bitte ergänzen und erneut versuchen.`);
+  }
+}
+
+export interface PostRequest {
+  id: string;
+  customerId: string;
+  topic: string | null;
+  channel: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toPostRequest(r: PostRequestRow): PostRequest {
+  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at };
+}
+
+export const POST_REQUEST_MAX_OPEN = 1;
+export const POST_REQUEST_MAX_PER_DAY = 3;
+
+/** How many still-pending requests this customer currently has (should be 0 or 1 - enforced at creation). */
+export function openPostRequestCount(customerId: string): number {
+  return (db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status = 'pending'").get(customerId) as { n: number }).n;
+}
+
+/** How many requests (any status) this customer created today (server-local calendar day - a soft daily cap, precision doesn't matter). */
+export function postRequestCountToday(customerId: string): number {
+  return (
+    db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND date(created_at) = date('now')").get(customerId) as {
+      n: number;
+    }
+  ).n;
+}
+
+/**
+ * Queues a "post now" request for the routine to pick up - does NOT call any MCP tool or
+ * generate anything itself (this server has no Anthropic API access in this context, and the
+ * whole point is that the routine decides how to fulfil it). Caller must check
+ * openPostRequestCount/postRequestCountToday against POST_REQUEST_MAX_OPEN/_PER_DAY first.
+ */
+export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null): PostRequest {
+  const id = `preq_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(id, customerId, topic || null, channel, now, now);
+  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now };
+}
+
+/** Most recent request for one customer (any status), for the panel's own status display. Null if they never asked. */
+export function lastPostRequestForCustomer(customerId: string): PostRequest | null {
+  const row = db
+    .prepare("SELECT * FROM post_requests WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1")
+    .get(customerId) as PostRequestRow | undefined;
+  return row ? toPostRequest(row) : null;
+}
+
+/** All still-open requests across all customers, oldest first - what the routine should process before its regular customer loop. */
+export function listOpenPostRequests(): PostRequest[] {
+  const rows = db.prepare("SELECT * FROM post_requests WHERE status = 'pending' ORDER BY created_at").all() as PostRequestRow[];
+  return rows.map(toPostRequest);
+}
+
+/** Marks a request done once the routine has fulfilled it. Returns false if the id doesn't exist (already handled by someone else, or invalid). */
+export function markPostRequestDone(id: string): boolean {
+  const result = db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
+  return result.changes > 0;
+}
+
+export interface PendingApproval {
+  id: string;
+  customerId: string;
+  provider: string;
+  headline: string | null;
+  caption: string | null;
+  imageUrl: string | null;
+  pillarTitle: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toPendingApproval(r: PendingApprovalRow): PendingApproval {
+  return {
+    id: r.id,
+    customerId: r.customer_id,
+    provider: r.provider,
+    headline: r.headline,
+    caption: r.caption,
+    imageUrl: r.image_url,
+    pillarTitle: r.pillar_title,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/**
+ * Used by `save_pending_approval` (the MCP tool) when a customer has `approval_mode` on -
+ * files a generated post away for the customer to review in their panel instead of
+ * publishing it. Whether to call this instead of a publish tool is the routine's own decision
+ * (based on `approvalMode` from list_customers) - nothing here intercepts the publish tools.
+ */
+export function savePendingApproval(input: {
+  customerId: string;
+  provider: string;
+  headline?: string;
+  caption?: string;
+  imageUrl?: string;
+  pillarTitle?: string;
+}): PendingApproval {
+  const id = `appr_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO pending_approvals (id, customer_id, provider, headline, caption, image_url, pillar_title, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(id, input.customerId, input.provider, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, now, now);
+  return toPendingApproval(
+    db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow,
+  );
+}
+
+/** A customer's own pending_approvals in a given status ("pending" for the review UI), newest first. */
+export function listPendingApprovalsForCustomer(customerId: string, status: string = "pending"): PendingApproval[] {
+  const rows = db
+    .prepare("SELECT * FROM pending_approvals WHERE customer_id = ? AND status = ? ORDER BY created_at DESC")
+    .all(customerId, status) as PendingApprovalRow[];
+  return rows.map(toPendingApproval);
+}
+
+/** Sets one of a customer's own pending_approvals to a new status (approve/reject) - scoped to that customer, so one customer can never touch another's. Returns null if not found/not theirs/not pending. */
+export function setPendingApprovalStatus(customerId: string, id: string, status: "approved" | "rejected"): PendingApproval | null {
+  const result = db
+    .prepare("UPDATE pending_approvals SET status = ?, updated_at = ? WHERE id = ? AND customer_id = ? AND status = 'pending'")
+    .run(status, nowIso(), id, customerId);
+  if (result.changes === 0) return null;
+  return toPendingApproval(db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow);
+}
+
+/** All customer-approved posts across all customers, oldest first - what `list_approved_pending_posts` (the MCP tool) returns for the routine to actually publish + logPost, then mark done via `mark_pending_approval_published`. */
+export function listApprovedPendingPosts(): PendingApproval[] {
+  const rows = db.prepare("SELECT * FROM pending_approvals WHERE status = 'approved' ORDER BY created_at").all() as PendingApprovalRow[];
+  return rows.map(toPendingApproval);
+}
+
+/** Marks an approved pending_approval as published once the routine has actually published it - stops it from being returned by list_approved_pending_posts again. */
+export function markPendingApprovalPublished(id: string): boolean {
+  const result = db.prepare("UPDATE pending_approvals SET status = 'published', updated_at = ? WHERE id = ? AND status = 'approved'").run(nowIso(), id);
+  return result.changes > 0;
+}
+
+export interface SavedTheme {
+  id: string;
+  name: string;
+  accentColor: string | null;
+  watermarkText: string | null;
+  createdAt: string;
+}
+
+function toSavedTheme(r: SavedThemeRow): SavedTheme {
+  return { id: r.id, name: r.name, accentColor: r.accent_color, watermarkText: r.watermark_text, createdAt: r.created_at };
+}
+
+/** A customer's saved color themes, oldest first. */
+export function listSavedThemes(customerId: string): SavedTheme[] {
+  const rows = db.prepare("SELECT * FROM saved_themes WHERE customer_id = ? ORDER BY created_at").all(customerId) as SavedThemeRow[];
+  return rows.map(toSavedTheme);
+}
+
+/** Saves the customer's current accent color / watermark text as a new named theme (doesn't activate it). */
+export function createSavedTheme(customerId: string, name: string, accentColor: string | null, watermarkText: string | null): SavedTheme {
+  const id = `theme_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    "INSERT INTO saved_themes (id, customer_id, name, accent_color, watermark_text, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(id, customerId, name, accentColor || null, watermarkText || null, now);
+  return { id, name, accentColor, watermarkText, createdAt: now };
+}
+
+/** Activates one of a customer's own saved themes (their generated images use its color/watermark from now on). False if the theme doesn't exist or isn't theirs. */
+export function activateSavedTheme(customerId: string, themeId: string): boolean {
+  const owned = db.prepare("SELECT 1 FROM saved_themes WHERE id = ? AND customer_id = ?").get(themeId, customerId);
+  if (!owned) return false;
+  db.prepare("UPDATE customers SET active_theme_id = ?, updated_at = ? WHERE id = ?").run(themeId, nowIso(), customerId);
+  return true;
+}
+
+/** Switches a customer back to their plain accent_color/watermark_text fields (no active theme). */
+export function deactivateTheme(customerId: string): void {
+  db.prepare("UPDATE customers SET active_theme_id = NULL, updated_at = ? WHERE id = ?").run(nowIso(), customerId);
+}
+
+/**
+ * The accent color / watermark text that should actually be used for this customer's
+ * generated images: their active saved theme if they have one, otherwise their plain
+ * accent_color/watermark_text fields exactly as before v4 (full backward compatibility - a
+ * customer who never touches themes has `active_theme_id` NULL forever).
+ */
+export function effectiveBranding(c: CustomerRow): { accentColor: string | null; watermarkText: string | null } {
+  if (c.active_theme_id) {
+    const theme = db
+      .prepare("SELECT accent_color, watermark_text FROM saved_themes WHERE id = ? AND customer_id = ?")
+      .get(c.active_theme_id, c.id) as { accent_color: string | null; watermark_text: string | null } | undefined;
+    if (theme) return { accentColor: theme.accent_color, watermarkText: theme.watermark_text };
+  }
+  return { accentColor: c.accent_color, watermarkText: c.watermark_text };
 }
 
 const STYLE_CACHE_HOURS = 24;

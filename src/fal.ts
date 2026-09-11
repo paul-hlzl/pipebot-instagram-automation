@@ -195,8 +195,10 @@ async function requestFalImage(prompt: string, format: PostFormat): Promise<stri
 export interface ImageBranding {
   /** Validated hex color, e.g. from a customer's accentColor. Falls back to the default navy tone when absent. */
   accentColor?: string;
-  /** Text stamped as the watermark instead of "Pipeline". */
+  /** Text stamped as the watermark instead of "Pipeline". Ignored when logoPath is set. */
   watermarkText?: string;
+  /** Local file path to a customer's uploaded logo - shown small in the corner instead of the text watermark. */
+  logoPath?: string | null;
 }
 
 export async function generateImageUrl(
@@ -219,7 +221,7 @@ export async function generateImageUrl(
   );
 
   const withHeadline = await addHeadlineText(Buffer.from(data), trimmedHeadline, format);
-  const finished = await addPipelineWatermark(withHeadline, format, branding?.watermarkText || "Pipeline");
+  const finished = await addPipelineWatermark(withHeadline, format, branding?.watermarkText || "Pipeline", branding?.logoPath);
   const imageBase64 = finished.toString("base64");
   const imageUrl = await withRetry(
     () => uploadImageBase64(`data:image/jpeg;base64,${imageBase64}`),

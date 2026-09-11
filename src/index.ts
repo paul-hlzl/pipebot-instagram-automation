@@ -17,11 +17,18 @@ import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 import {
   assertChannelEnabled,
+  assertNoBannedWords,
+  assertRequiredElements,
   getCachedStyleSamples,
   getCredentials,
   getCustomerOverview,
   listCustomers,
+  listApprovedPendingPosts,
+  listOpenPostRequests,
   logPost,
+  markPendingApprovalPublished,
+  markPostRequestDone,
+  savePendingApproval,
   setCachedStyleSamples,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
@@ -41,6 +48,16 @@ const customerIdSchema = z
       "in der .env konfigurierte Account verwendet (unverändertes Verhalten). Mit customer_id werden " +
       "die Zugangsdaten dieses Kunden aus dem Kunden-Panel geladen und für diesen Aufruf verwendet - " +
       "Tokens selbst werden nie zurückgegeben.",
+  );
+
+const pillarTitleSchema = z
+  .string()
+  .optional()
+  .describe(
+    "Optional: exact `title` of the content pillar (from `list_customers`' `contentPillars`/`suggestedPillar`) this " +
+      "post covers, if the customer uses content pillars. Only stored in the post history so future " +
+      "`suggestedPillar` picks avoid repeating the same pillar twice in a row - has no effect on publishing itself. " +
+      "Omit if the customer has no content pillars configured.",
   );
 
 /** Lädt die Instagram-Zugangsdaten eines Kunden. undefined = eigener .env-Account (Standardverhalten). */
@@ -69,6 +86,7 @@ function resolveImageBranding(customerId?: string): ImageBranding {
   return {
     accentColor: customer.accentColor ?? undefined,
     watermarkText: customer.watermarkText || customer.company || undefined,
+    logoPath: customer.logoUrl,
   };
 }
 
@@ -220,15 +238,18 @@ function createServer(): McpServer {
             "Optional: the headline used on the image (from `generate_post_image`). Only used to label this " +
               "post in a customer's history in the panel (`logPost`, requires customer_id) - has no effect on publishing itself.",
           ),
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ imageUrl, caption, customer_id, headline }) => {
+    async ({ imageUrl, caption, customer_id, headline, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
+        assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl, pillarTitle: pillar_title });
         }
         return textResult(result);
       } catch (error) {
@@ -254,11 +275,14 @@ function createServer(): McpServer {
         headline: headlineSchema,
         caption: z.string().min(1).max(2200).describe("Instagram caption (max 2200 characters)."),
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ topic, headline, caption, customer_id }) => {
+    async ({ topic, headline, caption, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
+        assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
@@ -268,6 +292,7 @@ function createServer(): McpServer {
             headline,
             caption,
             imageUrl: generated.imageUrl,
+            pillarTitle: pillar_title,
           });
         }
         return textResult({
@@ -356,15 +381,18 @@ function createServer(): McpServer {
             "Optional: the headline used on the image (from `generate_story_image`). Only used to label this " +
               "post in a customer's history in the panel (`logPost`, requires customer_id) - has no effect on publishing itself.",
           ),
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ imageUrl, customer_id, headline }) => {
+    async ({ imageUrl, customer_id, headline, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_story");
+        assertNoBannedWords(customer_id, headline);
+        assertRequiredElements(customer_id, headline);
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl, pillarTitle: pillar_title });
         }
         return textResult(result);
       } catch (error) {
@@ -389,11 +417,14 @@ function createServer(): McpServer {
         topic: topicSchema,
         headline: headlineSchema,
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ topic, headline, customer_id }) => {
+    async ({ topic, headline, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "ig_story");
+        assertNoBannedWords(customer_id, headline);
+        assertRequiredElements(customer_id, headline);
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         const published = await publishStoryToInstagram(generated.imageUrl, creds);
@@ -402,6 +433,7 @@ function createServer(): McpServer {
             externalPostId: published.postId,
             headline,
             imageUrl: generated.imageUrl,
+            pillarTitle: pillar_title,
           });
         }
         return textResult({
@@ -479,15 +511,18 @@ function createServer(): McpServer {
           .max(3000)
           .describe("LinkedIn post text (plain commentary, hashtags at the end). Max 3000 characters."),
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ text, customer_id }) => {
+    async ({ text, customer_id, pillar_title }) => {
       try {
         assertChannelEnabled(customer_id, "linkedin");
+        assertNoBannedWords(customer_id, text);
+        assertRequiredElements(customer_id, text);
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
-          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text });
+          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text, pillarTitle: pillar_title });
         }
         return textResult(result);
       } catch (error) {
@@ -513,9 +548,10 @@ function createServer(): McpServer {
           .describe("JPEG or PNG as base64, optionally a data URL."),
         alt_text: z.string().optional().describe("Alt text for the image (accessibility)."),
         customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
       },
     },
-    async ({ text, image_url, image_base64, alt_text, customer_id }) => {
+    async ({ text, image_url, image_base64, alt_text, customer_id, pillar_title }) => {
       try {
         const hasUrl = Boolean(image_url?.trim());
         const hasB64 = Boolean(image_base64?.trim());
@@ -524,6 +560,8 @@ function createServer(): McpServer {
         }
 
         assertChannelEnabled(customer_id, "linkedin");
+        assertNoBannedWords(customer_id, text);
+        assertRequiredElements(customer_id, text);
         const creds = await resolveLinkedInCredentials(customer_id);
         const imageSource: string | Buffer = hasB64
           ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
@@ -535,6 +573,7 @@ function createServer(): McpServer {
             externalPostId: result.postId ?? undefined,
             caption: text,
             imageUrl: hasUrl ? image_url : undefined,
+            pillarTitle: pillar_title,
           });
         }
         return textResult(result);
@@ -631,6 +670,134 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
+    "list_post_requests",
+    {
+      description:
+        "List all still-pending \"post now\" requests customers queued themselves from their panel dashboard " +
+        "(topic, customerId, channel, createdAt). Call this and work through every entry BEFORE the regular " +
+        "list_customers/dueNow loop in each routine run - a customer who explicitly asked for a post right now " +
+        "should not wait behind the scheduled queue. For each entry, generate and publish a post for that " +
+        "customerId using its `topic` (fall back to the customer's usual briefing/content pillars if `topic` is " +
+        "empty), respecting that customer's usual rules (bannedWords, requiredElements, approval_mode if set, " +
+        "channel toggles). After successfully handling one (published, or filed into pending_approvals under " +
+        "approval_mode), call `mark_post_request_done` with its id - never leave a handled request pending, " +
+        "and never call a publish tool twice for the same request.",
+    },
+    async () => {
+      try {
+        return textResult({ requests: listOpenPostRequests() });
+      } catch (error) {
+        console.error("list_post_requests:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_post_request_done",
+    {
+      description:
+        "Marks one \"post now\" request (from `list_post_requests`) as done, after you've published (or queued " +
+        "for approval) a post for it. Idempotent-safe to call once per request - has no effect on publishing " +
+        "itself, purely bookkeeping so the panel can show the customer their request was handled.",
+      inputSchema: { request_id: z.string().describe("The `id` of the request, from `list_post_requests`.") },
+    },
+    async ({ request_id }) => {
+      try {
+        const ok = markPostRequestDone(request_id);
+        return textResult({ ok });
+      } catch (error) {
+        console.error("mark_post_request_done:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "save_pending_approval",
+    {
+      description:
+        "Files a generated post away for the customer to review and approve in their panel, INSTEAD of publishing " +
+        "it. Use this - never a publish_* tool - whenever `list_customers` shows `approvalMode: true` for this " +
+        "customer; that check is the routine's own responsibility, nothing on the server redirects a publish " +
+        "call automatically. Still runs the same banned-word/required-element checks as the publish tools (fails " +
+        "fast instead of showing the customer a caption that could never actually go out). The customer approves " +
+        "or rejects it in their dashboard; once approved, it shows up in `list_approved_pending_posts` for you " +
+        "to actually publish on a later run.",
+      inputSchema: {
+        customer_id: z.string().describe("customerId - required, this tool only makes sense for a specific approval_mode customer."),
+        channel: z.enum(["ig_feed", "ig_story", "linkedin"]).describe("Which format/channel this post is intended for."),
+        headline: z.string().optional().describe("The headline used on the image, if any."),
+        caption: z.string().optional().describe("The caption/post text the customer will review."),
+        image_url: z.string().optional().describe("The generated image URL, if any (e.g. from generate_post_image)."),
+        pillar_title: pillarTitleSchema,
+      },
+    },
+    async ({ customer_id, channel, headline, caption, image_url, pillar_title }) => {
+      try {
+        assertChannelEnabled(customer_id, channel);
+        assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
+        const provider = channel === "linkedin" ? "linkedin" : "instagram";
+        const approval = savePendingApproval({
+          customerId: customer_id,
+          provider,
+          headline,
+          caption,
+          imageUrl: image_url,
+          pillarTitle: pillar_title,
+        });
+        return textResult(approval);
+      } catch (error) {
+        console.error("save_pending_approval:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_approved_pending_posts",
+    {
+      description:
+        "Lists posts across all customers that were saved via `save_pending_approval` and have since been " +
+        "approved by the customer in their panel (status 'approved') - these are ready to actually publish. For " +
+        "each one, call the matching publish tool (`publish_generated_post` for ig_feed, `publish_generated_story` " +
+        "for ig_story, the LinkedIn tools for linkedin) using its `imageUrl`/`caption`/`headline`, with that " +
+        "entry's `customerId` as `customer_id` and `pillarTitle` as `pillar_title`. After a successful publish, " +
+        "call `mark_pending_approval_published` with its `id` so it isn't published again next run. Process " +
+        "these before the regular `list_customers`/`dueNow` loop, same priority as `list_post_requests`.",
+    },
+    async () => {
+      try {
+        return textResult({ approvals: listApprovedPendingPosts() });
+      } catch (error) {
+        console.error("list_approved_pending_posts:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_pending_approval_published",
+    {
+      description:
+        "Marks one approved pending post (from `list_approved_pending_posts`) as published, after you've " +
+        "actually published it. Has no effect on publishing itself - purely bookkeeping so it isn't published " +
+        "again on a later run.",
+      inputSchema: { id: z.string().describe("The `id` of the approval, from `list_approved_pending_posts`.") },
+    },
+    async ({ id }) => {
+      try {
+        const ok = markPendingApprovalPublished(id);
+        return textResult({ ok });
+      } catch (error) {
+        console.error("mark_pending_approval_published:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "list_customers",
     {
       description:
@@ -649,6 +816,27 @@ function createServer(): McpServer {
         "format/channel that is false; the publish tools refuse it anyway, but check first to avoid a wasted " +
         "generation) and caption style preferences `hashtagPreference` (keine/wenige/viele), `emojisEnabled` " +
         "(boolean), and `language` (de/en) - write the caption to match these. " +
+        "Each customer also has `contentPillars` (array of {title, description, weight} - recurring content " +
+        "themes the customer defined, e.g. \"Tipps\", \"Hinter den Kulissen\") and `suggestedPillar` (one pillar " +
+        "from that array, or null): if `suggestedPillar` is not null, base this post's topic/headline/caption on " +
+        "that pillar's title+description instead of guessing from `about`; pass its exact `title` as the " +
+        "`pillar_title` argument on the publish tool so future picks keep rotating pillars instead of repeating. " +
+        "If `suggestedPillar` is null (customer has no pillars configured), fall back to `about` as before and " +
+        "omit `pillar_title`. " +
+        "Each customer also has `bannedWords` (comma-separated string, or null) - words that are HARD-blocked: " +
+        "the publish tools will refuse (with a clear error naming the word) any caption/headline containing one " +
+        "of them, even if this looks fine to you. Check `bannedWords` yourself before writing the caption so you " +
+        "avoid them proactively; if a publish call still fails with a banned-word error, rewrite the caption " +
+        "without that word and retry once rather than giving up on the customer for this run. This is separate " +
+        "from `avoidTopics`, which is only a soft style hint. " +
+        "Each customer also has `requiredElements` (comma-separated string, or null) - elements that MUST appear " +
+        "somewhere across the headline+caption combined (e.g. a mandatory hashtag or handle), or the publish " +
+        "tools refuse with a clear error naming what's missing. Include every required element yourself before " +
+        "publishing; on a missing-element error, add it and retry once rather than giving up. " +
+        "Each customer also has `approvalMode` (boolean) - when true, NEVER call a publish_* tool for them " +
+        "directly; call `save_pending_approval` instead so they can review it first (see that tool's " +
+        "description), and separately check `list_approved_pending_posts` each run for posts they already " +
+        "approved that are ready to actually publish. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },
