@@ -1,6 +1,8 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import path from "node:path";
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import sharp from "sharp";
 import { PACKAGE_ROOT } from "../config.js";
 import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
@@ -41,6 +43,8 @@ const VERSION: string = (() => {
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
+const LOGO_DIR = path.join(PACKAGE_ROOT, "data/logos");
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const SESSION_DAYS = 90;
 const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
@@ -222,6 +226,7 @@ function publicState(c: CustomerRow) {
       lastPostRequest: lastPostRequestForCustomer(c.id),
       savedThemes: listSavedThemes(c.id),
       activeThemeId: c.active_theme_id,
+      hasLogo: Boolean(c.logo_url),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -263,6 +268,86 @@ export function createPanelRouter(): Router {
     );
     next();
   });
+  // Logo-Upload (Aufgabe 9): eigener, groesserer JSON-Parser NUR fuer diese Route, registriert
+  // VOR dem globalen 50kb-Parser unten - der wuerde ein Base64-Bild sonst schon ablehnen,
+  // bevor der Handler hier ueberhaupt laeuft.
+  router.post(
+    "/api/logo",
+    express.json({ limit: "3mb" }),
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const raw = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64.trim() : "";
+      const match = /^data:image\/(png|jpe?g);base64,([a-z0-9+/=\s]+)$/i.exec(raw);
+      if (!match) {
+        res.status(400).json({ error: "Bitte eine PNG- oder JPG-Datei hochladen." });
+        return;
+      }
+      const buffer = Buffer.from(match[2], "base64");
+      if (buffer.length > LOGO_MAX_BYTES) {
+        res.status(400).json({ error: "Datei zu groß - maximal 2 MB." });
+        return;
+      }
+      let resized: Buffer;
+      try {
+        resized = await sharp(buffer).resize(512, 512, { fit: "inside", withoutEnlargement: true }).png().toBuffer();
+      } catch {
+        res.status(400).json({ error: "Die Datei konnte nicht als Bild gelesen werden." });
+        return;
+      }
+      await fsPromises.mkdir(LOGO_DIR, { recursive: true });
+      const logoPath = path.join(LOGO_DIR, `${c.id}.png`);
+      await fsPromises.writeFile(logoPath, resized);
+      db.prepare("UPDATE customers SET logo_url = ?, updated_at = ? WHERE id = ?").run(logoPath, nowIso(), c.id);
+      res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+    }),
+  );
+
+  // Liefert das eigene Logo zurueck (fuer die Vorschau im Formular) - nie oeffentlich, immer
+  // nur mit gueltiger Kunden-Session, nie der Pfad eines anderen Kunden erratbar.
+  router.get(
+    "/api/logo",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const row = db.prepare("SELECT logo_url FROM customers WHERE id = ?").get(c.id) as { logo_url: string | null } | undefined;
+      if (!row?.logo_url) {
+        res.status(404).end();
+        return;
+      }
+      try {
+        await fsPromises.access(row.logo_url);
+      } catch {
+        res.status(404).end();
+        return;
+      }
+      res.sendFile(row.logo_url);
+    }),
+  );
+
+  router.delete(
+    "/api/logo",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const row = db.prepare("SELECT logo_url FROM customers WHERE id = ?").get(c.id) as { logo_url: string | null } | undefined;
+      if (row?.logo_url) {
+        await fsPromises.unlink(row.logo_url).catch(() => {});
+      }
+      db.prepare("UPDATE customers SET logo_url = NULL, updated_at = ? WHERE id = ?").run(nowIso(), c.id);
+      res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+    }),
+  );
+
   router.use(express.json({ limit: "50kb" }));
 
   router.use("/admin", createAdminRouter());
@@ -427,7 +512,7 @@ export function createPanelRouter(): Router {
   // Konto loeschen, nie ein anderer Kunde und nie ein Admin ueber die Oberflaeche (Meta
   // verlangt so einen Selbstbedienungs-Weg fuer instagram_business_basic/-content_publish).
   // ON DELETE CASCADE auf connections/sessions/oauth_states/posts/style_cache raeumt alles auf.
-  router.delete("/api/me", safe((req, res) => {
+  router.delete("/api/me", safe(async (req, res) => {
     const c = currentCustomer(req);
     if (!c) {
       res.status(401).json({ error: "Nicht angemeldet" });
@@ -436,6 +521,10 @@ export function createPanelRouter(): Router {
     if (req.body?.confirm !== true) {
       res.status(400).json({ error: "Bestätigung erforderlich." });
       return;
+    }
+    // Logo liegt als Datei auf der Platte, nicht in der DB - CASCADE raeumt es nicht mit auf.
+    if (c.logo_url) {
+      await fsPromises.unlink(c.logo_url).catch(() => {});
     }
     db.prepare("DELETE FROM customers WHERE id = ?").run(c.id);
     res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);

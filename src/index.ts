@@ -86,6 +86,7 @@ function resolveImageBranding(customerId?: string): ImageBranding {
   return {
     accentColor: customer.accentColor ?? undefined,
     watermarkText: customer.watermarkText || customer.company || undefined,
+    logoPath: customer.logoUrl,
   };
 }
 

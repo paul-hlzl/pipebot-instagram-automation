@@ -385,6 +385,19 @@
       <button type="button" class="link" id="theme-save">+ Aktuelle Farbe/Beschriftung als Thema speichern</button>`;
   }
 
+  /* ================= Logo ================= */
+  function logoSectionHtml(c) {
+    return `
+      <label for="f-logo">Eigenes Logo <span class="opt">(optional, PNG oder JPG, max. 2 MB)</span></label>
+      <p class="hint">Wird klein am Bildrand angezeigt und ersetzt dort die Text-Beschriftung - kein Vollbild-Logo.</p>
+      <div id="logo-preview">${c.hasLogo ? `<img src="${DEMO && MOCK.logoDataUrl ? MOCK.logoDataUrl : `${CONFIG.mount}/api/logo?t=${Date.now()}`}" alt="Ihr Logo" style="width:64px;height:64px;object-fit:contain;background:var(--wash);border-radius:2px">` : ""}</div>
+      <input type="file" id="f-logo" accept="image/png,image/jpeg">
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="link" id="logo-upload" disabled>Logo hochladen</button>
+        ${c.hasLogo ? `<button type="button" class="link" id="logo-remove" style="color:var(--stop)">Logo entfernen</button>` : ""}
+      </div>`;
+  }
+
   /* ================= Content-Säulen ================= */
   function renderPillarsSection() {
     const rows = S.pillarsDraft.map((p, i) => `
@@ -492,6 +505,7 @@
           </div>
         </div>
         ${edit ? `<div class="field" id="themes-section">${themesSectionHtml(c)}</div>` : ""}
+        ${edit ? `<div class="field" id="logo-section">${logoSectionHtml(c)}</div>` : ""}
         <fieldset class="field">
           <legend>An welchen Tagen posten - Instagram?</legend>
           <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
@@ -912,6 +926,34 @@
     }
   });
 
+  let pendingLogoDataUrl = null;
+  document.addEventListener("change", (e) => {
+    if (e.target.id !== "f-logo") return;
+    const file = e.target.files?.[0];
+    const uploadBtn = $("#logo-upload");
+    pendingLogoDataUrl = null;
+    if (uploadBtn) uploadBtn.disabled = true;
+    if (!file) return;
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      alert("Bitte eine PNG- oder JPG-Datei wählen.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Datei zu groß - maximal 2 MB.");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      pendingLogoDataUrl = reader.result;
+      const preview = $("#logo-preview");
+      if (preview) preview.innerHTML = `<img src="${pendingLogoDataUrl}" alt="Vorschau" style="width:64px;height:64px;object-fit:contain;background:var(--wash);border-radius:2px">`;
+      if (uploadBtn) uploadBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  });
+
   async function improveBriefing() {
     const btn = $("#ai-improve");
     const form = $("#company");
@@ -961,6 +1003,32 @@
     const formPartBtn = e.target.closest("[data-formpart]");
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("#logo-upload")) {
+      const btn = e.target.closest("#logo-upload");
+      if (!pendingLogoDataUrl) return;
+      btn.classList.add("busy");
+      try {
+        applyState(await api("POST", "/api/logo", { imageBase64: pendingLogoDataUrl }));
+        pendingLogoDataUrl = null;
+        const section = $("#logo-section");
+        if (section) section.innerHTML = logoSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Hochladen fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
+    if (e.target.closest("#logo-remove")) {
+      if (!confirm("Logo entfernen? Danach wird wieder die Text-Beschriftung verwendet.")) return;
+      try {
+        applyState(await api("DELETE", "/api/logo"));
+        const section = $("#logo-section");
+        if (section) section.innerHTML = logoSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht entfernt werden.");
+      }
+      return;
+    }
     if (e.target.closest("#theme-save")) {
       const name = prompt("Name für dieses Farbthema (z. B. \"Sommer-Kampagne\"):");
       if (!name || !name.trim()) return;
@@ -1296,6 +1364,16 @@
       return mockState();
     }
     if (url === "/api/approvals") return { approvals: [] };
+    if (url === "/api/logo" && method === "POST") {
+      MOCK.logoDataUrl = body.imageBase64;
+      MOCK.customer = { ...MOCK.customer, hasLogo: true };
+      return mockState();
+    }
+    if (url === "/api/logo" && method === "DELETE") {
+      MOCK.logoDataUrl = null;
+      MOCK.customer = { ...MOCK.customer, hasLogo: false };
+      return mockState();
+    }
     if (url === "/api/themes") {
       const theme = { id: `theme_${Date.now()}`, name: body.name, accentColor: body.accentColor || null, watermarkText: body.watermarkText || null, createdAt: new Date().toISOString() };
       MOCK.customer.savedThemes = [...(MOCK.customer.savedThemes || []), theme];

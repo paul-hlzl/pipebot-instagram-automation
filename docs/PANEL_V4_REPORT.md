@@ -18,7 +18,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 6 | "Jetzt posten"-Button | ✅ Code fertig, ⚠️ Panel-Button nicht im Browser getestet |
 | 7 | Freigabe-Modus | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
 | 8 | Mehrere Farbthemen | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
-| 9 | Eigenes Logo | ⏳ offen |
+| 9 | Eigenes Logo | ✅ erledigt (End-to-End mit echtem Bild verifiziert) |
 | 10 | Abschluss & Deploy | ⏳ offen |
 
 ## Aufgabe 1 – Sicherheitsnetz ✅
@@ -313,6 +313,51 @@ Dashboard-Bereich wurden nicht in einem echten Browser angeklickt.
 nicht in einem echten Browser angeklickt, nur die API dahinter (ausführlich, siehe oben).
 
 **Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
+
+## Aufgabe 9 – Eigenes Logo statt nur Text-Wasserzeichen ✅
+
+**Erledigt:**
+- Neue Spalte `logo_url` (TEXT, nullable) auf `customers` - **kein öffentlicher Link**,
+  sondern ein absoluter lokaler Dateipfad. `watermark.ts` liest die Datei direkt von der
+  Platte, kein R2/Upload nötig für den Kompositing-Schritt selbst (R2 kommt erst danach für
+  das fertige Bild ins Spiel, wie schon bisher).
+- `POST /panel/api/logo` (Kunden-Session, JSON mit `imageBase64`, eigener 3MB-Body-Parser NUR
+  für diese Route - der globale 50kb-Parser hätte ein Bild sonst schon vorher abgelehnt):
+  validiert Format (PNG/JPG per Data-URL-Präfix), Größe (max. 2MB vor dem Verkleinern),
+  verkleinert serverseitig auf max. 512×512 (Seitenverhältnis erhalten) via `sharp`, speichert
+  unter `/root/mcp-server/data/logos/<customer_id>.png`.
+- `GET /panel/api/logo` liefert das eigene Logo zur Vorschau zurück (nur mit gültiger Session -
+  ein Kunde kann nie das Logo eines anderen abrufen, kein erratbarer öffentlicher Pfad).
+  `DELETE /panel/api/logo` entfernt Logo-Datei und `logo_url` wieder (nicht explizit im
+  Aufgabentext verlangt, aber naheliegend und trivial mit demselben Muster).
+- `watermark.ts`: `addPipelineWatermark()` bekommt einen neuen optionalen `logoPath`-Parameter.
+  Ist er gesetzt, wird das Logo klein unten rechts eingeblendet **statt** des rotierten
+  Text-Wasserzeichens; schlägt das Einfügen fehl (kaputte/fehlende Datei), fällt der Code
+  automatisch auf das Text-Wasserzeichen zurück, bricht die Bildgenerierung nie ab. Ohne
+  `logoPath` exakt bisheriges Verhalten - volle Rückwärtskompatibilität.
+- **Kompletter End-to-End-Test mit einem echten Bild gegen Staging:** 300×300-PNG hochgeladen
+  → korrekt auf der Platte gespeichert → `GET /api/logo` liefert es unverändert zurück → über
+  das MCP-Tool `generate_post_image` ein echtes Bild für den Testkunden erzeugt → das
+  generierte Bild tatsächlich angeschaut (siehe Chat-Verlauf) - das Logo erscheint korrekt
+  klein unten rechts, das Text-Wasserzeichen ist weg, Headline unverändert korrekt.
+- **Bug beim Testen gefunden und behoben:** `DELETE /api/me` (Konto löschen, aus Aufgabe 11 der
+  letzten Sitzung) hat die Logo-**Datei** auf der Platte nicht mitgelöscht (nur DB-Zeilen via
+  `ON DELETE CASCADE` - eine Datei auf der Platte ist davon nie betroffen). Behoben: löscht vor
+  dem Entfernen des Kunden jetzt zusätzlich die Logo-Datei, falls vorhanden.
+- Panel: Datei-Upload-Feld mit sofortiger Client-seitiger Vorschau (vor dem eigentlichen
+  Hochladen), "Logo hochladen"-Button, "Logo entfernen"-Button, Hinweistext dass es klein am
+  Bildrand erscheint statt als Vollbild-Logo.
+- `npm run test:panel` erweitert (Upload, Abruf mit korrektem `Content-Type`, 401 ohne Login,
+  400 bei Nicht-Bild-Datei, Entfernen) - **ein zweiter Bug direkt im Testskript gefunden und
+  behoben:** ein von Hand getipptes Base64-PNG war ungültig; jetzt wird ein echtes winziges
+  PNG zur Laufzeit mit `sharp` erzeugt. **71 passed, 0 failed.**
+
+**⚠️ Einzige verbleibende Lücke:** nur der reine Datei-Upload-Dialog selbst (Browser-natives
+`<input type="file">`) wurde nicht in einem echten Browser angeklickt - die serverseitige
+Verarbeitung und das Ergebnis wurden aber, anders als bei den meisten übrigen v4-UI-Arbeiten,
+vollständig mit einem echten Bild end-to-end verifiziert.
+
+**Für Paul:** nichts zu tun.
 
 ---
 *(wird fortgesetzt)*

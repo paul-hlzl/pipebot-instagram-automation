@@ -313,6 +313,43 @@ async function main() {
     ok("Aktivieren eines fremden/unbekannten Themas -> 404", badActivateRes.status === 404, `status=${badActivateRes.status}`);
   }
 
+  // --- 3g. Eigenes Logo (v4) --- ein winziges 2x2-PNG reicht fuer den Roundtrip-Test,
+  // die echte Bild-Kompositing-Logik (Groesse/Platzierung) wurde manuell mit einem echten
+  // 300x300-Test-Logo gegen ein tatsaechlich generiertes Bild verifiziert (siehe Report).
+  console.log("\nLogo:");
+  {
+    const { default: sharp } = await import("sharp");
+    const tinyPngBuffer = await sharp({ create: { width: 4, height: 4, channels: 4, background: { r: 200, g: 30, b: 30, alpha: 1 } } })
+      .png()
+      .toBuffer();
+    const tinyPngBase64 = tinyPngBuffer.toString("base64");
+    const uploadRes = await fetch(`${BASE}${MOUNT}/api/logo`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ imageBase64: `data:image/png;base64,${tinyPngBase64}` }),
+    });
+    const uploadBody = await uploadRes.json();
+    ok("Logo-Upload -> 200, hasLogo true", uploadRes.status === 200 && uploadBody.customer?.hasLogo === true, JSON.stringify(uploadBody.customer?.hasLogo));
+
+    const getRes = await fetch(`${BASE}${MOUNT}/api/logo`, { headers: { cookie: sessionCookie } });
+    ok("GET /api/logo liefert das Bild -> 200", getRes.status === 200, `status=${getRes.status}`);
+    ok("GET /api/logo liefert image/png", (getRes.headers.get("content-type") || "").includes("image/png"), getRes.headers.get("content-type"));
+
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/logo`);
+    ok("GET /api/logo ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const badUploadRes = await fetch(`${BASE}${MOUNT}/api/logo`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ imageBase64: "data:text/plain;base64,aGVsbG8=" }),
+    });
+    ok("Upload einer Nicht-Bild-Datei -> 400", badUploadRes.status === 400, `status=${badUploadRes.status}`);
+
+    const deleteRes = await fetch(`${BASE}${MOUNT}/api/logo`, { method: "DELETE", headers: { cookie: sessionCookie } });
+    const deleteBody = await deleteRes.json();
+    ok("Logo entfernen -> hasLogo wieder false", deleteBody.customer?.hasLogo === false, deleteBody.customer?.hasLogo);
+  }
+
   // --- 4a. POST /api/pause (customer's own pause toggle) ---
   console.log("\nPausieren:");
   {

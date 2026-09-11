@@ -101,6 +101,8 @@ export interface CustomerOverview {
   suggestedPillar: ContentPillar | null;
   /** When true, the routine must call `save_pending_approval` instead of a publish tool for this customer - see list_customers' tool description. */
   approvalMode: boolean;
+  /** Absolute local file path to this customer's uploaded logo, or null. Not a public URL - only meaningful server-side (image generation). */
+  logoUrl: string | null;
   channels: ChannelOverview[];
 }
 
@@ -168,6 +170,7 @@ function overview(c: CustomerRow): CustomerOverview {
     contentPillars: listContentPillars(c.id),
     suggestedPillar: pickPillarForToday(c.id),
     approvalMode: Boolean(c.approval_mode),
+    logoUrl: c.logo_url,
     channels: channelsFor(c.id),
   };
 }

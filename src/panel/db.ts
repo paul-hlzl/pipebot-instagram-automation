@@ -181,6 +181,9 @@ migrateColumns("customers", [
   // NULL (default) = keep using the plain accent_color/watermark_text columns exactly as
   // before. Set only once a customer actually activates a saved theme.
   ["active_theme_id", "TEXT"],
+  // Absolute local file path to an uploaded logo (task 9) - never a public URL, watermark.ts
+  // reads it directly off disk. NULL = exactly the previous text-watermark-only behavior.
+  ["logo_url", "TEXT"],
 ]);
 
 migrateColumns("posts", [
@@ -222,6 +225,7 @@ export interface CustomerRow {
   pause_until: string | null;
   approval_mode: number;
   active_theme_id: string | null;
+  logo_url: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;
