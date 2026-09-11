@@ -19,7 +19,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 7 | Freigabe-Modus | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
 | 8 | Mehrere Farbthemen | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
 | 9 | Eigenes Logo | ✅ erledigt (End-to-End mit echtem Bild verifiziert) |
-| 10 | Abschluss & Deploy | ⏳ offen |
+| 10 | Abschluss & Deploy | ✅ **deployed, live auf mcp.pipebot.at** |
 
 ## Aufgabe 1 – Sicherheitsnetz ✅
 
@@ -359,5 +359,180 @@ vollständig mit einem echten Bild end-to-end verifiziert.
 
 **Für Paul:** nichts zu tun.
 
+## Aufgabe 10 – Abschluss und Deploy ✅
+
+**Voraussetzungen geprüft, bevor deployed wurde:**
+- `npm run build`: fehlerfrei.
+- `npm run test:panel`: **71 passed, 0 failed** (letzter Lauf direkt vor dem Merge, gegen den
+  frischen Staging-Build von `main`).
+- Alle 9 Content-Aufgaben manuell gegen Staging durchgespielt (siehe jeweilige Abschnitte oben) -
+  mehrere davon (Content-Säulen-Rotation, Farbthemen-Auflösung, kompletter Freigabe-Modus-
+  Kreislauf, Logo-Kompositing mit einem echten generierten Bild) end-to-end mit echten
+  Testkunden, nicht nur isolierte Funktionsaufrufe.
+- Uhrzeit beim Deploy: **15:55 UTC** - außerhalb des Sperrfensters 14:30-15:45 UTC (kurz
+  danach geprüft, keine Cloud-Routine-Kollision).
+- Keine MCP-Tool-Namenskollisionen (20 Tools total, alle eindeutig geprüft).
+
+**Ablauf (identisch zur letzten Sitzung):**
+1. Zusätzliches, klar benanntes Vor-Deploy-Backup der Produktions-DB
+   (`panel-pre-deploy-panel-v4-<Zeitstempel>.db`), durch Öffnen verifiziert.
+2. `panel-v4` mit `--no-ff` in `main` gemerged (sauber, keine Konflikte), gepusht.
+3. `npm run build` + `npm run test:panel` auf dem frischen `main`-Staging-Build - grün.
+4. `pm2 restart instagram-mcp` (Produktion).
+5. **Nach dem Deploy geprüft (alles erfolgreich):** `/panel` lädt (lokal und über
+   `https://mcp.pipebot.at`), `/panel/api/health` ok, `/mcp` ohne Bearer-Token → 401,
+   `list_customers` (roher MCP-HTTP-Aufruf) liefert weiterhin **beide** bestehenden Kunden mit
+   intakten Verbindungen UND allen neuen v4-Feldern (leere `contentPillars`, `approvalMode:
+   false`, usw. - die additiven Migrationen liefen sauber gegen die echte Produktions-DB),
+   Admin-Login funktioniert.
+6. Staging-Prozess entfernt, DB-Dateien aufgeräumt. `pm2 list` zeigt wieder genau die
+   ursprünglichen drei Prozesse.
+
+**Ergebnis: erfolgreich deployed.** Kein Rollback nötig.
+
+Finaler Commit auf `main`: `ba4d0e0` (Merge-Commit von `panel-v4`, Ausgangspunkt `1f99a40`).
+Tag `pre-panel-v4` bleibt als Rollback-Punkt bestehen.
+
 ---
-*(wird fortgesetzt)*
+
+# Abschlussbericht
+
+## 1. Welche Aufgaben erledigt, welche teilweise, welche nicht - Phase 2 (Meta-Berechtigungen)
+
+**Alle 10 Aufgaben erledigt und deployed.** Keine einzige Aufgabe brauchte eine zusätzliche
+Meta-Berechtigung über die bereits bestehenden (`instagram_business_basic`,
+`instagram_business_content_publish`) hinaus - **nichts musste auf Phase 2 verschoben werden.**
+Alles ließ sich mit den bestehenden Berechtigungen bauen, da v4 ausschließlich interne
+Personalisierungs-Logik (eigene DB-Tabellen, Panel-Formulare, MCP-Tools) hinzufügt, ohne neue
+Instagram-/LinkedIn-API-Endpunkte zu benötigen.
+
+Einschränkungen bei einzelnen Aufgaben:
+- **Aufgaben 5-8** (granulare Zeitplanung, "Jetzt posten", Freigabe-Modus, Farbthemen): Code
+  fertig und über die API/MCP-Tools gründlich end-to-end gegen Staging getestet, aber die
+  jeweiligen **Panel-UI-Bedienelemente** (Wochentage-Picker, Freigeben/Ablehnen-Buttons,
+  Themen-Chips) wurden **nie in einem echten Browser angeklickt** - diese Sitzung lief ohne
+  Display/Chrome-Zugriff (Claude-in-Chrome probiert, nicht verbunden).
+- **Aufgabe 9** (Logo): als einzige UI-Aufgabe **doch vollständig end-to-end verifiziert**,
+  inklusive eines tatsächlich generierten, visuell geprüften Bildes - nur der reine
+  Datei-Auswahl-Dialog selbst wurde nicht angeklickt.
+- Alle anderen Aufgaben (2, 3, 4, Backend-Teile von 5-8): vollständig getestet, keine
+  Einschränkung.
+
+## 2. Deployed oder nur im Branch?
+
+**Deployed und live.** `main` wurde mit `panel-v4` gemerged (Merge-Commit `ba4d0e0`), gepusht,
+Produktion (`pm2`-Prozess `instagram-mcp`) läuft seit 15:55 UTC mit diesem Stand. Verifiziert
+über `https://mcp.pipebot.at/panel` und `/panel/api/health`. Branch `panel-v4` bleibt bestehen,
+Tag `pre-panel-v4` zeigt weiter auf den Stand vor dieser Sitzung.
+
+## 3. Was DU manuell tun musst
+
+1. **Cloud-Routine komplett ersetzen** mit dem Prompt-Text unten (Abschnitt 4) - er ersetzt
+   den aus der letzten Sitzung vollständig (enthält alle v3- UND v4-Fähigkeiten). Ohne diesen
+   Schritt bringt der gesamte Umbau dieser Sitzung nichts: die Routine kennt sonst keines der
+   neuen Felder/Tools.
+2. **Kurzer Browser-Check** der UI-Teile von Aufgaben 5-8 (siehe Einschränkung oben) - am
+   besten mit deinem eigenen Account (`Pipeline Ai Solutions`) oder dem Testkunden
+   (`Testunternehmen`) unter `https://mcp.pipebot.at/panel`: Wochentage-Picker pro Kanal,
+   Pause-Datumsfelder, "Jetzt posten"-Feld, Freigabe-Modus-Umschalter samt Dashboard-Bereich,
+   Farbthemen-Chips.
+3. Weiterhin offen aus der letzten Sitzung (unverändert): `PANEL_ENCRYPTION_KEY` extern
+   sichern, `PANEL_ADMIN_PASSWORD` steht in `.env`.
+
+## 4. KOMPLETT NEUER Routine-Prompt-Text für claude.ai/customize
+
+Dieser Text **ersetzt** den aus der v3-Sitzung vollständig - er enthält alle v3- und
+v4-Fähigkeiten in der richtigen Reihenfolge.
+
+```
+Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Bei jedem Lauf,
+IN DIESER REIHENFOLGE:
+
+1. Rufe `list_approved_pending_posts` auf. Für jeden Eintrag: veröffentliche ihn mit dem
+   passenden Publish-Tool (`publish_generated_post` für Provider "instagram" ohne
+   Story-Kennzeichnung, `publish_generated_story` falls als Story markiert, die LinkedIn-Tools
+   für Provider "linkedin"), unter Verwendung von `imageUrl`/`caption`/`headline`, mit
+   `customerId` als `customer_id` und `pillarTitle` als `pillar_title`. Nach Erfolg:
+   `mark_pending_approval_published` mit der `id` aufrufen.
+
+2. Rufe `list_post_requests` auf und arbeite JEDE offene Anfrage ab, bevor du mit der
+   regulären Kundenliste weitermachst - ein Kunde, der explizit "Jetzt posten" gedrückt hat,
+   soll nicht hinter der normalen Zeitplanung warten. Nutze `topic` als Thema (leer: nutze das
+   übliche Briefing/die Content-Säulen des Kunden). Beachte für diesen Kunden trotzdem
+   `approvalMode` (Schritt 7) - eine "Jetzt posten"-Anfrage überspringt NICHT die Freigabe.
+   Nach erfolgreicher Veröffentlichung (oder erfolgreichem Einreichen zur Freigabe):
+   `mark_post_request_done` mit der `id` aufrufen - nie doppelt bearbeiten.
+
+3. Rufe `list_customers` auf. Überspringe einen Kunden vollständig, wenn `trialExpired` true
+   ist. Prüfe sonst pro Kanal: `igFeedEnabled`/`igStoryEnabled` zusammen mit `instagramDueNow`,
+   und `linkedinEnabled` zusammen mit `linkedinDueNow` - bearbeite nur die Kanäle, die aktiv
+   UND laut Zeitplan gerade fällig sind (Wochentage pro Kanal, Pause/Urlaub-Zeitraum, "heute
+   schon gepostet" werden bereits serverseitig in `instagramDueNow`/`linkedinDueNow`
+   berücksichtigt). Das allgemeine `dueNow`/`nextPostAt` gilt weiterhin als grobe
+   Gesamtkunden-Einschätzung, für die eigentliche Kanal-Entscheidung zählen die
+   kanal-spezifischen Felder.
+
+4. Rufe für jeden fälligen Kunden/Kanal `get_customer_style_samples` auf, um Tonfall,
+   Emoji-Nutzung, Hashtag-Stil und wiederkehrende Themen zu übernehmen, sofern vorhanden.
+
+5. Prüfe `contentPillars`/`suggestedPillar`: ist `suggestedPillar` gesetzt, formuliere Thema,
+   Headline und Caption danach und gib den exakten `title` als `pillar_title` beim
+   Publish-/`save_pending_approval`-Tool mit. Ist es `null`, nutze `about` wie bisher. Schreibe
+   die Caption in der eingestellten Sprache (`language`: de/en), mit Hashtags gemäß
+   `hashtagPreference` (keine/wenige/viele) und Emojis nur wenn `emojisEnabled` true ist.
+
+6. Prüfe `bannedWords`/`requiredElements`, BEVOR du einen Text abschickst: baue verbotene
+   Wörter gar nicht erst ein, Pflicht-Elemente immer ein (irgendwo in Headline+Caption
+   zusammen reicht). Schlägt ein Tool trotzdem mit einer entsprechenden Fehlermeldung fehl,
+   lies den fehlenden/verbotenen Begriff aus der Fehlermeldung, formuliere die Caption
+   angepasst um und versuche es GENAU EINMAL erneut für diesen Kunden - gib nicht schon nach
+   dem ersten Fehlversuch auf, aber versuche es auch nicht endlos.
+
+7. **Prüfe `approvalMode` für diesen Kunden, BEVOR du tatsächlich veröffentlichst:**
+   - `approvalMode: false` (Standard) → wie gewohnt: `publish_generated_post` (Feed),
+     `publish_generated_story` (Story) oder die LinkedIn-Tools direkt aufrufen. Nach Erfolg
+     wird automatisch `logPost` intern aufgerufen (kein separater Schritt nötig).
+   - `approvalMode: true` → NIE direkt veröffentlichen. Stattdessen `save_pending_approval`
+     mit `customer_id`, `channel` (`ig_feed`/`ig_story`/`linkedin`), `headline`, `caption`,
+     `image_url`, `pillar_title` aufrufen. Der Kunde entscheidet selbst im Panel, ob und wann
+     veröffentlicht wird - das erledigt danach ein SPÄTERER Lauf über Schritt 1.
+
+8. Bei einem Fehler für einen Kunden (z. B. abgelaufene Verbindung, Trial abgelaufen): diesen
+   Kunden überspringen, kurz notieren welcher Fehler auftrat, und mit dem nächsten Kunden
+   weitermachen - ein einzelner fehlerhafter Kunde darf den Lauf für alle anderen nicht
+   abbrechen.
+
+Zeitplan dieser Routine: stündlich (z. B. `0 * * * *` UTC) statt 1×/Tag, damit jeder Kunde
+möglichst nah an seiner eingestellten `postTime` und seinem eingestellten Wochentag pro Kanal
+dran ist.
+```
+
+## 5. Bekannte Risiken
+
+- **Kein echter Browser-Test** für die UI-Teile der Aufgaben 5-8 (Wochentage-Picker,
+  Freigabe-Dashboard, Themen-Umschalter) - größtes Restrisiko dieser Sitzung, siehe Punkt 1.
+- **Bis die Cloud-Routine umgestellt ist**, bleiben `bannedWords`, `requiredElements`,
+  `approvalMode` und die kanal-spezifische Zeitplanung wirkungslos für die alte, v4-unwissende
+  Routine - ABER die harten serverseitigen Sperren (`assertNoBannedWords`,
+  `assertRequiredElements`, `assertChannelEnabled`, Trial-/Pause-Sperren in `getCredentials`)
+  greifen bereits jetzt unabhängig davon: eine alte Routine, die versehentlich ein verbotenes
+  Wort postet oder einen pausierten Kunden bedient, wird vom Server selbst abgelehnt, nicht nur
+  von der Routine-Logik. `approvalMode` ist die einzige Ausnahme ohne Server-seitige
+  Zwangsdurchsetzung (das war eine bewusste Design-Vorgabe: "das entscheidet die Routine") -
+  bei einem Kunden mit `approvalMode: true` UND einer noch nicht umgestellten Routine würde
+  also **trotzdem direkt veröffentlicht**, ohne die gewünschte Freigabe abzuwarten. Bis die
+  Routine umgestellt ist, diese Funktion Kunden gegenüber besser noch nicht aktiv bewerben.
+- Zwei echte Bugs während dieser Sitzung selbst gefunden und behoben (nicht mehr im
+  deployten Code): ein Rate-Limit-Konflikt im Testskript (Aufgabe 5) und fehlende
+  Logo-Datei-Bereinigung beim Konto-Löschen (Aufgabe 9) - beide Details in den jeweiligen
+  Abschnitten oben.
+- `weekly-report.mjs` bleibt weiterhin unangetastet als untracked Datei liegen.
+- Eine harmlose, unbeabsichtigte Nebenwirkung: beim Bearbeiten von `src/index.ts` in Aufgabe 4
+  wurden per Skript versehentlich alle Zeilenumbrüche der Datei von CRLF auf LF normalisiert
+  (die Datei hatte das schon vor dieser Sitzung, aus einer früheren Bearbeitung). Funktional
+  unverändert (Build und alle Tests grün), aber dadurch zeigt der Git-Diff dieses einen
+  Commits mehr geänderte Zeilen als inhaltlich tatsächlich geändert wurden - falls das beim
+  Durchsehen der Historie auffällt: kein Grund zur Sorge, rein kosmetisch.
+
+---
+*(Ende des Berichts)*
