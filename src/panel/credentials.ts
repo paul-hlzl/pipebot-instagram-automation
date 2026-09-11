@@ -562,6 +562,9 @@ export interface PendingApproval {
   id: string;
   customerId: string;
   provider: string;
+  /** ig_feed/ig_story/linkedin - the exact channel from save_pending_approval. Falls back to
+   *  `provider` for rows written before this field existed (NULL there). */
+  channel: string;
   headline: string | null;
   caption: string | null;
   imageUrl: string | null;
@@ -576,6 +579,7 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
     id: r.id,
     customerId: r.customer_id,
     provider: r.provider,
+    channel: r.channel ?? r.provider,
     headline: r.headline,
     caption: r.caption,
     imageUrl: r.image_url,
@@ -595,6 +599,7 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
 export function savePendingApproval(input: {
   customerId: string;
   provider: string;
+  channel: string;
   headline?: string;
   caption?: string;
   imageUrl?: string;
@@ -603,9 +608,9 @@ export function savePendingApproval(input: {
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO pending_approvals (id, customer_id, provider, headline, caption, image_url, pillar_title, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-  ).run(id, input.customerId, input.provider, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, now, now);
+    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(id, input.customerId, input.provider, input.channel, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, now, now);
   return toPendingApproval(
     db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow,
   );

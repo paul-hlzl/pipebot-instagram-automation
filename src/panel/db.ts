@@ -145,6 +145,14 @@ function migrateColumns(table: string, columns: readonly (readonly [string, stri
   }
 }
 
+migrateColumns("pending_approvals", [
+  // Exact ig_feed/ig_story/linkedin value from save_pending_approval's `channel` argument -
+  // the pre-existing `provider` column collapses ig_feed/ig_story both to "instagram", which
+  // loses exactly the distinction the panel UI and a later publish-approved-post run need.
+  // NULL on rows written before this column existed - callers fall back to `provider` there.
+  ["channel", "TEXT"],
+]);
+
 migrateColumns("customers", [
   ["accent_color", "TEXT"],
   ["watermark_text", "TEXT"],
@@ -282,6 +290,7 @@ export interface PendingApprovalRow {
   id: string;
   customer_id: string;
   provider: string;
+  channel: string | null;
   headline: string | null;
   caption: string | null;
   image_url: string | null;

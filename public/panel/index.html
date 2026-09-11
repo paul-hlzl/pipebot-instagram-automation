@@ -113,6 +113,7 @@
   .approval-card img, .approval-card .ph { width: 96px; height: 96px; object-fit: cover; border-radius: 2px; background: var(--wash); flex: none; }
   .approval-card .approval-body { flex: 1; min-width: 0; }
   .approval-card .approval-body p { color: var(--stone); font-size: 14px; }
+  .channel-badge { display: inline-block; margin-bottom: 6px; padding: 2px 10px; border: 1px solid var(--ink); border-radius: 20px; font-size: 11.5px; font-weight: 500; letter-spacing: .02em; }
   .approval-card .actions { margin-top: 10px; }
   @media (max-width: 480px) { .approval-card { flex-direction: column; } .approval-card img, .approval-card .ph { width: 100%; height: auto; aspect-ratio: 1; } }
 
@@ -822,10 +823,24 @@
     }
   }
 
+  const CHANNEL_BADGE_LABEL = {
+    ig_feed: "Instagram Feed",
+    ig_story: "Instagram Story",
+    linkedin: "LinkedIn",
+    instagram: "Instagram",
+  };
+
+  function channelBadgeLabel(a) {
+    const key = a.channel || a.provider || "";
+    return CHANNEL_BADGE_LABEL[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : "");
+  }
+
   function approvalCardHtml(a) {
+    const badge = channelBadgeLabel(a);
     return `<div class="approval-card" data-approval-id="${esc(a.id)}">
       ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : `<div class="ph"></div>`}
       <div class="approval-body">
+        ${badge ? `<span class="channel-badge">${esc(badge)}</span>` : ""}
         ${a.headline ? `<strong>${esc(a.headline)}</strong>` : ""}
         ${a.caption ? `<p>${esc(a.caption)}</p>` : ""}
         <div class="actions">

@@ -742,6 +742,7 @@ function createServer(): McpServer {
         const approval = savePendingApproval({
           customerId: customer_id,
           provider,
+          channel,
           headline,
           caption,
           imageUrl: image_url,
@@ -760,9 +761,10 @@ function createServer(): McpServer {
     {
       description:
         "Lists posts across all customers that were saved via `save_pending_approval` and have since been " +
-        "approved by the customer in their panel (status 'approved') - these are ready to actually publish. For " +
-        "each one, call the matching publish tool (`publish_generated_post` for ig_feed, `publish_generated_story` " +
-        "for ig_story, the LinkedIn tools for linkedin) using its `imageUrl`/`caption`/`headline`, with that " +
+        "approved by the customer in their panel (status 'approved') - these are ready to actually publish. Check " +
+        "each entry's `channel` field (ig_feed / ig_story / linkedin) and call the matching publish tool " +
+        "(`publish_generated_post` for ig_feed, `publish_generated_story` for ig_story, the LinkedIn tools for " +
+        "linkedin) using its `imageUrl`/`caption`/`headline`, with that " +
         "entry's `customerId` as `customer_id` and `pillarTitle` as `pillar_title`. After a successful publish, " +
         "call `mark_pending_approval_published` with its `id` so it isn't published again next run. Process " +
         "these before the regular `list_customers`/`dueNow` loop, same priority as `list_post_requests`.",

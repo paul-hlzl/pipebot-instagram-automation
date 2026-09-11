@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import sharp from "sharp";
-import { PACKAGE_ROOT } from "../config.js";
+import { PACKAGE_ROOT, getConfig } from "../config.js";
 import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
@@ -258,6 +258,10 @@ export function createPanelRouter(): Router {
   baseUrl();
   const router = express.Router();
   const publicDir = process.env.PANEL_PUBLIC_DIR ?? path.resolve(process.cwd(), "public/panel");
+  // Generated post/story images (approval-review cards, style samples) are hosted on the R2
+  // media bucket, not this origin - img-src must allow that domain or browsers silently drop
+  // the <img> load (shows as an empty box, no console-visible network error to the user).
+  const mediaOrigin = new URL(getConfig().mediaBucketUrl).origin;
 
   router.use((_req, res, next) => {
     res.setHeader("X-Frame-Options", "DENY");
@@ -265,7 +269,7 @@ export function createPanelRouter(): Router {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'",
+      `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-ancestors 'none'; form-action 'self'`,
     );
     next();
   });
