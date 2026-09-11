@@ -3,10 +3,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig } from "./config.js";
 import { generateImageUrl, type ImageBranding } from "./fal.js";
-import { ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
+import { ensureAdminPassword, ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
 import {
   getPublishingLimit,
+  getRecentMedia,
   publishImageToInstagram,
   publishStoryToInstagram,
   refreshAccessToken,
@@ -14,7 +15,16 @@ import {
 } from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
-import { getCredentials, getCustomerOverview, listCustomers, logPost, startTokenRefreshSchedule } from "./panel/credentials.js";
+import {
+  assertChannelEnabled,
+  getCachedStyleSamples,
+  getCredentials,
+  getCustomerOverview,
+  listCustomers,
+  logPost,
+  setCachedStyleSamples,
+  startTokenRefreshSchedule,
+} from "./panel/credentials.js";
 import {
   checkLinkedInToken,
   publishLinkedInImagePost,
@@ -214,6 +224,7 @@ function createServer(): McpServer {
     },
     async ({ imageUrl, caption, customer_id, headline }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_feed");
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
@@ -247,6 +258,7 @@ function createServer(): McpServer {
     },
     async ({ topic, headline, caption, customer_id }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_feed");
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
@@ -348,6 +360,7 @@ function createServer(): McpServer {
     },
     async ({ imageUrl, customer_id, headline }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_story");
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
@@ -380,6 +393,7 @@ function createServer(): McpServer {
     },
     async ({ topic, headline, customer_id }) => {
       try {
+        assertChannelEnabled(customer_id, "ig_story");
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         const published = await publishStoryToInstagram(generated.imageUrl, creds);
@@ -469,6 +483,7 @@ function createServer(): McpServer {
     },
     async ({ text, customer_id }) => {
       try {
+        assertChannelEnabled(customer_id, "linkedin");
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
@@ -508,6 +523,7 @@ function createServer(): McpServer {
           throw new ToolError("Genau eines von image_url oder image_base64 angeben, nicht beides und nicht keines.");
         }
 
+        assertChannelEnabled(customer_id, "linkedin");
         const creds = await resolveLinkedInCredentials(customer_id);
         const imageSource: string | Buffer = hasB64
           ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
@@ -573,11 +589,66 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
+    "get_customer_style_samples",
+    {
+      description:
+        "Fetch up to 10 of a customer's most recent OWN Instagram posts (caption, media type, date) via the " +
+        "Instagram Graph API. Read-only - publishes or changes nothing. Call this BEFORE writing a caption or " +
+        "headline for a customer, so you can match their existing tone of voice, emoji usage, hashtag style, " +
+        "and recurring topics instead of guessing from the briefing alone. Results are cached for 24h per " +
+        "customer (repeated calls the same day return instantly, no extra API usage). Returns an empty list " +
+        "if the customer has no Instagram connected or has no posts yet - fall back to the briefing in that case.",
+      inputSchema: { customer_id: z.string().describe("customerId eines Kunden aus `list_customers`.") },
+    },
+    async ({ customer_id }) => {
+      try {
+        const cached = getCachedStyleSamples(customer_id);
+        if (cached) {
+          return textResult({ samples: cached, cached: true });
+        }
+        let creds: InstagramCredentials | undefined;
+        try {
+          creds = await resolveInstagramCredentials(customer_id);
+        } catch (credError) {
+          // Nothing to learn from yet (not connected) is a normal, expected case here -
+          // unlike a real trial/token error, don't surface it as a tool failure.
+          if (credError instanceof Error && credError.message.includes("nicht verbunden")) {
+            return textResult({ samples: [], cached: false });
+          }
+          throw credError;
+        }
+        if (!creds) {
+          return textResult({ samples: [], cached: false });
+        }
+        const samples = await getRecentMedia(creds, 10);
+        setCachedStyleSamples(customer_id, samples);
+        return textResult({ samples, cached: false });
+      } catch (error) {
+        console.error("get_customer_style_samples:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "list_customers",
     {
       description:
         "List all active customers from the customer panel: briefing (company, industry, description, " +
         "tone, posting frequency, posting time) and connected channels with status (ok/renew-soon/expired). " +
+        "Each customer also has `trialExpired` (boolean) and `trialDaysLeft` (number, or null when the " +
+        "customer has no trial limit). SKIP any customer with `trialExpired: true` - do not generate or " +
+        "publish a post for them; the publish tools will also refuse with an error for these customers as " +
+        "a backstop, but check `trialExpired` first so you don't waste a generation call. " +
+        "Each customer also has `dueNow` (boolean, Europe/Vienna time: true only when today is one of " +
+        "their posting days per `frequency`, their `postTime` has passed, and nothing has been posted for " +
+        "them yet today) and `nextPostAt` (ISO timestamp of their next planned slot). Only generate/publish " +
+        "for a customer when `dueNow` is true - do not post for customers where it is false, even if you " +
+        "are running anyway; that is what makes each customer's own posting rhythm actually work. " +
+        "Each customer also has `igFeedEnabled`/`igStoryEnabled`/`linkedinEnabled` (booleans - skip a " +
+        "format/channel that is false; the publish tools refuse it anyway, but check first to avoid a wasted " +
+        "generation) and caption style preferences `hashtagPreference` (keine/wenige/viele), `emojisEnabled` " +
+        "(boolean), and `language` (de/en) - write the caption to match these. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },
@@ -596,6 +667,7 @@ function createServer(): McpServer {
 
 async function main(): Promise<void> {
   const { token: authToken, generated } = ensureAuthToken();
+  const { generated: adminPasswordGenerated } = ensureAdminPassword();
 
   let port: number;
   try {
@@ -616,6 +688,10 @@ async function main(): Promise<void> {
     console.error(`Health check: http://localhost:${port}/health (no auth required)`);
     if (generated) {
       console.error(`Generated new MCP_AUTH_TOKEN and saved it to .env: ${authToken}`);
+    }
+    if (adminPasswordGenerated) {
+      // Deliberately not logging the password value itself - check .env for it.
+      console.error("Generated new PANEL_ADMIN_PASSWORD and saved it to .env (value not logged - check .env).");
     }
   });
 }

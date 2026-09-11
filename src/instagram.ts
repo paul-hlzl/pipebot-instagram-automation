@@ -125,6 +125,38 @@ export async function getPublishingLimit(creds?: InstagramCredentials): Promise<
   };
 }
 
+export interface MediaSample {
+  caption: string | null;
+  mediaType: string;
+  timestamp: string;
+}
+
+interface GraphMediaResponse {
+  data?: { caption?: string; media_type?: string; timestamp?: string }[];
+}
+
+/**
+ * Read-only: the account's own most recent posts (caption, media type, date) via the
+ * `/media` edge - only fields covered by the `instagram_business_basic` scope, nothing that
+ * needs `instagram_business_content_publish`. Never publishes or modifies anything.
+ */
+export async function getRecentMedia(creds: InstagramCredentials, limit = 10): Promise<MediaSample[]> {
+  const igUserId = await resolveIgUserId(creds);
+  const { data } = await withRetry(
+    () =>
+      client().get<GraphMediaResponse>(`${GRAPH_BASE}/${igUserId}/media`, {
+        params: { ...tokenParams(creds), fields: "caption,media_type,timestamp", limit },
+      }),
+    2,
+    "Instagram media",
+  );
+  return (data.data ?? []).map((m) => ({
+    caption: m.caption ?? null,
+    mediaType: m.media_type ?? "IMAGE",
+    timestamp: m.timestamp ?? "",
+  }));
+}
+
 export async function assertPublishingQuota(creds?: InstagramCredentials): Promise<PublishingLimit> {
   const limit = await getPublishingLimit(creds);
   if (limit.remaining <= 0 || limit.quotaUsage >= limit.quotaTotal) {

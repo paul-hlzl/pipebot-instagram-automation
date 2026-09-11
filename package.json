@@ -11,7 +11,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test:limit": "tsx scripts/check-limit.ts"
+    "test:limit": "tsx scripts/check-limit.ts",
+    "pretest:panel": "pm2 restart instagram-mcp-staging > /dev/null",
+    "test:panel": "node scripts/test-panel.mjs",
+    "backup:db": "node scripts/backup-db.mjs"
   },
   "keywords": [
     "mcp",

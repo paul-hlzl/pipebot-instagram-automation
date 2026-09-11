@@ -1,10 +1,23 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import path from "node:path";
+import fs from "node:fs";
+import { PACKAGE_ROOT } from "../config.js";
 import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus, listPostsForCustomer } from "./credentials.js";
+import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
+import { createAdminRouter } from "./admin.js";
+import { isDue, nextPostAt } from "./schedule.js";
+import { anthropicAvailable, improveBriefing } from "../anthropic.js";
+
+const VERSION: string = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
@@ -12,7 +25,16 @@ const SESSION_DAYS = 90;
 const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
 const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
+const HASHTAG_PREFS = ["keine", "wenige", "viele"];
+const LANGUAGES = ["de", "en"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** Trial length for newly signed-up customers. Existing customers are never retroactively limited. */
+function trialDays(): number {
+  const raw = process.env.PANEL_TRIAL_DAYS?.trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 7;
+}
 
 const baseUrl = (): string => {
   const url = (process.env.PANEL_BASE_URL ?? "").replace(/\/$/, "");
@@ -62,11 +84,14 @@ const clientIp = (req: Request): string =>
   (String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || req.socket.remoteAddress || "unknown").trim();
 
 const str = (v: unknown, max: number): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean" ? v : fallback);
 
 interface BriefingInput {
   company: string; contactName: string; email: string; website: string; industry: string;
   about: string; tone: string; frequency: string; postTime: string;
   accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string;
+  igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
+  hashtagPreference: string; emojisEnabled: boolean; language: string;
 }
 
 function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; errors: Record<string, string> } {
@@ -84,6 +109,12 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     watermarkText: str(body.watermarkText, 40),
     avoidTopics: str(body.avoidTopics, 500),
     ctaPreference: str(body.ctaPreference, 30),
+    igFeedEnabled: bool(body.igFeedEnabled, true),
+    igStoryEnabled: bool(body.igStoryEnabled, true),
+    linkedinEnabled: bool(body.linkedinEnabled, true),
+    hashtagPreference: str(body.hashtagPreference, 20) || "wenige",
+    emojisEnabled: bool(body.emojisEnabled, true),
+    language: str(body.language, 5) || "de",
   };
   const errors: Record<string, string> = {};
   if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
@@ -94,6 +125,8 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(data.postTime)) data.postTime = "15:00";
   if (data.accentColor && !HEX_COLOR.test(data.accentColor)) data.accentColor = "";
   if (!CTAS.includes(data.ctaPreference)) data.ctaPreference = "link_bio";
+  if (!HASHTAG_PREFS.includes(data.hashtagPreference)) data.hashtagPreference = "wenige";
+  if (!LANGUAGES.includes(data.language)) data.language = "de";
   return { data, errors };
 }
 
@@ -106,6 +139,14 @@ function publicState(c: CustomerRow) {
       accentColor: c.accent_color ?? "", watermarkText: c.watermark_text ?? "",
       avoidTopics: c.avoid_topics ?? "", ctaPreference: c.cta_preference ?? "link_bio",
       trialEndsAt: c.trial_ends_at,
+      trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
+      trialDaysLeft: trialDaysLeft(c.trial_ends_at),
+      nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
+      linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
+      emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
+      customerPaused: Boolean(c.customer_paused),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -149,15 +190,62 @@ export function createPanelRouter(): Router {
   });
   router.use(express.json({ limit: "50kb" }));
 
+  router.use("/admin", createAdminRouter());
+
   router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+
+  // Keine Auth noetig (wie /health am Server-Root) - liefert bewusst nichts Sensibles, nur
+  // ob die DB erreichbar ist und welche Version laeuft.
+  router.get("/api/health", (_req, res) => {
+    try {
+      db.prepare("SELECT 1").get();
+      res.json({ status: "ok", version: VERSION });
+    } catch (err) {
+      console.error("[panel] Health-Check fehlgeschlagen:", err);
+      res.status(503).json({ status: "error" });
+    }
+  });
 
   router.get("/api/providers", (_req, res) => {
     res.json({
       providers: providers.map((p) => ({
         id: p.id, name: p.name, tagline: p.tagline, notice: p.notice ?? null, guide: p.guide, available: p.isConfigured(),
       })),
+      aiAvailable: anthropicAvailable(),
+      trialDays: trialDays(),
     });
   });
+
+  // Nutzt Kunden-Stichworte + Firmenname/Branche, um einen konkreteren Briefing-Text
+  // vorzuschlagen. Funktioniert auch waehrend des Signups (noch keine Session) - daher kein
+  // currentCustomer()-Zwang, aber ein strenges IP-Rate-Limit gegen Missbrauch/Kosten.
+  router.post(
+    "/api/improve-briefing",
+    safe(async (req, res) => {
+      if (rateLimited(`improve:${clientIp(req)}`, 6, 10 * 60_000)) {
+        res.status(429).json({ error: "Zu viele Anfragen. Bitte in ein paar Minuten erneut versuchen." });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
+        return;
+      }
+      const company = str(req.body?.company, 120);
+      const industry = str(req.body?.industry, 120);
+      const about = str(req.body?.about, 2000);
+      if (!about) {
+        res.status(400).json({ error: "Bitte geben Sie zuerst ein paar Stichworte ein." });
+        return;
+      }
+      try {
+        const suggestion = await improveBriefing({ company, industry, about });
+        res.json({ suggestion });
+      } catch (err) {
+        console.error("[panel] improve-briefing fehlgeschlagen:", err);
+        res.status(502).json({ error: "Der Vorschlag konnte gerade nicht erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
 
   router.get("/api/me", (req, res) => {
     const c = currentCustomer(req);
@@ -184,14 +272,17 @@ export function createPanelRouter(): Router {
     }
     const id = `cus_${randomToken(9)}`;
     const now = nowIso();
+    const trialEndsAt = new Date(Date.now() + trialDays() * 86_400_000).toISOString();
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
-         accent_color, watermark_text, avoid_topics, cta_preference,
+         accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
+         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
-      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
       sha256(randomToken()), now, now, now);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
@@ -212,11 +303,13 @@ export function createPanelRouter(): Router {
     }
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
-         accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?, updated_at=?
+         accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
+         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language,
       nowIso(), c.id);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   }));
@@ -249,6 +342,26 @@ export function createPanelRouter(): Router {
     res.json({ ok: true });
   });
 
+  // Die EINZIGE Loeschfunktion im ganzen Panel - nur der eingeloggte Kunde kann sein eigenes
+  // Konto loeschen, nie ein anderer Kunde und nie ein Admin ueber die Oberflaeche (Meta
+  // verlangt so einen Selbstbedienungs-Weg fuer instagram_business_basic/-content_publish).
+  // ON DELETE CASCADE auf connections/sessions/oauth_states/posts/style_cache raeumt alles auf.
+  router.delete("/api/me", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (req.body?.confirm !== true) {
+      res.status(400).json({ error: "Bestätigung erforderlich." });
+      return;
+    }
+    db.prepare("DELETE FROM customers WHERE id = ?").run(c.id);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    console.log(`[panel] Kunde ${c.id} (${c.company}) hat sein Konto inkl. aller Daten gelöscht.`);
+    res.json({ ok: true });
+  }));
+
   // Der Kunde sieht nur seine eigenen Posts - nie die anderer Kunden oder Pauls eigenen Account.
   router.get("/api/posts", (req, res) => {
     const c = currentCustomer(req);
@@ -267,6 +380,19 @@ export function createPanelRouter(): Router {
     }
     db.prepare("DELETE FROM connections WHERE customer_id = ? AND provider = ?").run(c.id, String(req.params.provider));
     res.json(publicState(c));
+  });
+
+  // Kunde pausiert/setzt sein eigenes Posting fort - anders als die Admin-Sperre (status)
+  // bleibt der Kunde dabei eingeloggt und sieht sein Dashboard weiter normal.
+  router.post("/api/pause", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const paused = req.body?.paused === true;
+    db.prepare("UPDATE customers SET customer_paused = ?, updated_at = ? WHERE id = ?").run(paused ? 1 : 0, nowIso(), c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   });
 
   // Schritt 1 OAuth: zur Plattform weiterleiten

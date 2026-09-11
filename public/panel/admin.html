@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Pipeline – Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #FFFFFF; --ink: #000000; --stone: #666666; --rule: #E3E3E3; --wash: #F5F5F5;
+    --go: #137A3F; --warn: #9A6700; --stop: #B42318;
+    --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 400 16px/1.5 var(--font); }
+  a { color: inherit; }
+  button, input { font: inherit; color: inherit; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  .top { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 24px; border-bottom: 1px solid var(--rule); }
+  .brand { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+  .brand span { color: var(--stone); font-weight: 400; }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px; border: 2px solid var(--ink); border-radius: 2px; background: var(--ink); color: var(--paper); font-size: 14px; font-weight: 500; text-decoration: none; cursor: pointer; }
+  .btn:hover { background: var(--paper); color: var(--ink); }
+  .btn.ghost { background: var(--paper); color: var(--ink); }
+  .btn.ghost:hover { background: var(--wash); }
+  .btn.small { min-height: 30px; padding: 0 10px; font-size: 12.5px; border-width: 1px; }
+  .btn[disabled] { opacity: .5; pointer-events: none; }
+  .btn.busy { opacity: .6; pointer-events: none; }
+
+  /* Login */
+  .loginwrap { max-width: 360px; margin: 15vh auto; padding: 0 24px; }
+  .loginwrap h1 { font-size: 28px; margin: 0 0 8px; }
+  .loginwrap p { color: var(--stone); margin: 0 0 24px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+  .field input { width: 100%; height: 46px; padding: 0 14px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); }
+  .banner { padding: 12px 14px; border-radius: 2px; font-size: 14px; margin-bottom: 16px; }
+  .banner.bad { background: #FBEAE8; color: var(--stop); }
+  .banner.ok { background: #E8F3EC; color: var(--go); }
+
+  /* Dashboard */
+  .metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 32px; }
+  .metric { background: var(--paper); padding: 16px; }
+  .metric .n { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+  .metric .l { font-size: 12.5px; color: var(--stone); margin-top: 2px; }
+  .metric.warn .n { color: var(--stop); }
+
+  h2 { font-size: 18px; margin: 0 0 16px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--stone); font-weight: 500; }
+  tr:hover td { background: var(--wash); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 500; margin: 0 4px 4px 0; white-space: nowrap; }
+  .badge.ok { background: #E8F3EC; color: var(--go); }
+  .badge.renew-soon { background: #FDF2E0; color: var(--warn); }
+  .badge.expired { background: #FBEAE8; color: var(--stop); }
+  .badge.trial { background: var(--wash); color: var(--ink); }
+  .badge.paused { background: #FDF2E0; color: var(--warn); }
+
+  .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .company-cell strong { display: block; }
+  .company-cell span { color: var(--stone); font-size: 12.5px; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: grid; place-items: center; z-index: 20; padding: 20px; }
+  .modal { background: var(--paper); max-width: 640px; width: 100%; max-height: 85vh; overflow: auto; padding: 28px; border-radius: 2px; }
+  .modal h2 { margin-top: 0; }
+  .modal .close { float: right; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 8px 16px; font-size: 14px; margin-bottom: 24px; }
+  .kv dt { color: var(--stone); }
+  .kv dd { margin: 0; }
+  .posts-list { list-style: none; margin: 0; padding: 0; }
+  .posts-list li { padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+  .posts-list time { color: var(--stone); display: block; font-size: 12px; }
+  .loading { color: var(--stone); padding: 60px 0; text-align: center; }
+
+  @media (max-width: 900px) {
+    .metrics { grid-template-columns: repeat(3, 1fr); }
+    table, thead, tbody, tr, th, td { display: block; }
+    thead { display: none; }
+    tr { border: 1px solid var(--rule); margin-bottom: 12px; border-radius: 2px; }
+    td { border: 0; padding: 6px 12px; }
+    td::before { content: attr(data-label); display: block; font-size: 11px; text-transform: uppercase; color: var(--stone); margin-bottom: 2px; }
+  }
+  @media (max-width: 480px) {
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">Pipeline <span>Admin</span></div>
+  <button class="btn ghost small" id="logout" hidden>Abmelden</button>
+</header>
+
+<main id="app"><p class="loading">Wird geladen …</p></main>
+
+<script>
+(() => {
+  const MOUNT = "/panel/admin";
+  const $ = (s, r) => (r || document).querySelector(s);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
+  const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
+
+  let banner = null;
+
+  async function api(method, url, body) {
+    const res = await fetch(MOUNT + url, {
+      method, credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || "Unbekannter Fehler"), { status: res.status });
+    return data;
+  }
+
+  /* ---------------- Login ---------------- */
+  function renderLogin() {
+    $("#logout").hidden = true;
+    $("#app").innerHTML = `
+      <div class="loginwrap">
+        <h1>Admin-Login</h1>
+        <p>Nur für Paul. Zugang über das Admin-Passwort aus der .env.</p>
+        ${banner ? `<div class="banner ${banner.kind}">${esc(banner.text)}</div>` : ""}
+        <form id="loginform">
+          <div class="field">
+            <label for="pw">Passwort</label>
+            <input id="pw" type="password" name="password" autocomplete="current-password" required autofocus>
+          </div>
+          <button class="btn" type="submit" style="width:100%">Anmelden</button>
+        </form>
+      </div>`;
+    $("#loginform").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector("button");
+      btn.classList.add("busy");
+      try {
+        await api("POST", "/api/login", { password: $("#pw").value });
+        banner = null;
+        boot();
+      } catch (err) {
+        banner = { kind: "bad", text: err.status === 429 ? err.message : "Falsches Passwort." };
+        renderLogin();
+      }
+    });
+  }
+
+  /* ---------------- Dashboard ---------------- */
+  let DATA = null;
+
+  function trialLabel(c) {
+    if (c.trial.unlimited) return `<span class="badge trial">unbefristet</span>`;
+    if (c.trial.expired) return `<span class="badge expired">abgelaufen</span>`;
+    return `<span class="badge trial">${c.trial.daysLeft} ${c.trial.daysLeft === 1 ? "Tag" : "Tage"}</span>`;
+  }
+
+  function channelBadges(c) {
+    if (!c.channels.length) return `<span class="badge">–</span>`;
+    return c.channels.map((ch) => `<span class="badge ${ch.status}">${esc(ch.provider)}: ${ch.status === "ok" ? "ok" : ch.status === "renew-soon" ? "bald ablaufend" : "abgelaufen"}</span>`).join("");
+  }
+
+  function metricsHtml(m) {
+    const items = [
+      ["Kunden gesamt", m.totalCustomers],
+      ["Aktiv", m.active],
+      ["Im Trial", m.inTrial],
+      ["Trial abgelaufen", m.trialExpired, m.trialExpired > 0],
+      ["Posts (7 Tage)", m.postsLast7Days],
+      ["Handlungsbedarf", m.connectionsNeedingAction, m.connectionsNeedingAction > 0],
+    ];
+    return items.map(([l, n, warn]) => `<div class="metric${warn ? " warn" : ""}"><div class="n">${n}</div><div class="l">${esc(l)}</div></div>`).join("");
+  }
+
+  function rowHtml(c) {
+    return `<tr data-id="${esc(c.customerId)}">
+      <td data-label="Firma"><div class="company-cell"><strong>${esc(c.company)}</strong><span>${esc(c.contactName)} · ${esc(c.email)}</span></div></td>
+      <td data-label="Erstellt">${fmtDate(c.createdAt)}</td>
+      <td data-label="Status"><span class="badge ${c.status === "active" ? "ok" : "paused"}">${c.status === "active" ? "aktiv" : "pausiert"}</span></td>
+      <td data-label="Trial">${trialLabel(c)}</td>
+      <td data-label="Kanäle">${channelBadges(c)}</td>
+      <td data-label="Posts">${c.postCount}${c.lastPostAt ? `<br><span style="color:var(--stone);font-size:12px">zuletzt ${fmtDate(c.lastPostAt)}</span>` : ""}</td>
+      <td data-label="Aktionen"><div class="row-actions">
+        <button class="btn small ghost" data-action="details" data-id="${esc(c.customerId)}">Details</button>
+        <button class="btn small ghost" data-action="extend" data-id="${esc(c.customerId)}">+7 Tage</button>
+        ${!c.trial.unlimited ? `<button class="btn small ghost" data-action="unlimited" data-id="${esc(c.customerId)}">Unbefristet</button>` : ""}
+        <button class="btn small ghost" data-action="toggle-status" data-id="${esc(c.customerId)}" data-status="${c.status === "active" ? "paused" : "active"}">${c.status === "active" ? "Pausieren" : "Aktivieren"}</button>
+      </div></td>
+    </tr>`;
+  }
+
+  function renderDashboard() {
+    $("#logout").hidden = false;
+    $("#app").innerHTML = `
+      <div class="metrics">${metricsHtml(DATA.metrics)}</div>
+      <h2>Kunden (${DATA.customers.length})</h2>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Firma</th><th>Erstellt</th><th>Status</th><th>Trial</th><th>Kanäle</th><th>Posts</th><th>Aktionen</th></tr></thead>
+        <tbody>${DATA.customers.length ? DATA.customers.map(rowHtml).join("") : `<tr><td colspan="7" style="text-align:center;color:var(--stone);padding:40px">Noch keine Kunden.</td></tr>`}</tbody>
+      </table>
+      </div>`;
+  }
+
+  async function loadOverview() {
+    $("#app").innerHTML = `<p class="loading">Wird geladen …</p>`;
+    DATA = await api("GET", "/api/overview");
+    renderDashboard();
+  }
+
+  async function showDetails(id) {
+    const c = await api("GET", `/api/customers/${id}`);
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML = `<div class="modal">
+      <button class="btn small ghost close">Schließen</button>
+      <h2>${esc(c.company)}</h2>
+      <dl class="kv">
+        <dt>Kontakt</dt><dd>${esc(c.contactName)} · ${esc(c.email)}</dd>
+        <dt>Website</dt><dd>${esc(c.briefing.website || "–")}</dd>
+        <dt>Branche</dt><dd>${esc(c.briefing.industry || "–")}</dd>
+        <dt>Ton</dt><dd>${esc(c.briefing.tone || "–")}</dd>
+        <dt>Rhythmus</dt><dd>${esc(c.briefing.frequency || "–")} um ${esc(c.briefing.postTime || "–")}</dd>
+        <dt>CTA</dt><dd>${esc(c.briefing.ctaPreference || "–")}</dd>
+        <dt>Worum es geht</dt><dd>${esc(c.briefing.about || "–")}</dd>
+        <dt>Vermeiden</dt><dd>${esc(c.briefing.avoidTopics || "–")}</dd>
+      </dl>
+      <h2>Letzte Beiträge</h2>
+      <ul class="posts-list">
+        ${c.posts.length ? c.posts.map((p) => `<li><strong>${esc(p.headline || p.provider)}</strong><time>${fmtDateTime(p.postedAt)}</time>${p.caption ? `<div style="color:var(--stone)">${esc(p.caption.slice(0, 140))}${p.caption.length > 140 ? "…" : ""}</div>` : ""}</li>`).join("") : `<li style="color:var(--stone)">Noch keine Beiträge.</li>`}
+      </ul>
+    </div>`;
+    ov.addEventListener("click", (e) => { if (e.target === ov || e.target.closest(".close")) ov.remove(); });
+    document.body.append(ov);
+  }
+
+  document.addEventListener("click", async (e) => {
+    if (e.target.id === "logout") {
+      await api("POST", "/api/logout");
+      return boot();
+    }
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const action = btn.dataset.action;
+    try {
+      if (action === "details") return showDetails(id);
+      if (action === "extend") {
+        const days = Number(prompt("Trial um wie viele Tage verlängern?", "7"));
+        if (!days || days <= 0) return;
+        btn.classList.add("busy");
+        await api("POST", `/api/customers/${id}/extend-trial`, { days });
+        await loadOverview();
+      }
+      if (action === "unlimited") {
+        if (!confirm("Diesen Kunden unbefristet freischalten (kein Trial-Ablauf mehr)?")) return;
+        btn.classList.add("busy");
+        await api("POST", `/api/customers/${id}/unlimited`);
+        await loadOverview();
+      }
+      if (action === "toggle-status") {
+        const status = btn.dataset.status;
+        if (status === "paused" && !confirm("Kunde pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht.")) return;
+        btn.classList.add("busy");
+        await api("POST", `/api/customers/${id}/status`, { status });
+        await loadOverview();
+      }
+    } catch (err) {
+      alert(err.message || "Aktion fehlgeschlagen.");
+      btn.classList.remove("busy");
+    }
+  });
+
+  /* ---------------- Boot ---------------- */
+  async function boot() {
+    try {
+      await api("GET", "/api/me");
+      await loadOverview();
+    } catch {
+      renderLogin();
+    }
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

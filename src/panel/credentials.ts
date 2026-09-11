@@ -7,6 +7,7 @@ import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
+import { isDue, nextPostAt } from "./schedule.js";
 
 const DAY = 86_400_000;
 
@@ -55,6 +56,24 @@ export interface CustomerOverview {
   ctaPreference: string | null;
   /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
   trialEndsAt: string | null;
+  /** True once trialEndsAt is in the past. Routines must skip these customers instead of posting. */
+  trialExpired: boolean;
+  /** Whole days left in the trial (0 once expired), or null when trialEndsAt is unset (unlimited / pre-trial customer). */
+  trialDaysLeft: number | null;
+  /** True right now (Europe/Vienna) if today is a posting day, postTime has passed, and nothing has been posted yet today. */
+  dueNow: boolean;
+  /** ISO timestamp of this customer's next planned (not yet posted) slot per their frequency/postTime. */
+  nextPostAt: string;
+  /** Channel/format toggles - publish tools refuse to post when the relevant one is false. */
+  igFeedEnabled: boolean;
+  igStoryEnabled: boolean;
+  linkedinEnabled: boolean;
+  /** Caption style preferences the routine should follow when writing captions (not enforced in code). */
+  hashtagPreference: "keine" | "wenige" | "viele";
+  emojisEnabled: boolean;
+  language: "de" | "en";
+  /** The customer's own pause toggle from their dashboard - distinct from `status` (admin lock). */
+  customerPaused: boolean;
   channels: ChannelOverview[];
 }
 
@@ -84,13 +103,62 @@ function overview(c: CustomerRow): CustomerOverview {
     avoidTopics: c.avoid_topics,
     ctaPreference: c.cta_preference,
     trialEndsAt: c.trial_ends_at,
+    trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
+    trialDaysLeft: trialDaysLeft(c.trial_ends_at),
+    // A customer who paused themselves is never "due", same effect as an unmet schedule -
+    // the routine doesn't need a separate flag to remember to check.
+    dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    igFeedEnabled: Boolean(c.ig_feed_enabled),
+    igStoryEnabled: Boolean(c.ig_story_enabled),
+    linkedinEnabled: Boolean(c.linkedin_enabled),
+    hashtagPreference: (c.hashtag_pref as CustomerOverview["hashtagPreference"]) || "wenige",
+    emojisEnabled: Boolean(c.emojis_enabled),
+    language: (c.language as CustomerOverview["language"]) || "de",
+    customerPaused: Boolean(c.customer_paused),
     channels: channelsFor(c.id),
   };
+}
+
+export type PublishChannel = "ig_feed" | "ig_story" | "linkedin";
+
+const CHANNEL_LABEL: Record<PublishChannel, string> = {
+  ig_feed: "Instagram Feed",
+  ig_story: "Instagram Story",
+  linkedin: "LinkedIn",
+};
+
+const CHANNEL_COLUMN: Record<PublishChannel, "ig_feed_enabled" | "ig_story_enabled" | "linkedin_enabled"> = {
+  ig_feed: "ig_feed_enabled",
+  ig_story: "ig_story_enabled",
+  linkedin: "linkedin_enabled",
+};
+
+/**
+ * Throws a clear error if a customer has switched this channel/format off in the panel.
+ * A missing customerId (the operator's own .env account) is never gated - unchanged behavior.
+ */
+export function assertChannelEnabled(customerId: string | undefined, channel: PublishChannel): void {
+  if (!customerId) return;
+  const column = CHANNEL_COLUMN[channel];
+  const row = db.prepare(`SELECT ${column} as enabled FROM customers WHERE id = ?`).get(customerId) as
+    | { enabled: number }
+    | undefined;
+  if (row && !row.enabled) {
+    throw new Error(`Kunde ${customerId}: ${CHANNEL_LABEL[channel]} ist im Panel deaktiviert - keine Veröffentlichung möglich.`);
+  }
 }
 
 /** True if this customer has a trial end date in the past. Routines should skip these instead of posting. */
 export function isTrialExpired(c: Pick<CustomerOverview, "trialEndsAt">): boolean {
   return Boolean(c.trialEndsAt) && new Date(c.trialEndsAt as string).getTime() < Date.now();
+}
+
+/** Whole days left in the trial (clamped to 0 once past), or null when there is no trial end date at all. */
+export function trialDaysLeft(trialEndsAt: string | null): number | null {
+  if (!trialEndsAt) return null;
+  const diff = new Date(trialEndsAt).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / DAY));
 }
 
 /** Alle aktiven Kunden inkl. Briefing – für die Content-Routine. Enthält KEINE Tokens. */
@@ -139,6 +207,19 @@ export async function getCredentials(
 ): Promise<{ accountId: string; accountName: string | null; accessToken: string }> {
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Unbekannte Plattform: ${providerId}`);
+
+  const customerRow = db.prepare("SELECT trial_ends_at, customer_paused FROM customers WHERE id = ?").get(customerId) as
+    | { trial_ends_at: string | null; customer_paused: number }
+    | undefined;
+  if (customerRow && isTrialExpired({ trialEndsAt: customerRow.trial_ends_at })) {
+    // Second line of defense - list_customers already exposes trialExpired so a well-behaved
+    // routine skips these customers on its own, but this check makes it impossible to
+    // publish for an expired trial even if that gets missed.
+    throw new Error(`Kunde ${customerId}: Probezeitraum abgelaufen. Keine Veröffentlichung möglich, bis der Kunde freigeschaltet wird.`);
+  }
+  if (customerRow?.customer_paused) {
+    throw new Error(`Kunde ${customerId}: Posting wurde vom Kunden selbst pausiert - keine Veröffentlichung möglich, bis er es im Panel fortsetzt.`);
+  }
 
   const row = db
     .prepare("SELECT * FROM connections WHERE customer_id = ? AND provider = ?")
@@ -231,6 +312,36 @@ export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost
     imageUrl: r.image_url,
     postedAt: r.posted_at,
   }));
+}
+
+const STYLE_CACHE_HOURS = 24;
+
+export interface CachedStyleSample {
+  caption: string | null;
+  mediaType: string;
+  timestamp: string;
+}
+
+/** Cached style samples for a customer if fetched within the last 24h, otherwise null (caller should re-fetch). */
+export function getCachedStyleSamples(customerId: string): CachedStyleSample[] | null {
+  const row = db.prepare("SELECT samples_json, fetched_at FROM style_cache WHERE customer_id = ?").get(customerId) as
+    | { samples_json: string; fetched_at: string }
+    | undefined;
+  if (!row) return null;
+  const ageMs = Date.now() - new Date(row.fetched_at).getTime();
+  if (ageMs > STYLE_CACHE_HOURS * 3_600_000) return null;
+  try {
+    return JSON.parse(row.samples_json) as CachedStyleSample[];
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedStyleSamples(customerId: string, samples: CachedStyleSample[]): void {
+  db.prepare(
+    `INSERT INTO style_cache (customer_id, samples_json, fetched_at) VALUES (?, ?, ?)
+     ON CONFLICT(customer_id) DO UPDATE SET samples_json = excluded.samples_json, fetched_at = excluded.fetched_at`,
+  ).run(customerId, JSON.stringify(samples), nowIso());
 }
 
 export function startTokenRefreshSchedule(intervalHours = 12): NodeJS.Timeout {

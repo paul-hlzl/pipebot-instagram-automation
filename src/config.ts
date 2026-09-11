@@ -23,6 +23,9 @@ export interface AppConfig {
   falApiKey: string;
   port: number;
   mcpAuthToken: string;
+  /** Empty string when not configured - "Mit KI verbessern" is then hidden/disabled rather than erroring. */
+  anthropicApiKey: string;
+  anthropicModel: string;
 }
 
 function parsePort(): number {
@@ -57,5 +60,8 @@ export function getConfig(): AppConfig {
     falApiKey: required("FAL_API_KEY"),
     port: parsePort(),
     mcpAuthToken: required("MCP_AUTH_TOKEN"),
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() ?? "",
+    // Fast, current Claude model per Anthropic's docs - overridable per .env without a code change.
+    anthropicModel: process.env.ANTHROPIC_MODEL?.trim() || "claude-haiku-4-5-20251001",
   };
 }

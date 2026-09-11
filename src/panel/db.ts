@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS posts (
   posted_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS posts_customer ON posts(customer_id, posted_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token_hash TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS style_cache (
+  customer_id TEXT PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+  samples_json TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
 `);
 
 // Migration: add columns to a customers table that existed before this version.
@@ -85,6 +96,18 @@ for (const [column, def] of [
   ["avoid_topics", "TEXT"],
   ["cta_preference", "TEXT"],
   ["trial_ends_at", "TEXT"],
+  // Channel/format toggles - default 1 (enabled) so existing customers keep posting exactly
+  // as before; new customers start with everything on and switch things off deliberately.
+  ["ig_feed_enabled", "INTEGER NOT NULL DEFAULT 1"],
+  ["ig_story_enabled", "INTEGER NOT NULL DEFAULT 1"],
+  ["linkedin_enabled", "INTEGER NOT NULL DEFAULT 1"],
+  ["hashtag_pref", "TEXT NOT NULL DEFAULT 'wenige'"],
+  ["emojis_enabled", "INTEGER NOT NULL DEFAULT 1"],
+  ["language", "TEXT NOT NULL DEFAULT 'de'"],
+  // Customer's own pause toggle (dashboard "Pausieren"/"Fortsetzen") - distinct from the
+  // admin's status column: a paused customer can still log in and see their dashboard, they
+  // just stop being posted for until they resume it themselves.
+  ["customer_paused", "INTEGER NOT NULL DEFAULT 0"],
 ] as const) {
   if (!existingColumns.has(column)) {
     db.exec(`ALTER TABLE customers ADD COLUMN ${column} ${def}`);
@@ -107,6 +130,13 @@ export interface CustomerRow {
   avoid_topics: string | null;
   cta_preference: string | null;
   trial_ends_at: string | null;
+  ig_feed_enabled: number;
+  ig_story_enabled: number;
+  linkedin_enabled: number;
+  hashtag_pref: string;
+  emojis_enabled: number;
+  language: string;
+  customer_paused: number;
   login_key_hash: string;
   status: string;
   consent_at: string;
@@ -144,4 +174,5 @@ export function cleanupExpired(): void {
   const now = nowIso();
   db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
   db.prepare("DELETE FROM oauth_states WHERE expires_at < ?").run(now);
+  db.prepare("DELETE FROM admin_sessions WHERE expires_at < ?").run(now);
 }
