@@ -19,7 +19,7 @@ um zu sehen, wo der Stand ist.
 | 7 | Kanal-/Formateinstellungen | ✅ erledigt |
 | 8 | Onboarding aufwerten | ✅ Code fertig, ⚠️ nicht in echtem Browser getestet (siehe unten) |
 | 9 | Kunden-Dashboard ausbauen | ⏳ offen |
-| 10 | Betrieb absichern (Backup/Health) | ⏳ offen |
+| 10 | Betrieb absichern (Backup/Health) | ✅ erledigt |
 | 11 | Meta App Review Vorbereitung | ⏳ offen |
 | 12 | Abschluss & Deploy | ⏳ offen |
 
@@ -345,6 +345,34 @@ und HTTP-Ebenen-Tests prüfen, **nicht** durch tatsächliches Klicken im Browser
 so weit ich sehen kann korrekt, aber bitte einmal `https://mcp.pipebot.at/panel?demo` nach dem
 Deploy kurz manuell durchklicken (Seite 1 → Seite 2 → zurück → Farbe wählen → Vorschau prüfen),
 bevor du dich darauf verlässt.
+
+## Aufgabe 10 – Betrieb absichern ✅
+
+**Erledigt:**
+- `scripts/backup-db.mjs` (`npm run backup:db`): Online-Backup der Panel-DB über
+  `better-sqlite3`'s `backup()`-API (funktional gleichwertig zu `sqlite3 .backup`, das auf
+  diesem Server nicht als CLI installiert ist - sicher auch bei laufenden Schreibzugriffen)
+  nach `/root/backups/panel/panel-YYYY-MM-DD.db`, behält die letzten 14 Tage, löscht ältere.
+  Erst gegen die Staging-DB getestet (inkl. Aufräum-Logik mit 20 künstlich alten Dateien -
+  korrekt auf 14 gekürzt), danach **einmal echt gegen die Produktions-DB ausgelöst und
+  verifiziert** (Backup-Datei geöffnet, Kundendaten stimmen: 2 Kunden, `Pipeline Ai Solutions`
+  + `Testunternehmen`).
+- Crontab **ergänzt** (bestehender `health-check.sh`-Eintrag alle 30 Min unangetastet
+  gelassen): täglich 03:15 UTC (außerhalb der Cloud-Routine und weit weg vom
+  Deploy-Sperrfenster 14:30-15:45 UTC), Log nach `/var/log/panel-backup.log`.
+- `GET /panel/api/health`: prüft `SELECT 1` gegen die DB, liefert nur `{status, version}` -
+  keine Pfade, keine Secrets, keine Kundendaten. Kein Auth nötig (wie der bestehende
+  `/health`-Root-Endpunkt), da reine Betriebs-Diagnose.
+- `npm run test:panel`: **33 passed** (der bisher übersprungene Health-Check läuft jetzt
+  scharf und ist grün).
+
+**⚠️ Für Paul - das kann ich nicht für dich erledigen:** `PANEL_ENCRYPTION_KEY` wurde
+bewusst **nicht** mit ins Backup-Verzeichnis kopiert (stünde sonst neben den verschlüsselten
+Tokens, die er entschlüsselt - dann wäre das Backup nutzlos als Schutz). Ohne diesen Key sind
+alle gespeicherten Instagram-/LinkedIn-Tokens beim Zurückspielen eines Backups unlesbar. Bitte
+sicherst du den aktuellen Wert aus `.env` (`PANEL_ENCRYPTION_KEY=...`) selbst extern ab, z. B.
+in einem Passwort-Manager - das ist der einzige Ort außerhalb dieses Servers, an dem er dann
+noch existiert.
 
 ---
 *(wird fortgesetzt)*

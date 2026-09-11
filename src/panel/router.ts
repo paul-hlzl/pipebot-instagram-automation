@@ -1,5 +1,7 @@
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import path from "node:path";
+import fs from "node:fs";
+import { PACKAGE_ROOT } from "../config.js";
 import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
@@ -8,6 +10,14 @@ import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft }
 import { createAdminRouter } from "./admin.js";
 import { isDue, nextPostAt } from "./schedule.js";
 import { anthropicAvailable, improveBriefing } from "../anthropic.js";
+
+const VERSION: string = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
@@ -182,6 +192,18 @@ export function createPanelRouter(): Router {
   router.use("/admin", createAdminRouter());
 
   router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+
+  // Keine Auth noetig (wie /health am Server-Root) - liefert bewusst nichts Sensibles, nur
+  // ob die DB erreichbar ist und welche Version laeuft.
+  router.get("/api/health", (_req, res) => {
+    try {
+      db.prepare("SELECT 1").get();
+      res.json({ status: "ok", version: VERSION });
+    } catch (err) {
+      console.error("[panel] Health-Check fehlgeschlagen:", err);
+      res.status(503).json({ status: "error" });
+    }
+  });
 
   router.get("/api/providers", (_req, res) => {
     res.json({
