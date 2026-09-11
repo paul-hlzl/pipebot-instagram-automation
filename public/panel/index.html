@@ -386,7 +386,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, trialDays: 7, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set() };
+  const S = { providers: [], aiAvailable: false, trialDays: 7, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [] };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -467,6 +467,16 @@
   }
 
   /* ================= Content-Säulen ================= */
+  function pillarSuggestionCardHtml(p, i) {
+    return `<div class="ai-box" data-pillar-suggestion="${i}">
+      <p><strong>${esc(p.title)}</strong><br>${esc(p.description)}</p>
+      <div class="row">
+        <button type="button" data-pillar-accept="${i}" ${S.pillarsDraft.length >= 6 ? "disabled" : ""}>Übernehmen</button>
+        <button type="button" class="ghost" data-pillar-discard="${i}">Verwerfen</button>
+      </div>
+    </div>`;
+  }
+
   function renderPillarsSection() {
     const rows = S.pillarsDraft.map((p, i) => `
       <div class="pillar-row" data-pillar-index="${i}">
@@ -479,7 +489,19 @@
       <label>Content-Säulen <span class="opt">(optional)</span></label>
       <p class="hint">Wiederkehrende Themen, zwischen denen automatisch abgewechselt wird (z. B. "Tipps", "Hinter den Kulissen", "Kundenstimmen"). Gewicht = wie oft im Vergleich zu den anderen dran. Ohne Säulen nutzen wir einfach Ihre Beschreibung oben.</p>
       <div id="pillars-list">${rows}</div>
-      ${S.pillarsDraft.length < 6 ? `<button type="button" class="link" id="pillar-add">+ Säule hinzufügen</button>` : `<p class="hint">Maximal 6 Säulen.</p>`}`;
+      ${S.pillarsDraft.length < 6 ? `<button type="button" class="link" id="pillar-add">+ Säule hinzufügen</button>` : `<p class="hint">Maximal 6 Säulen.</p>`}
+      ${S.aiAvailable ? `
+      <p class="hint"><button type="button" class="link" id="pillar-ai-suggest">Mit KI vorschlagen</button></p>
+      <div id="pillar-ai-block" ${S.pillarAiOpen ? "" : "hidden"}>
+        <div class="field">
+          <label for="f-pillar-keywords" class="vh">Stichworte für Themen-Ideen</label>
+          <input id="f-pillar-keywords" type="text" placeholder="Stichworte für Themen-Ideen (optional, z. B. Osteopressur, Faszientherapie, Mühlviertel)" maxlength="300" value="${esc(S.pillarAiKeywords)}">
+        </div>
+        <div class="actions">
+          <button type="button" class="link" id="pillar-ai-fetch">Vorschläge holen</button>
+        </div>
+        <div id="pillar-ai-results">${S.pillarSuggestions.map(pillarSuggestionCardHtml).join("")}</div>
+      </div>` : ""}`;
   }
 
   function syncPillarsDraftFromDom() {
@@ -1083,6 +1105,32 @@
     renderPreview();
   }
 
+  async function suggestPillarsUi() {
+    const btn = $("#pillar-ai-fetch");
+    const form = $("#company");
+    const company = form?.querySelector("[name=company]")?.value || "";
+    const industry = form?.querySelector("[name=industry]")?.value || "";
+    const about = $("#f-about")?.value || "";
+    const website = $("#f-website")?.value || "";
+    const keywords = $("#f-pillar-keywords")?.value || "";
+    const box = $("#pillar-ai-results");
+    if (!box) return;
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = "Wird recherchiert …";
+    box.innerHTML = "";
+    try {
+      const { pillars } = await api("POST", "/api/suggest-pillars", { company, industry, about, website, keywords });
+      S.pillarSuggestions = pillars;
+      box.innerHTML = pillars.map(pillarSuggestionCardHtml).join("");
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--stop)">${esc(err.message || "Die Vorschläge konnten gerade nicht erstellt werden.")}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+    }
+  }
+
   function renderTrialBar() {
     const bar = $("#trialbar");
     const c = S.customer;
@@ -1138,6 +1186,9 @@
   document.addEventListener("input", (e) => {
     if (e.target.id === "f-accentColor" || e.target.id === "f-watermarkText" || e.target.name === "company") {
       updateLivePreview();
+    }
+    if (e.target.id === "f-pillar-keywords") {
+      S.pillarAiKeywords = e.target.value;
     }
   });
 
@@ -1456,6 +1507,34 @@
       if (section) section.innerHTML = renderPillarsSection();
       return;
     }
+    if (e.target.closest("#pillar-ai-suggest")) {
+      S.pillarAiOpen = true;
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      $("#f-pillar-keywords")?.focus();
+      return;
+    }
+    if (e.target.closest("#pillar-ai-fetch")) return suggestPillarsUi();
+    const pillarAccept = e.target.closest("[data-pillar-accept]");
+    if (pillarAccept) {
+      const i = Number(pillarAccept.dataset.pillarAccept);
+      const suggestion = S.pillarSuggestions[i];
+      if (!suggestion) return;
+      syncPillarsDraftFromDom();
+      if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: suggestion.title, description: suggestion.description, weight: 1 });
+      S.pillarSuggestions.splice(i, 1);
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      return;
+    }
+    const pillarDiscard = e.target.closest("[data-pillar-discard]");
+    if (pillarDiscard) {
+      const i = Number(pillarDiscard.dataset.pillarDiscard);
+      S.pillarSuggestions.splice(i, 1);
+      const section = $("#pillars-section");
+      if (section) section.innerHTML = renderPillarsSection();
+      return;
+    }
     if (e.target.closest("[data-ai-accept]")) {
       const box = $("#ai-suggestion");
       $("#f-about").value = box.dataset.suggestion;
@@ -1717,6 +1796,15 @@
     }
     if (url === "/api/suggest-topics") {
       return { topics: ["Ein Kundenerfolg aus der letzten Woche", "Ein häufiges Missverständnis in Ihrer Branche aufklären", "Ein kurzer Tipp, den Sie sonst nur persönlich weitergeben"] };
+    }
+    if (url === "/api/suggest-pillars") {
+      return {
+        pillars: [
+          { title: "Tipps & Tricks", description: "Kurze, direkt umsetzbare Ratschläge rund um Ihr Angebot. (Vorschau-Beispiel)" },
+          { title: "Hinter den Kulissen", description: "Einblicke in Ihren Arbeitsalltag, die Vertrauen schaffen. (Vorschau-Beispiel)" },
+          { title: "Kundenstimmen", description: "Erfahrungen und Erfolge Ihrer Kundinnen und Kunden. (Vorschau-Beispiel)" },
+        ],
+      };
     }
     if (url === "/api/planned-posts" && method === "GET") {
       if (!MOCK.plannedPosts) {

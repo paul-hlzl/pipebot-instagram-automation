@@ -41,7 +41,7 @@ import {
 } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
-import { anthropicAvailable, improveBriefing, suggestTopics } from "../anthropic.js";
+import { anthropicAvailable, improveBriefing, suggestPillarsWithSearch, suggestTopics } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 
@@ -448,6 +448,39 @@ export function createPanelRouter(): Router {
       } catch (err) {
         console.error("[panel] analyze-website fehlgeschlagen:", err);
         res.status(502).json({ error: err instanceof Error ? err.message : "Die Website konnte nicht analysiert werden." });
+      }
+    }),
+  );
+
+  // Content-Saeulen per KI + Web-Suche vorschlagen (Zusatz-Aufgabe nach Panel v5). Laeuft auch
+  // waehrend des Signups, wie improve-briefing/analyze-website - aber strenger begrenzt (3/Tag
+  // statt 1/Minute oder 6/10min), weil eine Web-Suche pro Aufruf deutlich teurer ist als die
+  // anderen KI-Endpunkte (siehe suggestPillarsWithSearch's Doc-Kommentar). Rate-Limit-Schluessel
+  // ist die Kunden-Session falls vorhanden, sonst die IP (wie bei improve-briefing/
+  // analyze-website waehrend des Signups).
+  router.post(
+    "/api/suggest-pillars",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (rateLimited(`suggest-pillars:${c ? c.id : clientIp(req)}`, 3, 24 * 3_600_000)) {
+        res.status(429).json({ error: "Maximal 3 KI-Vorschläge pro Tag." });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
+        return;
+      }
+      const company = str(req.body?.company, 120);
+      const industry = str(req.body?.industry, 120);
+      const about = str(req.body?.about, 2000);
+      const website = str(req.body?.website, 300);
+      const keywords = str(req.body?.keywords, 300);
+      try {
+        const pillars = await suggestPillarsWithSearch({ company, industry, about, website, keywords });
+        res.json({ pillars });
+      } catch (err) {
+        console.error("[panel] suggest-pillars fehlgeschlagen:", err);
+        res.status(502).json({ error: "Die Vorschläge konnten gerade nicht erstellt werden. Bitte später erneut versuchen." });
       }
     }),
   );

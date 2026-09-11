@@ -334,6 +334,27 @@ async function main() {
     }
   }
 
+  // --- 3e-2. Content-Säulen per KI + Web-Suche (Zusatz-Aufgabe) - laeuft auch ohne Login
+  // (waehrend des Signups), wie improve-briefing/analyze-website. KEIN echter Anthropic/Web-
+  // Search-Aufruf in dieser Suite - ein Web-Search-Aufruf kostet echtes Geld pro Suche, und das
+  // strenge 3/Tag-Limit liesse sich ohnehin nicht ohne mehrere echte (teure) Aufrufe durchtesten.
+  // Der volle Roundtrip wurde manuell gegen Staging verifiziert (siehe Report).
+  console.log("\nContent-Säulen per KI (Web-Suche):");
+  {
+    const providersRes = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const { aiAvailable } = await providersRes.json();
+    if (!aiAvailable) {
+      const res = await fetch(`${BASE}${MOUNT}/api/suggest-pillars`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ company: "Test GmbH" }),
+      });
+      ok("suggest-pillars ohne ANTHROPIC_API_KEY -> 503", res.status === 503, `status=${res.status}`);
+    } else {
+      console.log("  skip - ANTHROPIC_API_KEY ist gesetzt, kein echter Web-Search-Aufruf in dieser Suite");
+    }
+  }
+
   // --- 3f-2. Vorausplanung/"Vorschau" (v5) - planned_posts-Zeilen werden direkt in die
   // Staging-DB eingefuegt (nicht ueber planUpcomingPosts, das wuerde echte Anthropic/fal.ai-
   // Aufrufe ausloesen). regenerate-image wird nur am bereits-am-Limit-Fall getestet (429 kommt

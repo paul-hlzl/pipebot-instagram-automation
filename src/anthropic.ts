@@ -351,3 +351,110 @@ export async function generatePlannedPostContent(input: {
   }
   return { headline, caption };
 }
+
+export interface SuggestedPillar {
+  title: string;
+  description: string;
+}
+
+/**
+ * Suggests 3-6 content pillars using the Anthropic web_search server tool - a short research
+ * step ("what social media topics tend to work for this kind of business") before answering,
+ * unlike every other function in this file, which is a single plain text call. Costlier than
+ * the other AI features (web search is billed per search, on top of token cost - see
+ * PANEL_V5_REPORT-style cost note in the router endpoint's rate limit), so callers should apply
+ * a stricter rate limit than the other single-call endpoints.
+ */
+export async function suggestPillarsWithSearch(input: {
+  company: string;
+  industry: string;
+  about: string;
+  website: string;
+  keywords: string;
+}): Promise<SuggestedPillar[]> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+
+  const system =
+    "Du hilfst Kleinunternehmern, sinnvolle wiederkehrende Themenbereiche (\"Content-Säulen\") für ihre " +
+    "automatisch generierten Social-Media-Beiträge zu finden. Du hast Zugriff auf eine Web-Suche - nutze sie " +
+    "kurz (wenige Suchen genügen), um herauszufinden, was für Social-Media-Themen bei dieser Branche/diesem " +
+    "Geschäft typischerweise gut funktionieren (verbreitete Content-Formate, häufige Kundenfragen, saisonale " +
+    "Themen, Besonderheiten der Region falls angegeben). Nachdem du recherchiert hast, antworte GANZ ZULETZT, " +
+    "als alleräußerster Teil deiner gesamten Antwort, AUSSCHLIESSLICH mit einem JSON-Array - kein Text danach, " +
+    'kein Markdown-Codeblock drumherum - nach genau diesem Schema: [{"title": "kurzer Titel, max. 4 Wörter", ' +
+    '"description": "1-2 Sätze auf Deutsch, was inhaltlich in diese Säule fällt"}]. Schlage 3 bis 6 Säulen vor, ' +
+    "jede thematisch klar von den anderen unterscheidbar - keine Duplikate oder Überlappungen.";
+
+  const user =
+    `Firma: ${input.company || "(unbekannt)"}\n` +
+    `Branche: ${input.industry || "(unbekannt)"}\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `Website: ${input.website || "(keine)"}\n` +
+    `Stichworte für Themen-Ideen: ${input.keywords || "(keine)"}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 2000,
+          system,
+          messages: [{ role: "user", content: user }],
+          tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 45_000,
+        },
+      ),
+    1, // fewer retries than the other AI features - a web-search call is markedly more expensive
+    "Anthropic suggest-pillars (web search)",
+  );
+
+  // Multiple text blocks interleave with server_tool_use/web_search_tool_result blocks (the
+  // search steps) - the JSON answer is in the LAST text block, per the system prompt above.
+  const textBlocks = (data.content ?? []).filter((c) => c.type === "text" && c.text);
+  const text = textBlocks[textBlocks.length - 1]?.text?.trim();
+  if (!text) {
+    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  }
+
+  // Unlike the other functions in this file, the model reliably adds a preamble sentence
+  // before the JSON here ("Basierend auf meiner Recherche...") despite being told to answer
+  // "GANZ ZULETZT... AUSSCHLIESSLICH" with JSON - likely because the preceding search steps put
+  // it in a more conversational mode. A simple leading/trailing fence strip (as the other
+  // functions use) doesn't help when there's prose before the fence too, so extract the
+  // outermost [...] substring instead, wherever it appears in the text.
+  const match = text.match(/\[[\s\S]*\]/);
+  let parsed: unknown;
+  try {
+    if (!match) throw new Error("no array found");
+    parsed = JSON.parse(match[0]);
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  const pillars = parsed
+    .map((p) => {
+      const obj = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+      const title = typeof obj.title === "string" ? obj.title.trim().slice(0, 60) : "";
+      const description = typeof obj.description === "string" ? obj.description.trim().slice(0, 300) : "";
+      return { title, description };
+    })
+    .filter((p) => p.title)
+    .slice(0, 6);
+  if (!pillars.length) {
+    throw new ToolError("Die KI hat keine verwertbaren Vorschläge geliefert.");
+  }
+  return pillars;
+}
