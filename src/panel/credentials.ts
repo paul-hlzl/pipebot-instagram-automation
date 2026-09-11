@@ -10,6 +10,8 @@ import {
   type ContentPillarRow,
   type CustomerRow,
   type PendingApprovalRow,
+  type PlannedPostRow,
+  type PlanningErrorRow,
   type PostRequestRow,
   type PostRow,
   type SavedThemeRow,
@@ -19,6 +21,9 @@ import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
 import { isDue, isDueForChannel, nextPostAt, type ScheduleInput } from "./schedule.js";
+import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
+import type { LinkedInCredentials } from "../linkedin.js";
+import type { ImageBranding } from "../fal.js";
 
 const DAY = 86_400_000;
 
@@ -189,6 +194,13 @@ const CHANNEL_COLUMN: Record<PublishChannel, "ig_feed_enabled" | "ig_story_enabl
   linkedin: "linkedin_enabled",
 };
 
+/** Which fal.ai/watermark image format a channel uses - LinkedIn images are square, same as the feed format. */
+export const CHANNEL_IMAGE_FORMAT: Record<PublishChannel, "feed" | "story"> = {
+  ig_feed: "feed",
+  ig_story: "story",
+  linkedin: "feed",
+};
+
 /**
  * Throws a clear error if a customer has switched this channel/format off in the panel.
  * A missing customerId (the operator's own .env account) is never gated - unchanged behavior.
@@ -293,6 +305,44 @@ export async function getCredentials(
     }
   }
   return { accountId: row.account_id, accountName: row.account_name, accessToken };
+}
+
+/**
+ * Instagram/LinkedIn/image-branding resolvers - moved here (from index.ts, where they were
+ * private helpers used by every MCP publish/generate tool) so planning.ts (v5's server-side
+ * daily pre-planning) can call the exact same credential/branding resolution directly, without
+ * going through an MCP tool. index.ts imports these too now instead of keeping its own copies -
+ * one source of truth for both call paths.
+ */
+
+/** Loads a customer's Instagram credentials. undefined = the operator's own .env account (unchanged default behavior). */
+export async function resolveInstagramCredentials(customerId?: string): Promise<InstagramCredentials | undefined> {
+  if (!customerId) return undefined;
+  const cred = await getCredentials(customerId, "instagram");
+  return { accessToken: cred.accessToken, igUserId: cred.accountId };
+}
+
+/** Loads a customer's LinkedIn credentials. undefined = the operator's own .env account (unchanged default behavior). */
+export async function resolveLinkedInCredentials(customerId?: string): Promise<LinkedInCredentials | undefined> {
+  if (!customerId) return undefined;
+  const cred = await getCredentials(customerId, "linkedin");
+  return { accessToken: cred.accessToken, personUrn: cred.accountId };
+}
+
+/**
+ * Loads a customer's image branding (accent color, watermark text/logo) for the generate_*
+ * image tools. No customerId or unknown customer: {} -> generateImageUrl falls back to the
+ * default styleguide look (navy, "Pipeline" watermark), exactly as before.
+ */
+export function resolveImageBranding(customerId?: string): ImageBranding {
+  if (!customerId) return {};
+  const customer = getCustomerOverview(customerId);
+  if (!customer) return {};
+  return {
+    accentColor: customer.accentColor ?? undefined,
+    watermarkText: customer.watermarkText || customer.company || undefined,
+    logoPath: customer.logoUrl,
+  };
 }
 
 /** Verlängert alle bald ablaufenden Tokens. Wird per Intervall aufgerufen. */
@@ -416,17 +466,18 @@ export function setContentPillars(customerId: string, pillars: { title: string; 
  * recent logged post used (so the routine doesn't hit the same pillar twice in a row). Returns
  * null when the customer has no pillars set up - callers should fall back to `about`.
  */
-export function pickPillarForToday(customerId: string): ContentPillar | null {
-  const pillars = listContentPillars(customerId);
+/**
+ * Weighted-random pick among `pillars`, avoiding `avoidTitle` when given (falls back to the
+ * full list if avoiding it would empty the pool). Factored out of pickPillarForToday so
+ * planning.ts (v5) can rotate pillars across a whole 7-day plan in one run - pickPillarForToday
+ * itself only ever "avoids" whatever the last REAL post used, which would pick the same pillar
+ * for every day of a freshly-generated week (no new `posts` rows exist yet mid-planning).
+ */
+export function pickWeightedPillar(pillars: ContentPillar[], avoidTitle: string | null): ContentPillar | null {
   if (!pillars.length) return null;
   if (pillars.length === 1) return pillars[0];
-
-  const lastPost = db
-    .prepare("SELECT pillar_title FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 1")
-    .get(customerId) as { pillar_title: string | null } | undefined;
-  const lastTitle = lastPost?.pillar_title ?? null;
-  const pool = lastTitle ? pillars.filter((p) => p.title !== lastTitle) : pillars;
-  const candidates = pool.length ? pool : pillars; // everything filtered out is only possible with 1 active pillar, handled above, but stay safe
+  const pool = avoidTitle ? pillars.filter((p) => p.title !== avoidTitle) : pillars;
+  const candidates = pool.length ? pool : pillars;
 
   const totalWeight = candidates.reduce((sum, p) => sum + p.weight, 0);
   let r = Math.random() * totalWeight;
@@ -437,7 +488,17 @@ export function pickPillarForToday(customerId: string): ContentPillar | null {
   return candidates[candidates.length - 1];
 }
 
-function splitCommaList(raw: string | null): string[] {
+/** Today's pick, avoiding whatever pillar the customer's most recent REAL post used - unchanged behavior/signature. */
+export function pickPillarForToday(customerId: string): ContentPillar | null {
+  const pillars = listContentPillars(customerId);
+  if (!pillars.length) return null;
+  const lastPost = db
+    .prepare("SELECT pillar_title FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 1")
+    .get(customerId) as { pillar_title: string | null } | undefined;
+  return pickWeightedPillar(pillars, lastPost?.pillar_title ?? null);
+}
+
+export function splitCommaList(raw: string | null): string[] {
   return (raw ?? "")
     .split(",")
     .map((w) => w.trim())
@@ -645,6 +706,164 @@ export function markPendingApprovalPublished(id: string): boolean {
   return result.changes > 0;
 }
 
+export interface PlannedPost {
+  id: string;
+  customerId: string;
+  channel: string;
+  scheduledFor: string;
+  status: string;
+  headline: string | null;
+  caption: string | null;
+  imageUrl: string | null;
+  pillarTitle: string | null;
+  accentColorUsed: string | null;
+  regenerateCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toPlannedPost(r: PlannedPostRow): PlannedPost {
+  return {
+    id: r.id,
+    customerId: r.customer_id,
+    channel: r.channel,
+    scheduledFor: r.scheduled_for,
+    status: r.status,
+    headline: r.headline,
+    caption: r.caption,
+    imageUrl: r.image_url,
+    pillarTitle: r.pillar_title,
+    accentColorUsed: r.accent_color_used,
+    regenerateCount: r.regenerate_count,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** Above this many "Mit dieser Farbe neu erstellen" regenerations, the panel hides the button (cost control, task 8). */
+export const PLANNED_POST_MAX_REGENERATE = 3;
+
+/** Creates one planned_posts row (planning.ts, one per due customer/channel/day). */
+export function createPlannedPost(input: {
+  customerId: string;
+  channel: string;
+  scheduledFor: string;
+  headline?: string;
+  caption?: string;
+  imageUrl?: string;
+  pillarTitle?: string;
+  accentColorUsed?: string;
+}): PlannedPost {
+  const id = `plan_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 0, ?, ?)`,
+  ).run(
+    id,
+    input.customerId,
+    input.channel,
+    input.scheduledFor,
+    input.headline ?? null,
+    input.caption ?? null,
+    input.imageUrl ?? null,
+    input.pillarTitle ?? null,
+    input.accentColorUsed ?? null,
+    now,
+    now,
+  );
+  return toPlannedPost(db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow);
+}
+
+/** One customer's planned post for one channel/day, or null - planning.ts's idempotency check and the
+ *  `get_planned_post` MCP tool (K0 in the routine, task 6) both use this exact lookup shape. */
+export function getPlannedPostByChannelDate(customerId: string, channel: string, scheduledFor: string): PlannedPost | null {
+  const row = db
+    .prepare("SELECT * FROM planned_posts WHERE customer_id = ? AND channel = ? AND scheduled_for = ?")
+    .get(customerId, channel, scheduledFor) as PlannedPostRow | undefined;
+  return row ? toPlannedPost(row) : null;
+}
+
+/** A customer's planned posts in a date range (both ends inclusive, YYYY-MM-DD), earliest first - the panel's "Vorschau" tab. */
+export function listPlannedPosts(customerId: string, fromDate: string, toDate: string): PlannedPost[] {
+  const rows = db
+    .prepare("SELECT * FROM planned_posts WHERE customer_id = ? AND scheduled_for >= ? AND scheduled_for <= ? ORDER BY scheduled_for, channel")
+    .all(customerId, fromDate, toDate) as PlannedPostRow[];
+  return rows.map(toPlannedPost);
+}
+
+export function getPlannedPost(id: string): PlannedPost | null {
+  const row = db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow | undefined;
+  return row ? toPlannedPost(row) : null;
+}
+
+/** customer_id-scoped lookup for the panel's own endpoints - never lets a customer read/edit another's row. */
+export function getPlannedPostForCustomer(customerId: string, id: string): PlannedPost | null {
+  const row = db.prepare("SELECT * FROM planned_posts WHERE id = ? AND customer_id = ?").get(id, customerId) as PlannedPostRow | undefined;
+  return row ? toPlannedPost(row) : null;
+}
+
+/**
+ * Edits headline/caption on a planned post (customer edit in the "Vorschau" tab). Moves a plain
+ * 'planned' row to 'edited' so the routine/panel can tell it was customer-touched; a row already
+ * past that (approved/rejected/published) keeps its status - editing text after approval doesn't
+ * silently un-approve it.
+ */
+export function updatePlannedPostText(id: string, fields: { headline?: string; caption?: string }): PlannedPost | null {
+  const row = db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow | undefined;
+  if (!row) return null;
+  const headline = fields.headline !== undefined ? fields.headline : row.headline;
+  const caption = fields.caption !== undefined ? fields.caption : row.caption;
+  const nextStatus = row.status === "planned" ? "edited" : row.status;
+  db.prepare("UPDATE planned_posts SET headline = ?, caption = ?, status = ?, updated_at = ? WHERE id = ?").run(headline, caption, nextStatus, nowIso(), id);
+  return getPlannedPost(id);
+}
+
+/** Sets a planned post's status directly (approve/reject, or the routine marking it published) - no text/image change. */
+export function markPlannedPostStatus(id: string, status: string): PlannedPost | null {
+  const result = db.prepare("UPDATE planned_posts SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
+}
+
+/**
+ * Replaces a planned post's image (customer's "Mit dieser Farbe neu erstellen") and increments
+ * regenerate_count. Caller (the router) is responsible for checking PLANNED_POST_MAX_REGENERATE
+ * against the current count BEFORE calling generation - this function only records the result.
+ */
+export function updatePlannedPostImage(id: string, imageUrl: string, accentColorUsed: string): PlannedPost | null {
+  const result = db
+    .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = ?, regenerate_count = regenerate_count + 1, updated_at = ? WHERE id = ?")
+    .run(imageUrl, accentColorUsed, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
+}
+
+/** Records one skipped customer/day/channel from a planning run (task 4/8's safety net) - never throws, best-effort. */
+export function logPlanningError(customerId: string | null, channel: string | null, scheduledFor: string | null, message: string): void {
+  try {
+    db.prepare(
+      `INSERT INTO planning_errors (id, customer_id, channel, scheduled_for, message, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(`plerr_${randomToken(9)}`, customerId, channel, scheduledFor, message.slice(0, 500), nowIso());
+  } catch (err) {
+    console.error("[panel] logPlanningError selbst fehlgeschlagen:", err);
+  }
+}
+
+export interface PlanningError {
+  customerId: string | null;
+  channel: string | null;
+  scheduledFor: string | null;
+  message: string;
+  createdAt: string;
+}
+
+/** Most recent planning-run errors, newest first - for the report/admin view. */
+export function listRecentPlanningErrors(limit = 50): PlanningError[] {
+  const rows = db.prepare("SELECT * FROM planning_errors ORDER BY created_at DESC LIMIT ?").all(limit) as PlanningErrorRow[];
+  return rows.map((r) => ({ customerId: r.customer_id, channel: r.channel, scheduledFor: r.scheduled_for, message: r.message, createdAt: r.created_at }));
+}
+
 export interface SavedTheme {
   id: string;
   name: string;
@@ -723,6 +942,32 @@ export function getCachedStyleSamples(customerId: string): CachedStyleSample[] |
   } catch {
     return null;
   }
+}
+
+/**
+ * Full get_customer_style_samples behavior (cache check, credential resolution, Graph API call,
+ * cache write) as a plain function, not just an MCP tool - the MCP tool below calls this
+ * directly, and so does planning.ts's server-side pre-planning (v5), so both go through the
+ * exact same logic/cache instead of two implementations drifting apart.
+ */
+export async function getStyleSamples(customerId: string): Promise<{ samples: CachedStyleSample[]; cached: boolean }> {
+  const cached = getCachedStyleSamples(customerId);
+  if (cached) return { samples: cached, cached: true };
+  let creds: InstagramCredentials | undefined;
+  try {
+    creds = await resolveInstagramCredentials(customerId);
+  } catch (credError) {
+    // Not connected yet is a normal, expected case here - unlike a real trial/token error,
+    // don't surface it as a failure.
+    if (credError instanceof Error && credError.message.includes("nicht verbunden")) {
+      return { samples: [], cached: false };
+    }
+    throw credError;
+  }
+  if (!creds) return { samples: [], cached: false };
+  const samples = await getRecentMedia(creds, 10);
+  setCachedStyleSamples(customerId, samples);
+  return { samples, cached: false };
 }
 
 export function setCachedStyleSamples(customerId: string, samples: CachedStyleSample[]): void {

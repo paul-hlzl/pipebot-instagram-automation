@@ -153,3 +153,201 @@ export async function suggestFromWebsite(input: { title: string; description: st
     hashtags,
   };
 }
+
+/**
+ * Suggests 3 short topic ideas for the "Jetzt posten" theme field - a single Anthropic call,
+ * no tool loop, same pattern as improveBriefing/suggestFromWebsite. Told about recent post
+ * headlines specifically so it doesn't re-suggest something already covered recently.
+ */
+export async function suggestTopics(input: {
+  industry: string;
+  about: string;
+  tone: string;
+  contentPillars: { title: string; description: string | null }[];
+  recentHeadlines: string[];
+}): Promise<string[]> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+
+  const system =
+    "Du hilfst Kleinunternehmern, ein konkretes Thema für ihren nächsten Social-Media-Beitrag zu finden. " +
+    "Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - kein einleitender Satz, kein Markdown-Codeblock, kein " +
+    'Text davor oder danach - nach genau diesem Schema: {"topics": ["Thema 1", "Thema 2", "Thema 3"]}. ' +
+    "Genau 3 Themenvorschläge, je EIN kurzer, konkreter Satz auf Deutsch (kein Hashtag, keine Anführungszeichen, " +
+    "keine Nummerierung) - konkret genug, dass er direkt als Briefing für einen Beitrag dienen kann, nicht nur " +
+    "ein Schlagwort. Schlage nichts vor, das den kürzlich veröffentlichten Themen inhaltlich zu ähnlich ist.";
+  const pillarLines = input.contentPillars.length
+    ? input.contentPillars.map((p) => `- ${p.title}${p.description ? `: ${p.description}` : ""}`).join("\n")
+    : "(keine festgelegt)";
+  const recentLines = input.recentHeadlines.length ? input.recentHeadlines.map((h) => `- ${h}`).join("\n") : "(keine)";
+  const user =
+    `Branche: ${input.industry || "(unbekannt)"}\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `Tonalität: ${input.tone || "sachlich"}\n` +
+    `Content-Säulen:\n${pillarLines}\n\n` +
+    `Zuletzt veröffentlichte Themen (nicht wiederholen):\n${recentLines}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 300,
+          system,
+          messages: [{ role: "user", content: user }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic suggest-topics",
+  );
+
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) {
+    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  }
+
+  let parsed: unknown;
+  try {
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  const obj = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const topics = Array.isArray(obj.topics)
+    ? obj.topics
+        .map((t) => String(t).trim())
+        .filter(Boolean)
+        .slice(0, 3)
+    : [];
+  if (!topics.length) {
+    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  }
+  return topics;
+}
+
+const HASHTAG_GUIDANCE: Record<string, string> = {
+  keine: "KEINE Hashtags - die Caption endet ohne Hashtag-Zeile.",
+  wenige: "2 bis 4 Hashtags am Ende der Caption.",
+  viele: "10 bis 15 Hashtags am Ende der Caption.",
+};
+
+export interface PlannedPostContent {
+  headline: string;
+  caption: string;
+}
+
+/**
+ * Direct, single-call content generation for planning.ts's server-side daily pre-planning
+ * (Panel v5, task 4) - the same headline+caption writing job the K1-K9 cloud routine does
+ * itself via its own model, but invoked here as a plain Anthropic call so the panel server can
+ * produce a preview immediately, without waiting for the next routine run. Banned words/
+ * required elements are given as hard instructions in the prompt; the caller (planning.ts)
+ * still re-verifies them with assertNoBannedWords/assertRequiredElements afterwards - a prompt
+ * instruction alone is not a guarantee, same reasoning as everywhere else in this codebase.
+ */
+export async function generatePlannedPostContent(input: {
+  channel: "ig_feed" | "ig_story" | "linkedin";
+  company: string;
+  industry: string;
+  about: string;
+  tone: string;
+  language: string;
+  hashtagPreference: string;
+  emojisEnabled: boolean;
+  pillarTitle?: string | null;
+  pillarDescription?: string | null;
+  bannedWords: string[];
+  requiredElements: string[];
+  /** Recent caption texts (own posts) to match tone/emoji/hashtag style instead of guessing. */
+  styleSamples: string[];
+  /** Set only on the one retry after a hard-constraint violation - names what went wrong so the model avoids repeating it. */
+  avoidNote?: string;
+}): Promise<PlannedPostContent> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+
+  const isStory = input.channel === "ig_story";
+  const languageName = input.language === "en" ? "English" : "Deutsch";
+  const hashtagLine = isStory ? "Instagram Stories haben kein sichtbares Caption-Feld - caption bleibt ein leerer String." : HASHTAG_GUIDANCE[input.hashtagPreference] ?? HASHTAG_GUIDANCE.wenige;
+
+  const system =
+    `Du schreibst einen einzelnen Social-Media-Beitrag (${input.channel === "linkedin" ? "LinkedIn" : "Instagram"}) für ein ` +
+    "Kleinunternehmen, im Rahmen einer automatischen Vorausplanung. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - " +
+    'kein einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: ' +
+    '{"headline": "kurze Schlagzeile fuer das Bild, max. 6 Woerter", "caption": "der Beitragstext"}. ' +
+    `Schreibe vollständig auf ${languageName}. Tonalität: ${input.tone || "sachlich"}. ` +
+    `Emojis: ${input.emojisEnabled ? "sparsam und passend einsetzen" : "keine Emojis verwenden"}. ` +
+    `Hashtags: ${hashtagLine} ` +
+    "Wenn Beispiele eigener früherer Beiträge angegeben sind, orientiere dich an deren Tonfall, Emoji-Nutzung und " +
+    "Hashtag-Stil, statt zu raten. " +
+    (input.bannedWords.length ? `Verwende NIEMALS eines dieser Wörter: ${input.bannedWords.join(", ")}. ` : "") +
+    (input.requiredElements.length
+      ? `Baue JEDES der folgenden Elemente irgendwo ein (Headline oder Caption): ${input.requiredElements.join(", ")}. `
+      : "") +
+    (input.avoidNote ? `WICHTIG, vorheriger Versuch war ungültig: ${input.avoidNote} - korrigiere das jetzt.` : "");
+
+  const pillarLine = input.pillarTitle ? `Content-Säule für diesen Beitrag: ${input.pillarTitle}${input.pillarDescription ? ` - ${input.pillarDescription}` : ""}` : "Keine Content-Säule festgelegt - nutze die allgemeine Unternehmensbeschreibung.";
+  const samplesLine = input.styleSamples.length ? input.styleSamples.map((s, i) => `${i + 1}. ${s}`).join("\n") : "(keine früheren Beiträge verfügbar)";
+  const user =
+    `Firma: ${input.company || "(unbekannt)"}\n` +
+    `Branche: ${input.industry || "(unbekannt)"}\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `${pillarLine}\n\n` +
+    `Eigene frühere Beiträge (Tonfall-Referenz):\n${samplesLine}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 600,
+          system,
+          messages: [{ role: "user", content: user }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic planned-post content",
+  );
+
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) {
+    throw new ToolError("Die KI hat keinen Beitrag geliefert.");
+  }
+  let parsed: unknown;
+  try {
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  const obj = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const headline = typeof obj.headline === "string" ? obj.headline.trim().slice(0, 100) : "";
+  const caption = isStory ? "" : typeof obj.caption === "string" ? obj.caption.trim().slice(0, 2200) : "";
+  if (!headline) {
+    throw new ToolError("Die KI hat keine Schlagzeile geliefert.");
+  }
+  return { headline, caption };
+}

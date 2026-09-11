@@ -109,6 +109,41 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
 );
 CREATE INDEX IF NOT EXISTS pending_approvals_customer ON pending_approvals(customer_id, created_at DESC);
 
+-- Panel v5: server-side daily pre-planning (planning.ts), independent of pending_approvals -
+-- a planned_posts row exists BEFORE any customer review, for every due day/channel in the next
+-- 7 days. pending_approvals stays exactly as before (approvalMode's customer-review queue,
+-- filed by the K1-K9 routine at publish time); the two tables serve different points in time
+-- and are not merged, to avoid touching pending_approvals' existing read/write paths.
+CREATE TABLE IF NOT EXISTS planned_posts (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL,
+  scheduled_for TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planned',
+  headline TEXT,
+  caption TEXT,
+  image_url TEXT,
+  pillar_title TEXT,
+  accent_color_used TEXT,
+  regenerate_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS planned_posts_customer_date ON planned_posts(customer_id, scheduled_for, channel);
+
+-- Panel v5 task 4's safety net: one failure (for one customer/day/channel) never aborts the
+-- whole daily planning run - it's skipped and recorded here instead. No foreign key on
+-- customer_id on purpose - a log row should survive that customer being deleted later.
+CREATE TABLE IF NOT EXISTS planning_errors (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT,
+  channel TEXT,
+  scheduled_for TEXT,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS planning_errors_created ON planning_errors(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS saved_themes (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -308,6 +343,31 @@ export interface PostRequestRow {
   status: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface PlannedPostRow {
+  id: string;
+  customer_id: string;
+  channel: string;
+  scheduled_for: string;
+  status: string;
+  headline: string | null;
+  caption: string | null;
+  image_url: string | null;
+  pillar_title: string | null;
+  accent_color_used: string | null;
+  regenerate_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanningErrorRow {
+  id: string;
+  customer_id: string | null;
+  channel: string | null;
+  scheduled_for: string | null;
+  message: string;
+  created_at: string;
 }
 
 export const nowIso = (): string => new Date().toISOString();

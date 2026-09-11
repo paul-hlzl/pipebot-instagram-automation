@@ -7,29 +7,31 @@ import { ensureAdminPassword, ensureAuthToken, writeAccessToken, writeLinkedInTo
 import { toToolMessage, ToolError } from "./errors.js";
 import {
   getPublishingLimit,
-  getRecentMedia,
   publishImageToInstagram,
   publishStoryToInstagram,
   refreshAccessToken,
-  type InstagramCredentials,
 } from "./instagram.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
+import { startDailyPlanningSchedule } from "./panel/planning.js";
 import {
   assertChannelEnabled,
   assertNoBannedWords,
   assertRequiredElements,
-  getCachedStyleSamples,
-  getCredentials,
   getCustomerOverview,
+  getPlannedPostByChannelDate,
+  getStyleSamples,
   listCustomers,
   listApprovedPendingPosts,
   listOpenPostRequests,
   logPost,
   markPendingApprovalPublished,
+  markPlannedPostStatus,
   markPostRequestDone,
+  resolveImageBranding,
+  resolveInstagramCredentials,
+  resolveLinkedInCredentials,
   savePendingApproval,
-  setCachedStyleSamples,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
 import {
@@ -59,36 +61,6 @@ const pillarTitleSchema = z
       "`suggestedPillar` picks avoid repeating the same pillar twice in a row - has no effect on publishing itself. " +
       "Omit if the customer has no content pillars configured.",
   );
-
-/** Lädt die Instagram-Zugangsdaten eines Kunden. undefined = eigener .env-Account (Standardverhalten). */
-async function resolveInstagramCredentials(customerId?: string): Promise<InstagramCredentials | undefined> {
-  if (!customerId) return undefined;
-  const cred = await getCredentials(customerId, "instagram");
-  return { accessToken: cred.accessToken, igUserId: cred.accountId };
-}
-
-/** Lädt die LinkedIn-Zugangsdaten eines Kunden. undefined = eigener .env-Account (Standardverhalten). */
-async function resolveLinkedInCredentials(customerId?: string): Promise<LinkedInCredentials | undefined> {
-  if (!customerId) return undefined;
-  const cred = await getCredentials(customerId, "linkedin");
-  return { accessToken: cred.accessToken, personUrn: cred.accountId };
-}
-
-/**
- * Lädt Bild-Branding (Akzentfarbe, Wasserzeichen-Text) eines Kunden für die generate_*-Tools.
- * Ohne customer_id oder für einen unbekannten Kunden: {} -> generateImageUrl fällt auf das
- * Standard-Styleguide-Aussehen zurück (Navy, "Pipeline"-Wasserzeichen), exakt wie bisher.
- */
-function resolveImageBranding(customerId?: string): ImageBranding {
-  if (!customerId) return {};
-  const customer = getCustomerOverview(customerId);
-  if (!customer) return {};
-  return {
-    accentColor: customer.accentColor ?? undefined,
-    watermarkText: customer.watermarkText || customer.company || undefined,
-    logoPath: customer.logoUrl,
-  };
-}
 
 function textResult(data: unknown) {
   return {
@@ -641,27 +613,7 @@ function createServer(): McpServer {
     },
     async ({ customer_id }) => {
       try {
-        const cached = getCachedStyleSamples(customer_id);
-        if (cached) {
-          return textResult({ samples: cached, cached: true });
-        }
-        let creds: InstagramCredentials | undefined;
-        try {
-          creds = await resolveInstagramCredentials(customer_id);
-        } catch (credError) {
-          // Nothing to learn from yet (not connected) is a normal, expected case here -
-          // unlike a real trial/token error, don't surface it as a tool failure.
-          if (credError instanceof Error && credError.message.includes("nicht verbunden")) {
-            return textResult({ samples: [], cached: false });
-          }
-          throw credError;
-        }
-        if (!creds) {
-          return textResult({ samples: [], cached: false });
-        }
-        const samples = await getRecentMedia(creds, 10);
-        setCachedStyleSamples(customer_id, samples);
-        return textResult({ samples, cached: false });
+        return textResult(await getStyleSamples(customer_id));
       } catch (error) {
         console.error("get_customer_style_samples:", toToolMessage(error));
         return errorResult(error);
@@ -807,6 +759,58 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
+    "get_planned_post",
+    {
+      description:
+        "Checks whether the server's own daily pre-planning already prepared a post for one customer/channel/day " +
+        "(headline, caption, image already generated - see the panel's \"Vorschau\" tab, where the customer may " +
+        "have reviewed or edited it). Call this FIRST for every due customer/channel, before generating anything " +
+        "yourself. Returns null if nothing was prepared (pre-planning hasn't run yet for that day, generation " +
+        "failed for that customer, or the customer has no content pillars/isn't otherwise eligible) - in that " +
+        "case, fall back to generating on the spot exactly as before. If it returns a post: " +
+        "status 'rejected' means the customer explicitly skipped this one - do NOT generate a replacement, just " +
+        "skip this customer/channel/day entirely. status 'planned' or 'edited' means it's ready to use as-is " +
+        "(the image already exists - do not call generate_post_image/generate_story_image again). status " +
+        "'approved' is also ready to use (the customer pre-approved it in the panel, ahead of the usual " +
+        "approval-mode review). status 'published' should not normally appear here (already handled), skip it " +
+        "if it does.",
+      inputSchema: {
+        customer_id: z.string().describe("customerId eines Kunden aus `list_customers`."),
+        channel: z.enum(["ig_feed", "ig_story", "linkedin"]).describe("Which channel/format to check."),
+        date: z.string().describe("The calendar date to check, YYYY-MM-DD - normally today's date."),
+      },
+    },
+    async ({ customer_id, channel, date }) => {
+      try {
+        return textResult({ post: getPlannedPostByChannelDate(customer_id, channel, date) });
+      } catch (error) {
+        console.error("get_planned_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "mark_planned_post_published",
+    {
+      description:
+        "Marks one pre-planned post (from `get_planned_post`) as published, after you've actually published it " +
+        "using its existing image/headline/caption. Has no effect on publishing itself - purely bookkeeping, and " +
+        "distinct from `logPost` (which still happens automatically inside the publish_* tools you called).",
+      inputSchema: { id: z.string().describe("The `id` of the planned post, from `get_planned_post`.") },
+    },
+    async ({ id }) => {
+      try {
+        const post = markPlannedPostStatus(id, "published");
+        return textResult({ ok: Boolean(post) });
+      } catch (error) {
+        console.error("mark_planned_post_published:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "list_customers",
     {
       description:
@@ -876,6 +880,7 @@ async function main(): Promise<void> {
 
   const app = createHttpApp(createServer);
   startTokenRefreshSchedule();
+  startDailyPlanningSchedule();
   // Bind to loopback only - Nginx (proxy_pass http://127.0.0.1:3000) is the only
   // intended entry point. Express/Node default to 0.0.0.0 (all interfaces) if no
   // host is given, which would expose this port directly to the internet.

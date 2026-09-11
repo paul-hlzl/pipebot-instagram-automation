@@ -313,6 +313,113 @@ async function main() {
     ok("Freigeben einer nicht existierenden Anfrage -> 404", approveRes.status === 404, `status=${approveRes.status}`);
   }
 
+  // --- 3g. /api/suggest-topics (v5) - braucht eine Session (anders als improve-briefing/
+  // analyze-website, die auch beim Signup laufen). KEIN echter Anthropic-Aufruf in dieser
+  // Suite - nur Auth-Gate und (falls kein ANTHROPIC_API_KEY gesetzt ist) den 503-Fall.
+  console.log("\nThemenvorschläge (Jetzt posten):");
+  {
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/suggest-topics`, { method: "POST", headers: { "content-type": "application/json" } });
+    ok("suggest-topics ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
+
+    const providersRes = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const { aiAvailable } = await providersRes.json();
+    if (!aiAvailable) {
+      const res = await fetch(`${BASE}${MOUNT}/api/suggest-topics`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: sessionCookie },
+      });
+      ok("suggest-topics ohne ANTHROPIC_API_KEY -> 503", res.status === 503, `status=${res.status}`);
+    } else {
+      console.log("  skip - ANTHROPIC_API_KEY ist gesetzt, 503-Check nicht anwendbar (kein echter Aufruf in dieser Suite)");
+    }
+  }
+
+  // --- 3f-2. Vorausplanung/"Vorschau" (v5) - planned_posts-Zeilen werden direkt in die
+  // Staging-DB eingefuegt (nicht ueber planUpcomingPosts, das wuerde echte Anthropic/fal.ai-
+  // Aufrufe ausloesen). regenerate-image wird nur am bereits-am-Limit-Fall getestet (429 kommt
+  // VOR jedem echten fal.ai-Aufruf zurueck) - kein echter Aufruf in dieser Suite.
+  console.log("\nVorausplanung (Vorschau):");
+  {
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(STAGING_DB);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna" }).format(new Date());
+    const nowIso = new Date().toISOString();
+
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        bannedWords: "verboten", requiredElements: "#Pflicht",
+      }),
+    });
+    ok("Vorbereitung: bannedWords/requiredElements gesetzt", patchRes.status === 200);
+
+    const planId = "plan_test1";
+    db.prepare(
+      `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
+       VALUES (?, ?, 'ig_feed', ?, 'planned', 'Test Headline', 'Ein Text ohne das Pflicht-Element.', NULL, NULL, NULL, 0, ?, ?)`,
+    ).run(planId, customerId, today, nowIso, nowIso);
+
+    const getRes = await fetch(`${BASE}${MOUNT}/api/planned-posts`, { headers: { cookie: sessionCookie } });
+    const getBody = await getRes.json();
+    ok("GET /api/planned-posts findet den vorbereiteten Beitrag", getBody.posts?.some((p) => p.id === planId), JSON.stringify(getBody.posts?.map((p) => p.id)));
+    ok("GET /api/planned-posts ohne Login -> 401", (await fetch(`${BASE}${MOUNT}/api/planned-posts`)).status === 401);
+
+    const missingElRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ caption: "Text ohne das Pflicht-Element." }),
+    });
+    ok("PATCH ohne Pflicht-Element -> 400", missingElRes.status === 400, `status=${missingElRes.status}`);
+
+    const bannedRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ caption: "Das ist verboten #Pflicht" }),
+    });
+    ok("PATCH mit verbotenem Wort -> 400", bannedRes.status === 400, `status=${bannedRes.status}`);
+
+    const okPatchRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ caption: "Ein gültiger Text #Pflicht" }),
+    });
+    const okPatchBody = await okPatchRes.json();
+    ok("PATCH mit gültigem Text -> 200, status 'edited'", okPatchRes.status === 200 && okPatchBody.post?.status === "edited", JSON.stringify(okPatchBody));
+
+    const noAuthPatchRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ headline: "x" }) });
+    ok("PATCH ohne Login -> 401", noAuthPatchRes.status === 401);
+
+    const notFoundRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/does-not-exist`, { method: "PATCH", headers: { "content-type": "application/json", cookie: sessionCookie }, body: JSON.stringify({ headline: "x" }) });
+    ok("PATCH auf unbekannte id -> 404", notFoundRes.status === 404);
+
+    // approvalMode wurde durch das PATCH oben nicht gesetzt (voller Replace, Default false) -
+    // "Jetzt schon freigeben" muss serverseitig ablehnen.
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}/approve`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Freigeben ohne approvalMode -> 400", approveRes.status === 400, `status=${approveRes.status}`);
+
+    const skipRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}/skip`, { method: "POST", headers: { cookie: sessionCookie } });
+    const skipBody = await skipRes.json();
+    ok("Überspringen -> 200, status 'rejected'", skipRes.status === 200 && skipBody.post?.status === "rejected", JSON.stringify(skipBody));
+
+    // Zweite Zeile, schon am Limit - regenerate-image muss VOR jedem echten fal.ai-Aufruf mit
+    // 429 ablehnen.
+    const planIdMax = "plan_test2";
+    db.prepare(
+      `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
+       VALUES (?, ?, 'ig_feed', ?, 'planned', 'Test Headline 2', 'Text #Pflicht', NULL, NULL, NULL, 3, ?, ?)`,
+    ).run(planIdMax, customerId, today, nowIso, nowIso);
+    const regenRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planIdMax}/regenerate-image`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ accentColor: "#1a2e1a" }),
+    });
+    ok("Neuerstellung am Limit (3/3) -> 429, kein echter fal.ai-Aufruf", regenRes.status === 429, `status=${regenRes.status}`);
+
+    db.prepare("DELETE FROM planned_posts WHERE id IN (?, ?)").run(planId, planIdMax);
+  }
+
   // --- 3f. Mehrere Farbthemen (v4) ---
   console.log("\nFarbthemen:");
   {
