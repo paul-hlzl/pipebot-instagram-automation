@@ -12,6 +12,7 @@ import {
   type PendingApprovalRow,
   type PostRequestRow,
   type PostRow,
+  type SavedThemeRow,
 } from "./db.js";
 import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
@@ -128,6 +129,9 @@ export function scheduleInputFor(c: CustomerRow): ScheduleInput {
 }
 
 function overview(c: CustomerRow): CustomerOverview {
+  // Theme-resolved, not the raw columns - a customer with an active saved theme should
+  // generate images with that theme's color/watermark, not their old plain fields.
+  const branding = effectiveBranding(c);
   return {
     customerId: c.id,
     company: c.company,
@@ -137,8 +141,8 @@ function overview(c: CustomerRow): CustomerOverview {
     tone: c.tone,
     frequency: c.frequency,
     postTime: c.post_time,
-    accentColor: c.accent_color,
-    watermarkText: c.watermark_text,
+    accentColor: branding.accentColor,
+    watermarkText: branding.watermarkText,
     avoidTopics: c.avoid_topics,
     bannedWords: c.banned_words,
     requiredElements: c.required_elements,
@@ -631,6 +635,63 @@ export function listApprovedPendingPosts(): PendingApproval[] {
 export function markPendingApprovalPublished(id: string): boolean {
   const result = db.prepare("UPDATE pending_approvals SET status = 'published', updated_at = ? WHERE id = ? AND status = 'approved'").run(nowIso(), id);
   return result.changes > 0;
+}
+
+export interface SavedTheme {
+  id: string;
+  name: string;
+  accentColor: string | null;
+  watermarkText: string | null;
+  createdAt: string;
+}
+
+function toSavedTheme(r: SavedThemeRow): SavedTheme {
+  return { id: r.id, name: r.name, accentColor: r.accent_color, watermarkText: r.watermark_text, createdAt: r.created_at };
+}
+
+/** A customer's saved color themes, oldest first. */
+export function listSavedThemes(customerId: string): SavedTheme[] {
+  const rows = db.prepare("SELECT * FROM saved_themes WHERE customer_id = ? ORDER BY created_at").all(customerId) as SavedThemeRow[];
+  return rows.map(toSavedTheme);
+}
+
+/** Saves the customer's current accent color / watermark text as a new named theme (doesn't activate it). */
+export function createSavedTheme(customerId: string, name: string, accentColor: string | null, watermarkText: string | null): SavedTheme {
+  const id = `theme_${randomToken(9)}`;
+  const now = nowIso();
+  db.prepare(
+    "INSERT INTO saved_themes (id, customer_id, name, accent_color, watermark_text, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(id, customerId, name, accentColor || null, watermarkText || null, now);
+  return { id, name, accentColor, watermarkText, createdAt: now };
+}
+
+/** Activates one of a customer's own saved themes (their generated images use its color/watermark from now on). False if the theme doesn't exist or isn't theirs. */
+export function activateSavedTheme(customerId: string, themeId: string): boolean {
+  const owned = db.prepare("SELECT 1 FROM saved_themes WHERE id = ? AND customer_id = ?").get(themeId, customerId);
+  if (!owned) return false;
+  db.prepare("UPDATE customers SET active_theme_id = ?, updated_at = ? WHERE id = ?").run(themeId, nowIso(), customerId);
+  return true;
+}
+
+/** Switches a customer back to their plain accent_color/watermark_text fields (no active theme). */
+export function deactivateTheme(customerId: string): void {
+  db.prepare("UPDATE customers SET active_theme_id = NULL, updated_at = ? WHERE id = ?").run(nowIso(), customerId);
+}
+
+/**
+ * The accent color / watermark text that should actually be used for this customer's
+ * generated images: their active saved theme if they have one, otherwise their plain
+ * accent_color/watermark_text fields exactly as before v4 (full backward compatibility - a
+ * customer who never touches themes has `active_theme_id` NULL forever).
+ */
+export function effectiveBranding(c: CustomerRow): { accentColor: string | null; watermarkText: string | null } {
+  if (c.active_theme_id) {
+    const theme = db
+      .prepare("SELECT accent_color, watermark_text FROM saved_themes WHERE id = ? AND customer_id = ?")
+      .get(c.active_theme_id, c.id) as { accent_color: string | null; watermark_text: string | null } | undefined;
+    if (theme) return { accentColor: theme.accent_color, watermarkText: theme.watermark_text };
+  }
+  return { accentColor: c.accent_color, watermarkText: c.watermark_text };
 }
 
 const STYLE_CACHE_HOURS = 24;

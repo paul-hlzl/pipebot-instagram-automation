@@ -287,6 +287,32 @@ async function main() {
     ok("Freigeben einer nicht existierenden Anfrage -> 404", approveRes.status === 404, `status=${approveRes.status}`);
   }
 
+  // --- 3f. Mehrere Farbthemen (v4) ---
+  console.log("\nFarbthemen:");
+  {
+    const createRes = await fetch(`${BASE}${MOUNT}/api/themes`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ name: "Sommer-Kampagne", accentColor: "#2e2410", watermarkText: "Sommer" }),
+    });
+    const createBody = await createRes.json();
+    ok("Thema anlegen -> 201", createRes.status === 201, `status=${createRes.status}`);
+    const themeId = createBody.theme?.id;
+    ok("Thema hat eine id", Boolean(themeId));
+
+    const activateRes = await fetch(`${BASE}${MOUNT}/api/themes/${themeId}/activate`, { method: "POST", headers: { cookie: sessionCookie } });
+    const activateBody = await activateRes.json();
+    ok("Aktivieren -> activeThemeId gesetzt", activateBody.customer?.activeThemeId === themeId, activateBody.customer?.activeThemeId);
+    ok("Formular-accentColor bleibt unveraendert (nur Panel-Feld, nicht das Thema)", typeof activateBody.customer?.accentColor === "string");
+
+    const deactivateRes = await fetch(`${BASE}${MOUNT}/api/themes/deactivate`, { method: "POST", headers: { cookie: sessionCookie } });
+    const deactivateBody = await deactivateRes.json();
+    ok("Deaktivieren -> activeThemeId wieder null", deactivateBody.customer?.activeThemeId === null, deactivateBody.customer?.activeThemeId);
+
+    const badActivateRes = await fetch(`${BASE}${MOUNT}/api/themes/does-not-exist/activate`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Aktivieren eines fremden/unbekannten Themas -> 404", badActivateRes.status === 404, `status=${badActivateRes.status}`);
+  }
+
   // --- 4a. POST /api/pause (customer's own pause toggle) ---
   console.log("\nPausieren:");
   {

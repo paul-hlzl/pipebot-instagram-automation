@@ -197,6 +197,10 @@
   .colorrow input[type=text] { flex: 1; }
   .swatches { display: flex; gap: 8px; margin-top: 10px; }
 
+  .theme-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .theme-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 20px; text-decoration: none !important; }
+  .theme-chip[disabled] { border-color: var(--ink); font-weight: 600; cursor: default; }
+  .theme-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--rule); flex: none; }
   .pillar-row { display: grid; grid-template-columns: 1fr 1.4fr 64px auto; gap: 8px; align-items: center; margin-bottom: 8px; }
   .pillar-row input, .pillar-row select { height: 40px; padding: 0 10px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; }
   @media (max-width: 640px) { .pillar-row { grid-template-columns: 1fr; } }
@@ -370,6 +374,17 @@
     }).join("");
   }
 
+  /* ================= Farbthemen ================= */
+  function themesSectionHtml(c) {
+    const themes = c.savedThemes || [];
+    const activeName = themes.find((t) => t.id === c.activeThemeId)?.name;
+    return `
+      <label>Gespeicherte Farbthemen <span class="opt">(optional)</span></label>
+      ${c.activeThemeId ? `<p class="hint">Aktives Thema: <strong>${esc(activeName || "")}</strong> - <button type="button" class="link" id="theme-deactivate">stattdessen eigene Farbe oben verwenden</button></p>` : ""}
+      ${themes.length ? `<div class="theme-list">${themes.map((t) => `<button type="button" class="link theme-chip" data-theme-activate="${esc(t.id)}" ${c.activeThemeId === t.id ? "disabled" : ""}><span class="theme-dot" style="background:${esc(t.accentColor || "#0a0e1a")}"></span>${esc(t.name)}${c.activeThemeId === t.id ? " (aktiv)" : ""}</button>`).join("")}</div>` : ""}
+      <button type="button" class="link" id="theme-save">+ Aktuelle Farbe/Beschriftung als Thema speichern</button>`;
+  }
+
   /* ================= Content-Säulen ================= */
   function renderPillarsSection() {
     const rows = S.pillarsDraft.map((p, i) => `
@@ -463,7 +478,7 @@
             <div class="swatches" role="group" aria-label="Vorschläge">
               ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
             </div>
-            <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.</p>
+            <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Thema unten verwendet.</strong>" : ""}</p>
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
@@ -476,6 +491,7 @@
             </div>
           </div>
         </div>
+        ${edit ? `<div class="field" id="themes-section">${themesSectionHtml(c)}</div>` : ""}
         <fieldset class="field">
           <legend>An welchen Tagen posten - Instagram?</legend>
           <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
@@ -945,6 +961,42 @@
     const formPartBtn = e.target.closest("[data-formpart]");
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("#theme-save")) {
+      const name = prompt("Name für dieses Farbthema (z. B. \"Sommer-Kampagne\"):");
+      if (!name || !name.trim()) return;
+      try {
+        const accentColor = $("#f-accentColor")?.value || "";
+        const watermarkText = $("#f-watermarkText")?.value || "";
+        const result = await api("POST", "/api/themes", { name: name.trim(), accentColor, watermarkText });
+        S.customer.savedThemes = result.savedThemes;
+        const section = $("#themes-section");
+        if (section) section.innerHTML = themesSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht gespeichert werden.");
+      }
+      return;
+    }
+    const activateBtn = e.target.closest("[data-theme-activate]");
+    if (activateBtn) {
+      try {
+        applyState(await api("POST", `/api/themes/${activateBtn.dataset.themeActivate}/activate`));
+        const section = $("#themes-section");
+        if (section) section.innerHTML = themesSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht aktiviert werden.");
+      }
+      return;
+    }
+    if (e.target.closest("#theme-deactivate")) {
+      try {
+        applyState(await api("POST", "/api/themes/deactivate"));
+        const section = $("#themes-section");
+        if (section) section.innerHTML = themesSectionHtml(S.customer);
+      } catch (err) {
+        alert(err.message || "Konnte nicht geändert werden.");
+      }
+      return;
+    }
     if (e.target.closest("#pillar-add")) {
       syncPillarsDraftFromDom();
       if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: "", description: "", weight: 1 });
@@ -1244,6 +1296,20 @@
       return mockState();
     }
     if (url === "/api/approvals") return { approvals: [] };
+    if (url === "/api/themes") {
+      const theme = { id: `theme_${Date.now()}`, name: body.name, accentColor: body.accentColor || null, watermarkText: body.watermarkText || null, createdAt: new Date().toISOString() };
+      MOCK.customer.savedThemes = [...(MOCK.customer.savedThemes || []), theme];
+      return { ok: true, theme, savedThemes: MOCK.customer.savedThemes };
+    }
+    if (/^\/api\/themes\/.+\/activate$/.test(url)) {
+      const id = url.split("/")[3];
+      MOCK.customer = { ...MOCK.customer, activeThemeId: id };
+      return mockState();
+    }
+    if (url === "/api/themes/deactivate") {
+      MOCK.customer = { ...MOCK.customer, activeThemeId: null };
+      return mockState();
+    }
     if (/^\/api\/approvals\/.+\/(approve|reject)$/.test(url)) return { ok: true };
     if (url === "/api/post-now") {
       const request = { id: "preq_demo", topic: body.topic || "", status: "pending", createdAt: new Date().toISOString() };

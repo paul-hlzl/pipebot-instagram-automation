@@ -109,6 +109,16 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
 );
 CREATE INDEX IF NOT EXISTS pending_approvals_customer ON pending_approvals(customer_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS saved_themes (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  accent_color TEXT,
+  watermark_text TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS saved_themes_customer ON saved_themes(customer_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS content_pillars (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -168,6 +178,9 @@ migrateColumns("customers", [
   ["pause_until", "TEXT"],
   // Default 0 (off) - existing customers keep the current auto-publish behavior exactly.
   ["approval_mode", "INTEGER NOT NULL DEFAULT 0"],
+  // NULL (default) = keep using the plain accent_color/watermark_text columns exactly as
+  // before. Set only once a customer actually activates a saved theme.
+  ["active_theme_id", "TEXT"],
 ]);
 
 migrateColumns("posts", [
@@ -208,6 +221,7 @@ export interface CustomerRow {
   pause_from: string | null;
   pause_until: string | null;
   approval_mode: number;
+  active_theme_id: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;
@@ -249,6 +263,15 @@ export interface ContentPillarRow {
   active: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface SavedThemeRow {
+  id: string;
+  customer_id: string;
+  name: string;
+  accent_color: string | null;
+  watermark_text: string | null;
+  created_at: string;
 }
 
 export interface PendingApprovalRow {

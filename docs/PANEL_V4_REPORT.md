@@ -17,7 +17,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 5 | Granulare Zeitplanung | ✅ Code fertig, ⚠️ Weekday-Picker nicht im Browser getestet |
 | 6 | "Jetzt posten"-Button | ✅ Code fertig, ⚠️ Panel-Button nicht im Browser getestet |
 | 7 | Freigabe-Modus | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
-| 8 | Mehrere Farbthemen | ⏳ offen |
+| 8 | Mehrere Farbthemen | ✅ Code fertig, ⚠️ Panel-Teil nicht im Browser getestet |
 | 9 | Eigenes Logo | ⏳ offen |
 | 10 | Abschluss & Deploy | ⏳ offen |
 
@@ -280,6 +280,37 @@ IN DIESER REIHENFOLGE:
 
 **⚠️ Gleiche Einschränkung wie die übrigen v4-UI-Arbeiten:** der Umschalter und der neue
 Dashboard-Bereich wurden nicht in einem echten Browser angeklickt.
+
+**Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
+
+## Aufgabe 8 – Mehrere Farbthemen speichern ✅ Code / ⚠️ Panel-Teil-Browser-Test steht aus
+
+**Erledigt:**
+- Neue Tabelle `saved_themes` (id, customer_id, name, accent_color, watermark_text,
+  created_at), neue Spalte `active_theme_id` auf `customers` (nullable, additiv). `NULL`
+  bedeutet exakt das v3-Verhalten: die einzelnen `accent_color`/`watermark_text`-Felder gelten.
+- **Wichtige Design-Entscheidung:** das im Formular editierbare `accentColor`/`watermarkText`
+  (`GET/PATCH /api/me`) bleibt bewusst immer das **rohe Feld** - unabhängig davon, ob ein Thema
+  aktiv ist. Der tatsächlich für Bildgenerierung verwendete Wert (`CustomerOverview` /
+  `list_customers`, über eine neue `effectiveBranding()`-Auflösung in `credentials.ts`) ist
+  dagegen **immer** themen-aufgelöst: aktives Thema, falls gesetzt, sonst die rohen Felder.
+  Damit können Formular-Bearbeitung und Themen-Umschalten sich nie gegenseitig überschreiben.
+  Mit einem echten Staging-Kunden verifiziert: Thema "Sommer-Kampagne" (#2e2410, "Sommer")
+  angelegt und aktiviert → `GET /api/me` zeigt weiterhin die alte rohe Farbe fürs Formular,
+  `list_customers` liefert korrekt `#2e2410`/"Sommer" - und nach `deactivate` wieder das alte
+  Verhalten.
+- Endpunkte: `POST /api/themes` (anlegen), `POST /api/themes/:id/activate` (nur eigene Themen,
+  404 sonst), `POST /api/themes/deactivate` (zurück auf rohe Felder).
+- Panel: unter der bestehenden Farbwahl ein Bereich "Gespeicherte Farbthemen" - Liste als
+  Chips mit Farbpunkt zum Umschalten, "+ Aktuelle Farbe/Beschriftung als Thema speichern"-
+  Button (fragt nach einem Namen), Hinweis welches Thema aktiv ist mit Link zum Zurückschalten.
+  Ein Hinweistext bei der Farbwahl selbst macht klar, dass sie gerade wirkungslos ist, solange
+  ein Thema aktiv ist.
+- `npm run test:panel` erweitert (anlegen/aktivieren/deaktivieren/404 bei fremdem Thema).
+  **65 passed, 0 failed.**
+
+**⚠️ Gleiche Einschränkung wie die übrigen v4-UI-Arbeiten:** die neuen Buttons/Chips wurden
+nicht in einem echten Browser angeklickt, nur die API dahinter (ausführlich, siehe oben).
 
 **Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
 

@@ -7,13 +7,17 @@ import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
 import {
+  activateSavedTheme,
   connectionStatus,
   createPostRequest,
+  createSavedTheme,
+  deactivateTheme,
   isTrialExpired,
   lastPostRequestForCustomer,
   listContentPillars,
   listPendingApprovalsForCustomer,
   listPostsForCustomer,
+  listSavedThemes,
   openPostRequestCount,
   POST_REQUEST_MAX_OPEN,
   POST_REQUEST_MAX_PER_DAY,
@@ -216,6 +220,8 @@ function publicState(c: CustomerRow) {
       customerPaused: Boolean(c.customer_paused),
       contentPillars: listContentPillars(c.id),
       lastPostRequest: lastPostRequestForCustomer(c.id),
+      savedThemes: listSavedThemes(c.id),
+      activeThemeId: c.active_theme_id,
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -491,6 +497,49 @@ export function createPanelRouter(): Router {
     const request = createPostRequest(c.id, topic || null);
     res.json({ ok: true, request });
   }));
+
+  // Mehrere Farbthemen (Aufgabe 8): NUR ablegen/umschalten - der eigentliche accentColor/
+  // watermarkText-Wert im Formular bleibt unberuehrt, ein aktives Thema ueberschreibt ihn nur
+  // bei der Bild-Generierung (siehe credentials.ts effectiveBranding()).
+  router.post("/api/themes", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const name = str(req.body?.name, 60);
+    if (!name) {
+      res.status(400).json({ error: "Bitte geben Sie einen Namen für das Thema ein." });
+      return;
+    }
+    const accentColor = str(req.body?.accentColor, 7);
+    const watermarkText = str(req.body?.watermarkText, 40);
+    const theme = createSavedTheme(c.id, name, (accentColor && HEX_COLOR.test(accentColor) ? accentColor : null), watermarkText || null);
+    res.status(201).json({ ok: true, theme, savedThemes: listSavedThemes(c.id) });
+  }));
+
+  router.post("/api/themes/:id/activate", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (!activateSavedTheme(c.id, String(req.params.id))) {
+      res.status(404).json({ error: "Thema nicht gefunden." });
+      return;
+    }
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  });
+
+  router.post("/api/themes/deactivate", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    deactivateTheme(c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  });
 
   // Freigabe-Modus (Aufgabe 7): eigene ausstehende Beitraege ansehen/freigeben/ablehnen.
   // Freigeben veroeffentlicht NICHT selbst - das holt sich die Routine ueber
