@@ -16,6 +16,7 @@ import { db, nowIso, type CustomerRow } from "./db.js";
 import {
   assertNoBannedWords,
   assertRequiredElements,
+  CHANNEL_IMAGE_FORMAT,
   createPlannedPost,
   getPlannedPostByChannelDate,
   getStyleSamples,
@@ -26,26 +27,20 @@ import {
   scheduleInputFor,
   splitCommaList,
   type ContentPillar,
+  type PublishChannel,
 } from "./credentials.js";
 import { isPostingDayForChannel, type PostingChannel } from "./schedule.js";
 import { anthropicAvailable, generatePlannedPostContent } from "../anthropic.js";
 import { generateImageUrl } from "../fal.js";
-import type { PostFormat } from "../watermark.js";
 
 const LOOKAHEAD_DAYS = 7;
 
-type PlannableChannel = "ig_feed" | "ig_story" | "linkedin";
+type PlannableChannel = PublishChannel;
 
 const CHANNEL_SCHEDULE: Record<PlannableChannel, PostingChannel> = {
   ig_feed: "instagram",
   ig_story: "instagram",
   linkedin: "linkedin",
-};
-
-const CHANNEL_FORMAT: Record<PlannableChannel, PostFormat> = {
-  ig_feed: "feed",
-  ig_story: "story",
-  linkedin: "feed",
 };
 
 function checkTextsFor(channel: PlannableChannel, headline: string, caption: string): (string | undefined)[] {
@@ -95,7 +90,7 @@ async function planOnePost(row: CustomerRow, channel: PlannableChannel, schedule
   }
 
   const branding = resolveImageBranding(row.id);
-  const generated = await generateImageUrl(content.headline, CHANNEL_FORMAT[channel], branding);
+  const generated = await generateImageUrl(content.headline, CHANNEL_IMAGE_FORMAT[channel], branding);
 
   createPlannedPost({
     customerId: row.id,

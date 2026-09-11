@@ -10,29 +10,40 @@ import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
 import {
   activateSavedTheme,
+  assertNoBannedWords,
+  assertRequiredElements,
+  CHANNEL_IMAGE_FORMAT,
   connectionStatus,
   createPostRequest,
   createSavedTheme,
   deactivateTheme,
+  getPlannedPostForCustomer,
   isTrialExpired,
   lastPostRequestForCustomer,
   listContentPillars,
   listPendingApprovalsForCustomer,
+  listPlannedPosts,
   listPostsForCustomer,
   listSavedThemes,
+  markPlannedPostStatus,
   openPostRequestCount,
+  PLANNED_POST_MAX_REGENERATE,
   POST_REQUEST_MAX_OPEN,
   POST_REQUEST_MAX_PER_DAY,
   postRequestCountToday,
+  resolveImageBranding,
   scheduleInputFor,
   setContentPillars,
   setPendingApprovalStatus,
   trialDaysLeft,
+  updatePlannedPostImage,
+  updatePlannedPostText,
 } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
-import { isDue, isDueForChannel, nextPostAt } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, improveBriefing, suggestTopics } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
+import { generateImageUrl } from "../fal.js";
 
 const VERSION: string = (() => {
   try {
@@ -612,6 +623,145 @@ export function createPanelRouter(): Router {
       return;
     }
     res.json({ posts: listPostsForCustomer(c.id) });
+  });
+
+  // 7-Tage-Vorschau (Panel v5, Aufgabe 5) - liest, was planning.ts's taegliche Vorausplanung
+  // bereits vorbereitet hat. Nur Lesen, kein KI-/Bild-Aufruf hier.
+  router.get("/api/planned-posts", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const today = viennaDateStr();
+    const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+    res.json({ posts: listPlannedPosts(c.id, today, to), maxRegenerate: PLANNED_POST_MAX_REGENERATE });
+  });
+
+  // Kunde bearbeitet Headline/Caption eines vorbereiteten Beitrags. Re-verifiziert bannedWords/
+  // requiredElements vor dem Speichern - sonst koennte ein Kunde ein Pflicht-Element aus der
+  // Caption entfernen und der Beitrag wuerde beim spaeteren Veroeffentlichen durch die Routine
+  // (K0/K1, siehe docs/ROUTINE_TEIL1_V5.md) endlos fehlschlagen, exakt dasselbe Muster wie der
+  // ig_story-Fix der letzten Sitzung.
+  router.patch(
+    "/api/planned-posts/:id",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const plan = getPlannedPostForCustomer(c.id, String(req.params.id));
+      if (!plan) {
+        res.status(404).json({ error: "Beitrag nicht gefunden." });
+        return;
+      }
+      if (plan.status === "published") {
+        res.status(400).json({ error: "Dieser Beitrag wurde bereits veröffentlicht und kann nicht mehr bearbeitet werden." });
+        return;
+      }
+      const headline = req.body?.headline !== undefined ? str(req.body.headline, 100) : undefined;
+      const caption = req.body?.caption !== undefined ? str(req.body.caption, 2200) : undefined;
+      const nextHeadline = headline !== undefined ? headline : plan.headline ?? "";
+      const nextCaption = caption !== undefined ? caption : plan.caption ?? "";
+      const checkTexts = plan.channel === "ig_story" ? [nextHeadline] : [nextHeadline, nextCaption];
+      try {
+        assertNoBannedWords(c.id, ...checkTexts);
+        assertRequiredElements(c.id, ...checkTexts);
+      } catch (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : "Ungültiger Text." });
+        return;
+      }
+      const updated = updatePlannedPostText(plan.id, { headline, caption });
+      res.json({ post: updated });
+    }),
+  );
+
+  // "Mit dieser Farbe neu erstellen" - synchron, loest sofort eine echte fal.ai-Generierung aus
+  // (Aufgabe 5/8). PLANNED_POST_MAX_REGENERATE begrenzt das auf 3 Versuche PRO Beitrag.
+  router.post(
+    "/api/planned-posts/:id/regenerate-image",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      const plan = getPlannedPostForCustomer(c.id, String(req.params.id));
+      if (!plan) {
+        res.status(404).json({ error: "Beitrag nicht gefunden." });
+        return;
+      }
+      if (plan.status === "published") {
+        res.status(400).json({ error: "Dieser Beitrag wurde bereits veröffentlicht." });
+        return;
+      }
+      if (plan.regenerateCount >= PLANNED_POST_MAX_REGENERATE) {
+        res.status(429).json({ error: `Maximale Anzahl an Neuerstellungen (${PLANNED_POST_MAX_REGENERATE}) erreicht.` });
+        return;
+      }
+      const accentColor = str(req.body?.accentColor, 7);
+      if (!HEX_COLOR.test(accentColor)) {
+        res.status(400).json({ error: "Bitte eine gültige Farbe wählen." });
+        return;
+      }
+      if (!plan.headline) {
+        res.status(400).json({ error: "Dieser Beitrag hat keine Schlagzeile - kann nicht neu erstellt werden." });
+        return;
+      }
+      const branding = { ...resolveImageBranding(c.id), accentColor };
+      try {
+        const generated = await generateImageUrl(plan.headline, CHANNEL_IMAGE_FORMAT[plan.channel as keyof typeof CHANNEL_IMAGE_FORMAT], branding);
+        const updated = updatePlannedPostImage(plan.id, generated.imageUrl, accentColor);
+        res.json({ post: updated, maxRegenerate: PLANNED_POST_MAX_REGENERATE });
+      } catch (err) {
+        console.error("[panel] planned-post regenerate-image fehlgeschlagen:", err);
+        res.status(502).json({ error: "Das Bild konnte gerade nicht neu erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
+
+  // "Diesen Beitrag überspringen" - Kundenwunsch, kein Fehler: die Routine (K0) laesst diesen
+  // Kanal/Tag dann aus, ohne spontan zu ersetzen.
+  router.post("/api/planned-posts/:id/skip", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const plan = getPlannedPostForCustomer(c.id, String(req.params.id));
+    if (!plan) {
+      res.status(404).json({ error: "Beitrag nicht gefunden." });
+      return;
+    }
+    if (plan.status === "published") {
+      res.status(400).json({ error: "Dieser Beitrag wurde bereits veröffentlicht." });
+      return;
+    }
+    res.json({ post: markPlannedPostStatus(plan.id, "rejected") });
+  });
+
+  // "Jetzt schon freigeben" - nur sinnvoll (und nur erlaubt) fuer Kunden mit approvalMode.
+  router.post("/api/planned-posts/:id/approve", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (!c.approval_mode) {
+      res.status(400).json({ error: "Freigabe-Modus ist für Ihr Konto nicht aktiviert." });
+      return;
+    }
+    const plan = getPlannedPostForCustomer(c.id, String(req.params.id));
+    if (!plan) {
+      res.status(404).json({ error: "Beitrag nicht gefunden." });
+      return;
+    }
+    if (plan.status === "published" || plan.status === "rejected") {
+      res.status(400).json({ error: "Dieser Beitrag kann nicht mehr freigegeben werden." });
+      return;
+    }
+    res.json({ post: markPlannedPostStatus(plan.id, "approved") });
   });
 
   router.post("/api/disconnect/:provider", (req, res) => {

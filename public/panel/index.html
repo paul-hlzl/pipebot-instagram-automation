@@ -118,6 +118,19 @@
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
   .chip { min-height: 32px; padding: 4px 14px; border: 1px solid var(--ink); border-radius: 20px; background: var(--paper); color: var(--ink); cursor: pointer; font-size: 13.5px; text-align: left; }
   .chip:hover { background: var(--wash); }
+
+  .preview-days { display: flex; gap: 6px; overflow-x: auto; margin: 16px 0; padding-bottom: 4px; }
+  .preview-day { flex: 1 0 68px; min-width: 68px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper); color: var(--ink); cursor: pointer; font: inherit; }
+  .preview-day.is-selected { border-color: var(--ink); background: var(--wash); }
+  .preview-day-label { font-size: 12px; text-transform: capitalize; }
+  .preview-day-dots { display: flex; gap: 3px; min-height: 8px; }
+  .preview-day-dots .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+  .preview-card { display: flex; gap: 16px; border: 1px solid var(--rule); border-radius: 2px; padding: 16px; margin-bottom: 14px; }
+  .preview-card-media img, .preview-card-media .ph { width: 120px; height: 120px; object-fit: cover; border-radius: 2px; background: var(--wash); flex: none; }
+  .preview-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .preview-card-body textarea { min-height: 90px; }
+  .preview-card-body .swatches { margin: 4px 0; align-items: center; }
+  @media (max-width: 480px) { .preview-card { flex-direction: column; } .preview-card-media img, .preview-card-media .ph { width: 100%; height: auto; aspect-ratio: 1; } }
   .approval-card .actions { margin-top: 10px; }
   @media (max-width: 480px) { .approval-card { flex-direction: column; } .approval-card img, .approval-card .ph { width: 100%; height: auto; aspect-ratio: 1; } }
 
@@ -329,7 +342,7 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const conn = (id) => S.connections.find((c) => c.provider === id);
   const prov = (id) => S.providers.find((p) => p.id === id);
-  const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "history"];
+  const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "preview", "history"];
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
   const fmtNextPost = (iso) => {
     if (!iso) return "";
@@ -357,15 +370,15 @@
   function renderRail() {
     const list = steps();
     const cur = list.indexOf(S.step);
-    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "history" ? "Verlauf" : prov(id).name;
+    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : prov(id).name;
     const meta = (id) => {
       if (id === "company") return S.customer ? S.customer.company : "Angaben machen";
-      if (id === "done" || id === "history") return "";
+      if (id === "done" || id === "preview" || id === "history") return "";
       const c = conn(id);
       if (c) return c.status === "expired" ? "Abgelaufen" : c.accountName;
       return S.skipped.has(id) ? "Übersprungen" : "Nicht verbunden";
     };
-    const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "history") ? false : !!conn(id) && conn(id).status !== "expired";
+    const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "preview" || id === "history") ? false : !!conn(id) && conn(id).status !== "expired";
 
     $("#rail").innerHTML = list.map((id, i) => {
       const state = id === S.step ? "is-current" : isDone(id) ? "is-done" : "is-todo";
@@ -746,6 +759,9 @@
       </div>
       ${c.approvalMode ? `<h2>Warten auf Ihre Freigabe</h2>
       <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
+      <h2>Die nächsten 7 Tage</h2>
+      <p class="lede" style="font-size:16px;margin-bottom:16px">Schauen Sie sich vorbereitete Beiträge an, bevor sie automatisch veröffentlicht werden - Text bearbeiten, Bild-Farbe ändern oder überspringen.</p>
+      <div class="actions"><button class="btn" data-go="preview">Vorschau ansehen</button></div>
       <h2>Jetzt posten</h2>
       <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wir übernehmen das beim nächsten Lauf.</p>
       ${postNowStatusHtml(c.lastPostRequest)}
@@ -895,6 +911,128 @@
     }
   }
 
+  /* ================= Vorschau (Panel v5, Aufgabe 5) ================= */
+  const PP_CHANNEL_LABEL = { ig_feed: "Instagram Feed", ig_story: "Instagram Story", linkedin: "LinkedIn" };
+  const PP_STATUS_LABEL = { planned: "Geplant", edited: "Bearbeitet", approved: "Freigegeben", rejected: "Übersprungen", published: "Veröffentlicht" };
+  let previewCache = { posts: [], maxRegenerate: 3 };
+  let previewSelectedDate = null;
+
+  function localDateStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function nextSevenDates() {
+    const out = [];
+    const now = new Date();
+    for (let i = 0; i < 7; i++) {
+      out.push(localDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i)));
+    }
+    return out;
+  }
+
+  function previewHtml() {
+    const c = S.customer;
+    return `
+      ${bannerHtml()}
+      <h1>Vorschau - die nächsten 7 Tage</h1>
+      <p class="lede">Diese Beiträge hat Pipeline für Sie vorbereitet. Passen Sie Text oder Bild-Farbe an oder überspringen Sie einen Beitrag, bevor er automatisch veröffentlicht wird.${c.approvalMode ? " Da Sie Beiträge vor Veröffentlichung freigeben, können Sie das hier schon vorab tun." : ""}</p>
+      <div id="preview-strip"><p class="empty">Wird geladen …</p></div>
+      <div id="preview-detail"></div>
+      <div class="actions">
+        <button class="btn" data-go="done">Zurück zur Übersicht</button>
+      </div>`;
+  }
+
+  function previewStripHtml() {
+    const dates = nextSevenDates();
+    const byDate = {};
+    for (const p of previewCache.posts) (byDate[p.scheduledFor] ||= []).push(p);
+    if (!previewSelectedDate || !dates.includes(previewSelectedDate)) {
+      previewSelectedDate = dates.find((d) => (byDate[d] || []).length) || dates[0];
+    }
+    return `<div class="preview-days">
+      ${dates.map((d) => {
+        const items = byDate[d] || [];
+        const label = new Date(`${d}T00:00:00`).toLocaleDateString("de-AT", { weekday: "short", day: "2-digit", month: "2-digit" });
+        return `<button type="button" class="preview-day${d === previewSelectedDate ? " is-selected" : ""}" data-preview-day="${d}">
+          <span class="preview-day-label">${esc(label)}</span>
+          <span class="preview-day-dots">${items.map((it) => `<span class="dot" title="${esc(PP_CHANNEL_LABEL[it.channel] || it.channel)}"></span>`).join("")}</span>
+        </button>`;
+      }).join("")}
+    </div>`;
+  }
+
+  function previewCardHtml(p) {
+    const atMax = p.regenerateCount >= previewCache.maxRegenerate;
+    const editable = p.status !== "published";
+    const canSkip = editable && p.status !== "rejected";
+    const canApprove = S.customer.approvalMode && editable && p.status !== "approved" && p.status !== "rejected";
+    return `<div class="preview-card" data-plan-id="${esc(p.id)}">
+      <div class="preview-card-media">
+        ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="">` : `<div class="ph"></div>`}
+      </div>
+      <div class="preview-card-body">
+        <div>
+          <span class="channel-badge">${esc(PP_CHANNEL_LABEL[p.channel] || p.channel)}</span>
+          <span class="channel-badge">${esc(PP_STATUS_LABEL[p.status] || p.status)}</span>
+        </div>
+        <label class="vh" for="pp-headline-${esc(p.id)}">Headline</label>
+        <input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Headline" ${editable ? "" : "disabled"}>
+        ${p.channel !== "ig_story" ? `<label class="vh" for="pp-caption-${esc(p.id)}">Caption</label>
+        <textarea id="pp-caption-${esc(p.id)}" maxlength="2200" placeholder="Caption" ${editable ? "" : "disabled"}>${esc(p.caption || "")}</textarea>` : ""}
+        <p class="pp-save-status" data-pp-save-status="${esc(p.id)}" aria-live="polite"></p>
+        ${editable ? `<div class="actions"><button type="button" class="link" data-pp-save="${esc(p.id)}">Speichern</button></div>` : ""}
+
+        ${editable ? `<label>Bild-Farbe</label>
+        <div class="swatches">
+          ${PALETTE.map((hex) => `<button type="button" class="swatch" data-pp-swatch="${hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
+          <input type="color" data-pp-color="${esc(p.id)}" value="${esc(p.accentColorUsed || "#0a0e1a")}">
+        </div>
+        ${atMax
+          ? `<p class="hint">Maximale Anzahl an Neuerstellungen erreicht.</p>`
+          : `<button type="button" class="link" data-pp-regenerate="${esc(p.id)}">Mit dieser Farbe neu erstellen</button>
+             <p class="hint">${p.regenerateCount}/${previewCache.maxRegenerate} Neuerstellungen verwendet.</p>`}` : ""}
+
+        <div class="actions">
+          ${canSkip ? `<button type="button" class="link" data-pp-skip="${esc(p.id)}">Diesen Beitrag überspringen</button>` : ""}
+          ${canApprove ? `<button type="button" class="btn" data-pp-approve="${esc(p.id)}">Jetzt schon freigeben</button>` : ""}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function previewDetailHtml() {
+    const items = previewCache.posts.filter((p) => p.scheduledFor === previewSelectedDate).sort((a, b) => a.channel.localeCompare(b.channel));
+    if (!items.length) return `<p class="empty">Für diesen Tag ist nichts vorbereitet - entweder ist an diesem Tag laut Ihrem Zeitplan nichts fällig, oder die tägliche Vorausplanung hat diesen Tag noch nicht erreicht.</p>`;
+    return items.map(previewCardHtml).join("");
+  }
+
+  function renderPreview() {
+    const strip = $("#preview-strip");
+    const detail = $("#preview-detail");
+    if (strip) strip.innerHTML = previewStripHtml();
+    if (detail) detail.innerHTML = previewDetailHtml();
+  }
+
+  async function loadPreview() {
+    const strip = $("#preview-strip");
+    if (!strip) return;
+    try {
+      const { posts, maxRegenerate } = await api("GET", "/api/planned-posts");
+      previewCache = { posts, maxRegenerate };
+      renderPreview();
+    } catch {
+      strip.innerHTML = `<p class="empty">Vorschau konnte gerade nicht geladen werden.</p>`;
+    }
+  }
+
+  function updatePlannedPostInCache(updated) {
+    if (!updated) return;
+    const i = previewCache.posts.findIndex((p) => p.id === updated.id);
+    if (i >= 0) previewCache.posts[i] = updated;
+    renderPreview();
+  }
+
   function renderTrialBar() {
     const bar = $("#trialbar");
     const c = S.customer;
@@ -916,6 +1054,7 @@
     const stage = $("#stage");
     if (S.step === "company") stage.innerHTML = companyHtml();
     else if (S.step === "done") { stage.innerHTML = doneHtml(); loadDashboardExtras(); }
+    else if (S.step === "preview") { stage.innerHTML = previewHtml(); loadPreview(); }
     else if (S.step === "history") { stage.innerHTML = historyHtml(); loadHistory(); }
     else stage.innerHTML = providerHtml(prov(S.step));
     if (focus) { stage.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
@@ -1091,6 +1230,84 @@
     if (topicChip) {
       const input = $("#f-postNowTopic");
       if (input) { input.value = topicChip.dataset.topicChip; input.focus(); }
+      return;
+    }
+
+    const previewDay = e.target.closest("[data-preview-day]");
+    if (previewDay) {
+      previewSelectedDate = previewDay.dataset.previewDay;
+      renderPreview();
+      return;
+    }
+    const ppSwatch = e.target.closest("[data-pp-swatch]");
+    if (ppSwatch) {
+      const colorInput = ppSwatch.closest(".preview-card-body")?.querySelector("[data-pp-color]");
+      if (colorInput) colorInput.value = ppSwatch.dataset.ppSwatch;
+      return;
+    }
+    const ppSave = e.target.closest("[data-pp-save]");
+    if (ppSave) {
+      const id = ppSave.dataset.ppSave;
+      const headlineEl = document.getElementById(`pp-headline-${id}`);
+      const captionEl = document.getElementById(`pp-caption-${id}`);
+      const statusEl = document.querySelector(`[data-pp-save-status="${id}"]`);
+      if (statusEl) statusEl.textContent = "";
+      ppSave.disabled = true;
+      try {
+        const body = {};
+        if (headlineEl) body.headline = headlineEl.value;
+        if (captionEl) body.caption = captionEl.value;
+        const { post } = await api("PATCH", `/api/planned-posts/${id}`, body);
+        updatePlannedPostInCache(post);
+      } catch (err) {
+        if (statusEl) { statusEl.textContent = err.message || "Konnte nicht gespeichert werden."; statusEl.style.color = "var(--stop)"; }
+        ppSave.disabled = false;
+      }
+      return;
+    }
+    const ppRegen = e.target.closest("[data-pp-regenerate]");
+    if (ppRegen) {
+      const id = ppRegen.dataset.ppRegenerate;
+      const colorInput = ppRegen.closest(".preview-card-body")?.querySelector("[data-pp-color]");
+      const accentColor = colorInput ? colorInput.value : "#0a0e1a";
+      const oldLabel = ppRegen.textContent;
+      ppRegen.disabled = true;
+      ppRegen.textContent = "Wird erstellt …";
+      try {
+        const { post } = await api("POST", `/api/planned-posts/${id}/regenerate-image`, { accentColor });
+        updatePlannedPostInCache(post);
+      } catch (err) {
+        alert(err.message || "Das Bild konnte nicht neu erstellt werden.");
+        ppRegen.disabled = false;
+        ppRegen.textContent = oldLabel;
+      }
+      return;
+    }
+    const ppSkip = e.target.closest("[data-pp-skip]");
+    if (ppSkip) {
+      if (!confirm("Diesen Beitrag wirklich überspringen? Er wird dann nicht veröffentlicht.")) return;
+      const id = ppSkip.dataset.ppSkip;
+      ppSkip.classList.add("busy");
+      try {
+        const { post } = await api("POST", `/api/planned-posts/${id}/skip`);
+        updatePlannedPostInCache(post);
+      } catch (err) {
+        alert(err.message || "Konnte nicht übersprungen werden.");
+        ppSkip.classList.remove("busy");
+      }
+      return;
+    }
+    const ppApprove = e.target.closest("[data-pp-approve]");
+    if (ppApprove) {
+      const id = ppApprove.dataset.ppApprove;
+      ppApprove.classList.add("busy");
+      try {
+        const { post } = await api("POST", `/api/planned-posts/${id}/approve`);
+        updatePlannedPostInCache(post);
+      } catch (err) {
+        alert(err.message || "Konnte nicht freigegeben werden.");
+        ppApprove.classList.remove("busy");
+      }
       return;
     }
     if (e.target.closest("[data-website-accept]")) {
@@ -1450,6 +1667,50 @@
     }
     if (url === "/api/suggest-topics") {
       return { topics: ["Ein Kundenerfolg aus der letzten Woche", "Ein häufiges Missverständnis in Ihrer Branche aufklären", "Ein kurzer Tipp, den Sie sonst nur persönlich weitergeben"] };
+    }
+    if (url === "/api/planned-posts" && method === "GET") {
+      if (!MOCK.plannedPosts) {
+        const today = localDateStr(new Date());
+        const tomorrow = localDateStr(new Date(Date.now() + 86400000));
+        MOCK.plannedPosts = [
+          { id: "plan1", channel: "ig_feed", scheduledFor: today, status: "planned", headline: "Mobilität neu entdecken", caption: "Ein Beispieltext für die Vorschau. (Vorschau-Beispiel)", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 0 },
+          { id: "plan2", channel: "ig_story", scheduledFor: today, status: "planned", headline: "Tipp des Tages", caption: "", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 0 },
+          { id: "plan3", channel: "linkedin", scheduledFor: tomorrow, status: "planned", headline: "Ein Blick hinter die Kulissen", caption: "Ein Beispieltext für die Vorschau. (Vorschau-Beispiel)", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 1 },
+        ];
+      }
+      return { posts: MOCK.plannedPosts, maxRegenerate: 3 };
+    }
+    if (/^\/api\/planned-posts\/[^/]+$/.test(url) && method === "PATCH") {
+      const id = url.split("/").pop();
+      const p = (MOCK.plannedPosts || []).find((x) => x.id === id);
+      if (!p) throw Object.assign(new Error("Beitrag nicht gefunden."), { status: 404 });
+      if (body.headline !== undefined) p.headline = body.headline;
+      if (body.caption !== undefined) p.caption = body.caption;
+      if (p.status === "planned") p.status = "edited";
+      return { post: p };
+    }
+    if (/^\/api\/planned-posts\/[^/]+\/regenerate-image$/.test(url) && method === "POST") {
+      const id = url.split("/")[3];
+      const p = (MOCK.plannedPosts || []).find((x) => x.id === id);
+      if (!p) throw Object.assign(new Error("Beitrag nicht gefunden."), { status: 404 });
+      if (p.regenerateCount >= 3) throw Object.assign(new Error("Maximale Anzahl an Neuerstellungen erreicht."), { status: 429 });
+      p.regenerateCount++;
+      p.accentColorUsed = body?.accentColor || p.accentColorUsed;
+      return { post: p, maxRegenerate: 3 };
+    }
+    if (/^\/api\/planned-posts\/[^/]+\/skip$/.test(url) && method === "POST") {
+      const id = url.split("/")[3];
+      const p = (MOCK.plannedPosts || []).find((x) => x.id === id);
+      if (!p) throw Object.assign(new Error("Beitrag nicht gefunden."), { status: 404 });
+      p.status = "rejected";
+      return { post: p };
+    }
+    if (/^\/api\/planned-posts\/[^/]+\/approve$/.test(url) && method === "POST") {
+      const id = url.split("/")[3];
+      const p = (MOCK.plannedPosts || []).find((x) => x.id === id);
+      if (!p) throw Object.assign(new Error("Beitrag nicht gefunden."), { status: 404 });
+      p.status = "approved";
+      return { post: p };
     }
     if (url === "/api/analyze-website") {
       return {

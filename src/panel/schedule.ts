@@ -203,6 +203,11 @@ export function isDueForChannel(customer: ScheduleInput, channel: PostingChannel
  * table). Returns the Vienna calendar date the given instant falls on, so callers don't need
  * their own date-string derivation to stay consistent with the rest of this module.
  */
+/** The Vienna calendar date (YYYY-MM-DD) a UTC instant falls on - planned_posts.scheduled_for and the panel's date-range queries use this, to stay consistent with the Vienna-based weekday/pause logic above (a naive UTC date string would occasionally disagree by one day near midnight). */
+export function viennaDateStr(date: Date = new Date()): string {
+  return viennaParts(date).dateStr;
+}
+
 export function isPostingDayForChannel(customer: ScheduleInput, channel: PostingChannel, date: Date): { dateStr: string; due: boolean } {
   const channelSpecific = channel === "instagram" ? customer.instagramWeekdays : customer.linkedinWeekdays;
   const days = parseWeekdayList(channelSpecific) ?? parseWeekdayList(customer.activeWeekdays) ?? postingDaysFor(customer.frequency);

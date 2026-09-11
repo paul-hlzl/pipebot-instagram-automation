@@ -194,6 +194,13 @@ const CHANNEL_COLUMN: Record<PublishChannel, "ig_feed_enabled" | "ig_story_enabl
   linkedin: "linkedin_enabled",
 };
 
+/** Which fal.ai/watermark image format a channel uses - LinkedIn images are square, same as the feed format. */
+export const CHANNEL_IMAGE_FORMAT: Record<PublishChannel, "feed" | "story"> = {
+  ig_feed: "feed",
+  ig_story: "story",
+  linkedin: "feed",
+};
+
 /**
  * Throws a clear error if a customer has switched this channel/format off in the panel.
  * A missing customerId (the operator's own .env account) is never gated - unchanged behavior.
