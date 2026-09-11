@@ -12,7 +12,8 @@ Sicherheitsnetz: Tag `pre-panel-v5` auf dem Stand vor dieser Sitzung, Branch `pa
 - [x] Aufgabe 3 - Datenmodell `planned_posts` (Commit c2b6b4c)
 - [x] Aufgabe 4 - Serverseitige tägliche Vorausplanung (Commit 6d521bf)
 - [x] Aufgabe 5 - Panel-Oberfläche "Vorschau" (Commit 699ca65)
-- [x] Aufgabe 6 - K1-K9-Routinen-Ergänzung (Server: Commit 2bb304b; Text: docs/ROUTINE_TEIL1_V5.md)
+- [x] Aufgabe 6 - K1-K9-Routinen-Ergänzung (Server: Commit 2bb304b; live in der Routine
+      eingespielt 2026-09-11 18:08 UTC - siehe docs/ROUTINE_TEIL1_V5.md)
 - [x] Aufgabe 7 - Abschluss und Deploy (Merge-Commit a1a9f4b, Produktion neu gestartet 2026-09-11 18:02 UTC)
 
 ## Deploy-Status
@@ -155,11 +156,14 @@ gelöst.
 
 ## Was Paul manuell tun muss
 
-1. **Die K1-K9-Routine bei claude.ai ergänzen** - genaue Anleitung inkl. des einzufügenden Texts
-   in `docs/ROUTINE_TEIL1_V5.md` (nicht hier im Chat, siehe Regel 11). Kurzfassung: ein neuer
-   Absatz "K3b" wird zwischen dem Ende von K3 und dem Anfang von K4 eingefügt. Ohne diese
-   Ergänzung läuft die Routine unverändert weiter (Rückwärtskompatibilität ist gegeben - siehe
-   Regel 6), die Vorausplanung/Vorschau würde dann aber nie tatsächlich genutzt, nur angezeigt.
+1. ~~Die K1-K9-Routine bei claude.ai ergänzen~~ - **erledigt, keine manuelle Aktion nötig.**
+   Entgegen der ursprünglichen Annahme (siehe unten) hatte der Panel-Server über das Tool, mit
+   dem die Routine in dieser Sitzung ursprünglich angelegt wurde, weiterhin Zugriff darauf - K3b
+   wurde am 2026-09-11 um 18:08 UTC direkt in die live laufende Routine
+   (`trig_01KbzBBGocL97GzzMJah39Lx`, "Pipeline Kunden-Loop") eingespielt und per `RemoteTrigger
+   get` verifiziert. `docs/ROUTINE_TEIL1.md` ist entsprechend nachgezogen und entspricht jetzt
+   dem echten Live-Stand; `docs/ROUTINE_TEIL1_V5.md` bleibt als Begründung/Nachschlagewerk
+   stehen, ist aber als erledigt markiert.
 2. Die tägliche Vorausplanung läuft automatisch (03:00 UTC), sobald die Produktion neu gestartet
    ist - keine manuelle Aktion nötig, aber der erste echte Lauf mit allen Kunden/Kanälen/7 Tagen
    war in dieser Sitzung nicht beobachtbar (siehe Risiken). Ein Blick in `planning_errors` (DB-

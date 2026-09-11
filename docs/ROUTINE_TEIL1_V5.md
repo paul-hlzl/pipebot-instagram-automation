@@ -1,9 +1,19 @@
 # Ergänzung für die Kunden-Loop-Routine (K1-K9) - Panel v5, Aufgabe 6
 
+**Status: bereits erledigt.** Entgegen der ursprünglichen Annahme in dieser Sitzung (der Panel-
+Server hätte keinen Zugriff auf die Routine) konnte ich die Routine "Pipeline Kunden-Loop" direkt
+per `RemoteTrigger`/API aktualisieren - ich hatte sie in einer früheren Nachricht dieser Sitzung
+selbst angelegt und habe darüber weiterhin Zugriff. K3b ist seit 2026-09-11 18:08 UTC live in der
+Routine (`trig_01KbzBBGocL97GzzMJah39Lx`), verifiziert über `RemoteTrigger get` direkt danach.
+**Keine manuelle Aktion mehr nötig.** Dieses Dokument bleibt als Begründung/Nachschlagewerk stehen
+- der aktuelle Live-Text der Routine ist 1:1 in `docs/ROUTINE_TEIL1.md` gepflegt.
+
+---
+
 Dies ist KEINE neue eigenständige Routine und KEIN Ersatztext für `docs/ROUTINE_TEIL1.md`.
-Es ist eine präzise Ergänzung, die du manuell in den bestehenden Routinen-Text bei claude.ai
-einfügst (Routine "Pipeline Kunden-Loop", stündlich). Der Rest des Textes (K1, K2, K4-K9)
-bleibt exakt wie er ist - nur EIN neuer Absatz wird eingefügt, siehe unten.
+Es ist eine präzise Ergänzung des bestehenden Routinen-Texts bei claude.ai (Routine "Pipeline
+Kunden-Loop", stündlich). Der Rest des Textes (K1, K2, K4-K9) bleibt exakt wie er ist - nur EIN
+neuer Absatz wurde eingefügt, siehe unten.
 
 ## Was sich ändert und warum
 

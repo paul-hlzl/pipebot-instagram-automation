@@ -7,6 +7,11 @@ Aktueller Stand, eingefügt bei claude.ai/customize als eigene Routine mit stün
 Zeitplan. Bei Änderungen an den zugrunde liegenden Panel-Feldern/MCP-Tools (siehe
 `docs/PANEL_V4_REPORT.md`) diesen Text entsprechend nachziehen.
 
+**Update Panel v5 (2026-09-11):** Schritt K3b ergänzt (Nutzung server-seitig vorbereiteter
+Beiträge aus `planned_posts`, siehe `docs/PANEL_V5_REPORT.md` und `docs/ROUTINE_TEIL1_V5.md`).
+Direkt per `RemoteTrigger`/API in die live laufende Routine eingespielt, nicht nur hier
+dokumentiert - dieser Datei-Inhalt entspricht dem tatsächlichen Live-Stand der Routine.
+
 ---
 
 ```
@@ -65,6 +70,35 @@ K3. Call list_customers. This returns every panel customer with their current se
     if you checked it again - if you only did the feed and planned to "come back" for the story
     later, it would never happen today. So: if both are enabled, always do both now, not one now
     and one "later".
+
+K3b. Before proceeding to K4 for this due customer/channel, call get_planned_post with this
+     customer_id, this channel (ig_feed/ig_story/linkedin), and today's date (YYYY-MM-DD).
+     - No post returned (null): nothing was pre-planned for this customer/channel/day (planning
+       hasn't run yet, failed for this customer, or this customer/channel had nothing due when
+       it ran). Proceed to K4-K8 exactly as before - this is the normal fallback, not an error.
+     - status 'rejected': the customer explicitly skipped this one in their panel "Vorschau" tab.
+       Skip this channel for this customer entirely for today - do NOT proceed to K4, do NOT
+       generate a replacement. This is the customer's own choice, not a failure.
+     - status 'approved': publish it directly using its existing headline/caption/imageUrl (call
+       publish_generated_post for ig_feed, publish_generated_story for ig_story, or the LinkedIn
+       tools for linkedin - do NOT call generate_post_image/generate_story_image again, the
+       image already exists). After a successful publish, call mark_planned_post_published with
+       its id. Skip K4-K8 entirely for this customer/channel. On failure, treat it like any other
+       publish failure (K9) - skip and continue, do not retry differently than usual.
+     - status 'planned' or 'edited': check this customer's approvalMode (from list_customers).
+       - approvalMode false: publish it directly, exactly as for 'approved' above (existing
+         content, mark_planned_post_published after success, skip K4-K8).
+       - approvalMode true: this hasn't been reviewed by the customer yet - do NOT publish it
+         and do NOT call mark_planned_post_published. Proceed to K4-K8 exactly as before
+         (unchanged behavior: generate a fresh post and file it via save_pending_approval, same
+         as if nothing had been pre-planned). This is intentional, not a bug - a pre-planned post
+         only skips the normal flow once actually approved or once approvalMode is off.
+     - status 'published': should not normally occur here (already handled on an earlier run) -
+       if it does, treat it like 'rejected' (skip, do not regenerate) and move on.
+
+     Do this check separately for EACH due channel of this customer (ig_feed and ig_story each
+     have their own planned_posts row) - still respecting K3's "do both feed and story in the
+     same pass" rule when both are due today.
 
 K4. For a due customer/channel, call get_customer_style_samples first (with that customer_id).
     If it returns previous posts, match their tone of voice, emoji usage, hashtag style, and
