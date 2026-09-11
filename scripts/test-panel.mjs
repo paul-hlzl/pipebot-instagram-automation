@@ -193,10 +193,12 @@ async function main() {
           { title: "", weight: 2 }, // leerer Titel muss verworfen werden
         ],
         bannedWords: "billig, Konkurrenzname",
+        requiredElements: "#MeineMarke",
       }),
     });
     const body = await res.json();
     ok("bannedWords wird gespeichert", body.customer?.bannedWords === "billig, Konkurrenzname", body.customer?.bannedWords);
+    ok("requiredElements wird gespeichert", body.customer?.requiredElements === "#MeineMarke", body.customer?.requiredElements);
     const pillars = body.customer?.contentPillars ?? [];
     ok("2 gueltige Saeulen gespeichert (leerer Titel verworfen)", pillars.length === 2, `got ${pillars.length}`);
     ok("erste Saeule korrekt", pillars[0]?.title === "Tipps" && pillars[0]?.weight === 3, JSON.stringify(pillars[0]));

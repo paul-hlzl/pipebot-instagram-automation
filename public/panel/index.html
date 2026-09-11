@@ -479,6 +479,11 @@
           <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
         </div>
         <div class="field">
+          <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
+          <input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">
+          <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
+        </div>
+        <div class="field">
           <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
           <label class="check"><input type="checkbox" name="igFeedEnabled" ${c.igFeedEnabled !== false ? "checked" : ""}><span>Instagram Feed-Beiträge</span></label>
           <label class="check"><input type="checkbox" name="igStoryEnabled" ${c.igStoryEnabled !== false ? "checked" : ""}><span>Instagram Storys</span></label>

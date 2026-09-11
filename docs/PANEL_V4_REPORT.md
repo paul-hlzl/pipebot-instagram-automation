@@ -13,7 +13,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 1 | Sicherheitsnetz | ✅ erledigt |
 | 2 | Content-Säulen | ✅ erledigt |
 | 3 | Wortverbote (hart) | ✅ erledigt |
-| 4 | Pflicht-Elemente | ⏳ offen |
+| 4 | Pflicht-Elemente | ✅ erledigt |
 | 5 | Granulare Zeitplanung | ⏳ offen |
 | 6 | "Jetzt posten"-Button | ⏳ offen |
 | 7 | Freigabe-Modus | ⏳ offen |
@@ -94,6 +94,28 @@ siehe Routine-Prompt-Text weiter unten bzw. im Abschlussbericht.
   bewusst die Routine, siehe Routine-Prompt-Text in Aufgabe 11).
 - `npm run test:panel` erweitert (Signup speichert `bannedWords` korrekt). **45 passed, 0
   failed.**
+
+**Für Paul:** nichts zu tun.
+
+## Aufgabe 4 – Pflicht-Elemente ✅
+
+**Erledigt:**
+- Neue Spalte `required_elements` (TEXT, kommagetrennt), additiv, gleiches Muster wie
+  `banned_words`.
+- `assertRequiredElements(customerId, ...texte)` in `credentials.ts` - anders als bei den
+  Wortverboten werden hier **alle übergebenen Texte zu einem String zusammengefügt**, bevor
+  geprüft wird: ein Pflicht-Hashtag darf z. B. in der Headline ODER der Caption stehen, muss
+  nicht in beiden vorkommen. Mit einem echten Testkunden verifiziert: fehlen beide Pflicht-
+  Elemente → Fehler mit dem ersten fehlenden genannt; sind beide über Headline+Caption verteilt
+  vorhanden → kein Fehler.
+- In denselben 6 Publish-Tools durchgesetzt wie die Wortverbote aus Aufgabe 3 (direkt danach
+  aufgerufen).
+- Panel: neues Feld "Muss in jedem Beitrag vorkommen (optional, kommagetrennt)" direkt unter
+  dem Wortverbote-Feld.
+- `list_customers` liefert `requiredElements`; Tool-Beschreibung weist die Routine an, Pflicht-
+  Elemente selbst einzubauen und bei einem entsprechenden Fehler einmal mit Ergänzung erneut
+  zu versuchen.
+- `npm run test:panel` erweitert. **46 passed, 0 failed.**
 
 **Für Paul:** nichts zu tun.
 

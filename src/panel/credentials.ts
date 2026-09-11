@@ -54,6 +54,8 @@ export interface CustomerOverview {
   avoidTopics: string | null;
   /** Comma-separated words that are HARD-blocked: publish tools refuse a caption/headline containing one of these. */
   bannedWords: string | null;
+  /** Comma-separated elements that MUST appear somewhere in headline+caption combined, or publish tools refuse. */
+  requiredElements: string | null;
   /** Preferred call-to-action slug: link_bio | anrufen | nachricht | termin | keiner */
   ctaPreference: string | null;
   /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
@@ -108,6 +110,7 @@ function overview(c: CustomerRow): CustomerOverview {
     watermarkText: c.watermark_text,
     avoidTopics: c.avoid_topics,
     bannedWords: c.banned_words,
+    requiredElements: c.required_elements,
     ctaPreference: c.cta_preference,
     trialEndsAt: c.trial_ends_at,
     trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
@@ -422,6 +425,27 @@ export function assertNoBannedWords(customerId: string | undefined, ...texts: (s
     if (hit) {
       throw new Error(`Caption enthält verbotenes Wort: "${hit}" - bitte neu formulieren und erneut versuchen.`);
     }
+  }
+}
+
+/**
+ * Throws a clear, actionable error if this customer has required elements configured and one
+ * of them is missing across ALL of the given texts combined (e.g. a required hashtag can be
+ * in either the headline or the caption - it just has to be somewhere). A missing customerId
+ * is never checked - unchanged behavior. Call this from every publish tool, before the
+ * network call, alongside assertNoBannedWords.
+ */
+export function assertRequiredElements(customerId: string | undefined, ...texts: (string | undefined)[]): void {
+  if (!customerId) return;
+  const row = db.prepare("SELECT required_elements FROM customers WHERE id = ?").get(customerId) as
+    | { required_elements: string | null }
+    | undefined;
+  const required = splitCommaList(row?.required_elements ?? null);
+  if (!required.length) return;
+  const combined = texts.filter(Boolean).join(" \n ").toLowerCase();
+  const missing = required.find((el) => !combined.includes(el.toLowerCase()));
+  if (missing) {
+    throw new Error(`Caption fehlt ein Pflicht-Element: "${missing}" - bitte ergänzen und erneut versuchen.`);
   }
 }
 

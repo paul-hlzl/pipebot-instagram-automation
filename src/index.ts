@@ -18,6 +18,7 @@ import { createHttpApp } from "./http-server.js";
 import {
   assertChannelEnabled,
   assertNoBannedWords,
+  assertRequiredElements,
   getCachedStyleSamples,
   getCredentials,
   getCustomerOverview,
@@ -238,6 +239,7 @@ function createServer(): McpServer {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
         assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
@@ -274,6 +276,7 @@ function createServer(): McpServer {
       try {
         assertChannelEnabled(customer_id, "ig_feed");
         assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "feed", resolveImageBranding(customer_id));
         const published = await publishImageToInstagram(generated.imageUrl, caption, creds, customer_id);
@@ -379,6 +382,7 @@ function createServer(): McpServer {
       try {
         assertChannelEnabled(customer_id, "ig_story");
         assertNoBannedWords(customer_id, headline);
+        assertRequiredElements(customer_id, headline);
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
@@ -414,6 +418,7 @@ function createServer(): McpServer {
       try {
         assertChannelEnabled(customer_id, "ig_story");
         assertNoBannedWords(customer_id, headline);
+        assertRequiredElements(customer_id, headline);
         const creds = await resolveInstagramCredentials(customer_id);
         const generated = await generateImageUrl(headline, "story", resolveImageBranding(customer_id));
         const published = await publishStoryToInstagram(generated.imageUrl, creds);
@@ -507,6 +512,7 @@ function createServer(): McpServer {
       try {
         assertChannelEnabled(customer_id, "linkedin");
         assertNoBannedWords(customer_id, text);
+        assertRequiredElements(customer_id, text);
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
@@ -549,6 +555,7 @@ function createServer(): McpServer {
 
         assertChannelEnabled(customer_id, "linkedin");
         assertNoBannedWords(customer_id, text);
+        assertRequiredElements(customer_id, text);
         const creds = await resolveLinkedInCredentials(customer_id);
         const imageSource: string | Buffer = hasB64
           ? Buffer.from(image_base64!.trim().replace(/^data:[^;,]+;base64,/, ""), "base64")
@@ -688,6 +695,10 @@ function createServer(): McpServer {
         "avoid them proactively; if a publish call still fails with a banned-word error, rewrite the caption " +
         "without that word and retry once rather than giving up on the customer for this run. This is separate " +
         "from `avoidTopics`, which is only a soft style hint. " +
+        "Each customer also has `requiredElements` (comma-separated string, or null) - elements that MUST appear " +
+        "somewhere across the headline+caption combined (e.g. a mandatory hashtag or handle), or the publish " +
+        "tools refuse with a clear error naming what's missing. Include every required element yourself before " +
+        "publishing; on a missing-element error, add it and retry once rather than giving up. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },

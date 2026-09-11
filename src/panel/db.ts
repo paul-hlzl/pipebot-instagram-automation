@@ -131,6 +131,9 @@ migrateColumns("customers", [
   // Hard-enforced, comma-separated - distinct from the existing soft avoid_topics (an AI
   // instruction the routine may or may not follow perfectly). NULL/empty = no restriction.
   ["banned_words", "TEXT"],
+  // Hard-enforced, comma-separated - every element must appear somewhere across the
+  // headline/caption texts of a post, or publishing is refused. NULL/empty = no requirement.
+  ["required_elements", "TEXT"],
 ]);
 
 migrateColumns("posts", [
@@ -164,6 +167,7 @@ export interface CustomerRow {
   language: string;
   customer_paused: number;
   banned_words: string | null;
+  required_elements: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;
