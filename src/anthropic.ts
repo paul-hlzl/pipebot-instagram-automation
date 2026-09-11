@@ -67,3 +67,89 @@ export async function improveBriefing(input: {
   }
   return text;
 }
+
+export interface WebsiteSuggestion {
+  industry: string;
+  about: string;
+  tone: "sachlich" | "locker" | "inspirierend" | "humorvoll";
+  hashtags: string[];
+}
+
+const VALID_TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
+
+/**
+ * Turns text extracted from a customer's own website into a briefing suggestion (industry,
+ * about paragraph, tone, hashtags). Deliberately never suggests a color - scraping a brand
+ * color reliably out of arbitrary CSS/inline styles isn't feasible, so the existing color
+ * picker stays untouched and is the only source of truth for that.
+ */
+export async function suggestFromWebsite(input: { title: string; description: string; bodyText: string }): Promise<WebsiteSuggestion> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+
+  const system =
+    "Du hilfst Kleinunternehmern, ihr Profil für automatisch generierte Social-Media-Beiträge auszufüllen, " +
+    "basierend auf dem Text ihrer eigenen Website. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - kein " +
+    "einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: " +
+    '{"industry": "kurze Branche, 2-4 Wörter", "about": "2-3 Sätze auf Deutsch: Zielgruppe, Themen, Nutzen - ' +
+    'direkt und konkret, kein Marketing-Geschwafel", "tone": "genau eines von sachlich, locker, inspirierend, ' +
+    'humorvoll", "hashtags": ["3 bis 5 Schlagwörter ohne Raute, kleingeschrieben, je ein Wort ohne Leerzeichen"]}. ' +
+    "Schlage NIEMALS eine Farbe vor, das ist nicht Teil deiner Aufgabe. Mach eine plausible Bestapproximation, " +
+    "auch wenn der Text wenig hergibt - liefere nie leere Felder ohne Versuch.";
+  const user = `Titel der Seite: ${input.title || "(keiner)"}\nMeta-Beschreibung: ${input.description || "(keine)"}\nText von der Startseite:\n${input.bodyText || "(kein Text gefunden)"}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 500,
+          system,
+          messages: [{ role: "user", content: user }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic analyze-website",
+  );
+
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) {
+    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  }
+
+  let parsed: unknown;
+  try {
+    // The model should never wrap in a code fence per the system prompt, but strip one
+    // defensively in case it does anyway.
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  const obj = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const tone = VALID_TONES.includes(String(obj.tone)) ? (obj.tone as WebsiteSuggestion["tone"]) : "sachlich";
+  const hashtags = Array.isArray(obj.hashtags)
+    ? obj.hashtags
+        .map((h) => String(h).replace(/^#/, "").trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+
+  return {
+    industry: typeof obj.industry === "string" ? obj.industry.trim().slice(0, 120) : "",
+    about: typeof obj.about === "string" ? obj.about.trim().slice(0, 600) : "",
+    tone,
+    hashtags,
+  };
+}

@@ -76,6 +76,32 @@ async function main() {
     }
   }
 
+  // --- 0b. /api/analyze-website - genau EIN Aufruf hier (das Rate-Limit ist bewusst streng,
+  // 1/Minute - ein zweiter Aufruf im selben Lauf würde 429 statt des erwarteten Ergebnisses
+  // liefern). KEIN echter externer Website-Fetch in dieser Test-Suite - der volle Roundtrip
+  // inkl. echtem Fetch + Anthropic-Aufruf wurde manuell gegen Staging verifiziert (Report).
+  // Diese eine Anfrage deckt gleichzeitig den wichtigsten Fall ab: den SSRF-Schutz.
+  console.log("\nWebsite-Analyse:");
+  {
+    const providersRes = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const { aiAvailable } = await providersRes.json();
+    const res = await fetch(`${BASE}${MOUNT}/api/analyze-website`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ website: "http://192.168.1.1" }),
+    });
+    const resBody = await res.json();
+    if (!aiAvailable) {
+      ok("analyze-website ohne ANTHROPIC_API_KEY -> 503", res.status === 503, `status=${res.status}`);
+    } else {
+      ok(
+        "analyze-website mit privater IP -> abgelehnt (SSRF-Schutz)",
+        res.status === 502 && /nicht erlaubt/i.test(resBody.error || ""),
+        `status=${res.status} body=${JSON.stringify(resBody)}`,
+      );
+    }
+  }
+
   // --- 1. Signup validation errors ---
   console.log("Signup - Validierung:");
   {
