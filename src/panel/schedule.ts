@@ -195,3 +195,17 @@ export function nextPostAtForChannel(customer: ScheduleInput, channel: PostingCh
 export function isDueForChannel(customer: ScheduleInput, channel: PostingChannel, now: Date = new Date()): boolean {
   return dueFromSlot(nextSlot(customer, now, channel), now);
 }
+
+/**
+ * Day-level version of isDueForChannel for planning.ts (v5): would this channel get a post AT
+ * ALL on this calendar day, ignoring both time-of-day and "already posted" (planning runs once,
+ * long before the post time, and checks planned_posts for idempotency itself - not the posts
+ * table). Returns the Vienna calendar date the given instant falls on, so callers don't need
+ * their own date-string derivation to stay consistent with the rest of this module.
+ */
+export function isPostingDayForChannel(customer: ScheduleInput, channel: PostingChannel, date: Date): { dateStr: string; due: boolean } {
+  const channelSpecific = channel === "instagram" ? customer.instagramWeekdays : customer.linkedinWeekdays;
+  const days = parseWeekdayList(channelSpecific) ?? parseWeekdayList(customer.activeWeekdays) ?? postingDaysFor(customer.frequency);
+  const { dateStr, weekday } = viennaParts(date);
+  return { dateStr, due: !isPausedOn(customer, dateStr) && days.includes(weekday) };
+}
