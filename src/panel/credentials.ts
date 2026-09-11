@@ -72,6 +72,8 @@ export interface CustomerOverview {
   hashtagPreference: "keine" | "wenige" | "viele";
   emojisEnabled: boolean;
   language: "de" | "en";
+  /** The customer's own pause toggle from their dashboard - distinct from `status` (admin lock). */
+  customerPaused: boolean;
   channels: ChannelOverview[];
 }
 
@@ -103,7 +105,9 @@ function overview(c: CustomerRow): CustomerOverview {
     trialEndsAt: c.trial_ends_at,
     trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
     trialDaysLeft: trialDaysLeft(c.trial_ends_at),
-    dueNow: isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    // A customer who paused themselves is never "due", same effect as an unmet schedule -
+    // the routine doesn't need a separate flag to remember to check.
+    dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
     nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
     igFeedEnabled: Boolean(c.ig_feed_enabled),
     igStoryEnabled: Boolean(c.ig_story_enabled),
@@ -111,6 +115,7 @@ function overview(c: CustomerRow): CustomerOverview {
     hashtagPreference: (c.hashtag_pref as CustomerOverview["hashtagPreference"]) || "wenige",
     emojisEnabled: Boolean(c.emojis_enabled),
     language: (c.language as CustomerOverview["language"]) || "de",
+    customerPaused: Boolean(c.customer_paused),
     channels: channelsFor(c.id),
   };
 }
@@ -203,14 +208,17 @@ export async function getCredentials(
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Unbekannte Plattform: ${providerId}`);
 
-  const customerRow = db.prepare("SELECT trial_ends_at FROM customers WHERE id = ?").get(customerId) as
-    | { trial_ends_at: string | null }
+  const customerRow = db.prepare("SELECT trial_ends_at, customer_paused FROM customers WHERE id = ?").get(customerId) as
+    | { trial_ends_at: string | null; customer_paused: number }
     | undefined;
   if (customerRow && isTrialExpired({ trialEndsAt: customerRow.trial_ends_at })) {
     // Second line of defense - list_customers already exposes trialExpired so a well-behaved
     // routine skips these customers on its own, but this check makes it impossible to
     // publish for an expired trial even if that gets missed.
     throw new Error(`Kunde ${customerId}: Probezeitraum abgelaufen. Keine Veröffentlichung möglich, bis der Kunde freigeschaltet wird.`);
+  }
+  if (customerRow?.customer_paused) {
+    throw new Error(`Kunde ${customerId}: Posting wurde vom Kunden selbst pausiert - keine Veröffentlichung möglich, bis er es im Panel fortsetzt.`);
   }
 
   const row = db

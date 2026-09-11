@@ -142,10 +142,11 @@ function publicState(c: CustomerRow) {
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
       nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
-      dueNow: isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
+      customerPaused: Boolean(c.customer_paused),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -379,6 +380,19 @@ export function createPanelRouter(): Router {
     }
     db.prepare("DELETE FROM connections WHERE customer_id = ? AND provider = ?").run(c.id, String(req.params.provider));
     res.json(publicState(c));
+  });
+
+  // Kunde pausiert/setzt sein eigenes Posting fort - anders als die Admin-Sperre (status)
+  // bleibt der Kunde dabei eingeloggt und sieht sein Dashboard weiter normal.
+  router.post("/api/pause", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const paused = req.body?.paused === true;
+    db.prepare("UPDATE customers SET customer_paused = ?, updated_at = ? WHERE id = ?").run(paused ? 1 : 0, nowIso(), c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   });
 
   // Schritt 1 OAuth: zur Plattform weiterleiten

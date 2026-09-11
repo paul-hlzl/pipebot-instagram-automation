@@ -100,6 +100,28 @@
 
   .formpart-nav { display: flex; gap: 12px; margin-top: 32px; }
   .steplabel { font-size: 13px; color: var(--stone); margin: 0 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+
+  .dash-status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border: 1px solid var(--ink); border-radius: 20px; font-size: 13.5px; font-weight: 500; margin-bottom: 24px; }
+  .dash-status.warn { border-color: var(--stop); color: var(--stop); }
+  .needs-action { padding: 12px 16px; background: #FDF2E0; border: 1px solid #E8C468; border-radius: 2px; font-size: 14px; margin-bottom: 24px; }
+  .needs-action a, .needs-action button.link { font-weight: 600; }
+
+  .post-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 16px 0 8px; }
+  .post-grid img, .post-grid .ph { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--wash); display: block; }
+
+  .cal { margin: 16px 0 8px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-grid .hd { font-size: 11px; color: var(--stone); text-align: center; padding-bottom: 4px; }
+  .cal-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12.5px; border: 1px solid var(--rule); border-radius: 2px; gap: 3px; }
+  .cal-day.today { border-color: var(--ink); font-weight: 700; }
+  .cal-day .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .cal-day .dot.posted { background: var(--ink); }
+  .cal-day .dot.planned { border: 1px solid var(--stone); background: none; }
+  .cal-legend { display: flex; gap: 18px; font-size: 12.5px; color: var(--stone); margin-top: 8px; }
+  .cal-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .cal-legend .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .cal-legend .dot.posted { background: var(--ink); }
+  .cal-legend .dot.planned { border: 1px solid var(--stone); }
   input[type=text], input[type=email], input[type=url], input[type=time], select, textarea {
     width: 100%; height: 48px; padding: 0 14px; border: 1px solid #C9C9C9; border-radius: 2px; background: var(--paper); font: inherit; color: inherit;
   }
@@ -537,16 +559,36 @@
     `;
   }
 
+  function statusHtml(c) {
+    if (c.trialExpired) return `<span class="dash-status warn">Trial abgelaufen</span>`;
+    if (c.customerPaused) return `<span class="dash-status warn">Pausiert (von Ihnen)</span>`;
+    if (c.trialDaysLeft != null) return `<span class="dash-status">Trial · noch ${c.trialDaysLeft} ${c.trialDaysLeft === 1 ? "Tag" : "Tage"}</span>`;
+    return `<span class="dash-status">Aktiv</span>`;
+  }
+
+  function needsActionHtml() {
+    const bad = S.connections.filter((k) => k.status !== "ok");
+    if (!bad.length) return "";
+    return `<div class="needs-action">${bad.map((k) => {
+      const p = prov(k.provider);
+      return k.status === "expired"
+        ? `${esc(p?.name || k.provider)}: Freigabe abgelaufen - <a href="${CONFIG.mount}/connect/${k.provider}" data-connect="${k.provider}">jetzt neu verbinden</a>.`
+        : `${esc(p?.name || k.provider)}: Freigabe läuft bald ab - <a href="${CONFIG.mount}/connect/${k.provider}" data-connect="${k.provider}">jetzt erneuern</a>.`;
+    }).join("<br>")}</div>`;
+  }
+
   function doneHtml() {
     const connected = S.providers.filter((p) => conn(p.id) && conn(p.id).status !== "expired");
     const missing = S.providers.filter((p) => !connected.includes(p));
     const c = S.customer;
     return `
       ${bannerHtml()}
+      ${statusHtml(c)}
       <h1>${missing.length ? "Fast geschafft." : "Alles verbunden."}</h1>
       <p class="lede">${missing.length
         ? `Noch offen: ${missing.map((p) => esc(p.name)).join(" und ")}. Sie können das jederzeit nachholen.`
         : "Ab jetzt kümmern wir uns um Ihre Beiträge. Sie müssen nichts weiter tun."}</p>
+      ${needsActionHtml()}
       <dl class="sum">
         <div><dt>Unternehmen</dt><dd>${esc(c.company)}</dd></div>
         ${S.providers.map((p) => {
@@ -554,24 +596,75 @@
           return `<div><dt>${esc(p.name)}</dt><dd>${k ? esc(k.accountName) + (k.status === "expired" ? " (abgelaufen)" : "") : `<button class="link" data-go="${p.id}">Jetzt verbinden</button>`}</dd></div>`;
         }).join("")}
         <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
-        ${c.nextPostAt && !c.trialExpired ? `<div><dt>Nächster Beitrag</dt><dd>${esc(fmtNextPost(c.nextPostAt))}</dd></div>` : ""}
+        ${c.nextPostAt && !c.trialExpired && !c.customerPaused ? `<div><dt>Nächster Beitrag</dt><dd>${esc(fmtNextPost(c.nextPostAt))}</dd></div>` : ""}
         <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
         <div><dt>Bild-Akzentfarbe</dt><dd>${c.accentColor ? `<span style="display:inline-block;width:14px;height:14px;background:${esc(c.accentColor)};vertical-align:middle;margin-right:8px;border:1px solid var(--rule)"></span>${esc(c.accentColor)}` : "Standard"}</dd></div>
         <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
       </dl>
-      <h2>Wie es weitergeht</h2>
-      <p>${esc(CONFIG.nextSteps)}</p>
+      <div class="actions">
+        <button class="btn" data-go="company">Stil bearbeiten</button>
+        <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
+        <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
+      </div>
+      <h2>Letzte Beiträge</h2>
+      <div id="dash-posts" class="post-grid"><p class="empty">Wird geladen …</p></div>
+      <div class="actions"><button class="link" data-go="history">Alle Beiträge ansehen</button></div>
+      <h2>Kalender</h2>
+      <div id="dash-cal" class="cal"><p class="empty">Wird geladen …</p></div>
       <h2>Später wiederkommen</h2>
       <p style="color:var(--stone)">Auf diesem Gerät bleiben Sie angemeldet. Für andere Geräte erzeugen Sie einen persönlichen Link. Behandeln Sie ihn wie ein Passwort, ein neuer Link ersetzt den alten.</p>
       <div id="linkbox"><button class="link" id="mklink">Persönlichen Link erzeugen</button></div>
       <div class="actions">
-        <button class="btn" data-go="company">Angaben bearbeiten</button>
-        <button class="link" data-go="history">Bisherige Beiträge ansehen</button>
         <button class="link" id="logout">Abmelden</button>
       </div>
       <h2>Konto</h2>
       <p style="color:var(--stone)">Konto und alle gespeicherten Daten (Angaben, verbundene Kanäle, Beitrags-Verlauf) endgültig löschen. Das kann nicht rückgängig gemacht werden.</p>
       <div class="actions"><button class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button></div>`;
+  }
+
+  function calendarHtml(posts, frequency) {
+    const now = new Date();
+    const year = now.getFullYear(), month = now.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Mo=0..So=6
+    const postingDays = { taeglich: [0, 1, 2, 3, 4, 5, 6], werktags: [1, 2, 3, 4, 5], "3x-woche": [1, 3, 5] }[frequency] || [1, 2, 3, 4, 5];
+    const postedDates = new Set(posts.map((p) => new Date(p.postedAt).toDateString()));
+    const todayStr = now.toDateString();
+
+    const cells = [];
+    for (let i = 0; i < firstWeekday; i++) cells.push(`<div></div>`);
+    for (let day = 1; day <= daysInMonth; day++) {
+      const d = new Date(year, month, day);
+      const isPast = d < new Date(year, month, now.getDate());
+      const posted = postedDates.has(d.toDateString());
+      const planned = !posted && !isPast && postingDays.includes(d.getDay());
+      cells.push(`<div class="cal-day${d.toDateString() === todayStr ? " today" : ""}">${day}${posted ? '<span class="dot posted"></span>' : planned ? '<span class="dot planned"></span>' : ""}</div>`);
+    }
+    const monthLabel = now.toLocaleDateString("de-AT", { month: "long", year: "numeric", timeZone: "Europe/Vienna" });
+    return `<p class="hint" style="margin-bottom:8px">${esc(monthLabel)}</p>
+      <div class="cal-grid">
+        ${["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((d) => `<div class="hd">${d}</div>`).join("")}
+        ${cells.join("")}
+      </div>
+      <div class="cal-legend"><span><i class="dot posted"></i>Veröffentlicht</span><span><i class="dot planned"></i>Geplant</span></div>`;
+  }
+
+  async function loadDashboardExtras() {
+    const postsBox = $("#dash-posts");
+    const calBox = $("#dash-cal");
+    if (!postsBox && !calBox) return;
+    try {
+      const { posts } = await api("GET", "/api/posts");
+      if (postsBox) {
+        postsBox.innerHTML = posts.length
+          ? posts.slice(0, 9).map((p) => p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.headline || "")}">` : `<div class="ph"></div>`).join("")
+          : `<p class="empty">Noch keine Beiträge veröffentlicht.</p>`;
+      }
+      if (calBox) calBox.innerHTML = calendarHtml(posts, S.customer?.frequency);
+    } catch {
+      if (postsBox) postsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
+      if (calBox) calBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
+    }
   }
 
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
@@ -632,7 +725,7 @@
     renderRail();
     const stage = $("#stage");
     if (S.step === "company") stage.innerHTML = companyHtml();
-    else if (S.step === "done") stage.innerHTML = doneHtml();
+    else if (S.step === "done") { stage.innerHTML = doneHtml(); loadDashboardExtras(); }
     else if (S.step === "history") { stage.innerHTML = historyHtml(); loadHistory(); }
     else stage.innerHTML = providerHtml(prov(S.step));
     if (focus) { stage.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
@@ -732,6 +825,17 @@
       return;
     }
 
+    if (e.target.closest("#toggle-pause")) {
+      const nextPaused = !S.customer.customerPaused;
+      if (nextPaused && !confirm("Posting pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht, bis Sie es wieder fortsetzen.")) return;
+      try {
+        applyState(await api("POST", "/api/pause", { paused: nextPaused }));
+        render();
+      } catch (err) {
+        alert(err.message || "Konnte nicht geändert werden.");
+      }
+      return;
+    }
     if (e.target.closest("#delete-account")) {
       const company = S.customer?.company || "Ihr Konto";
       if (!confirm(`"${company}" inkl. aller verbundenen Kanäle und des Beitrags-Verlaufs endgültig löschen? Das kann nicht rückgängig gemacht werden.`)) return;
@@ -932,16 +1036,24 @@
       const isSignup = url === "/api/signup";
       const demoNextPost = new Date(Date.now() + 2 * 86400000).toISOString();
       MOCK.customer = {
-        trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false,
+        trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false, customerPaused: false,
         ...MOCK.customer,
         ...data,
-        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false } : {}),
+        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false, customerPaused: false } : {}),
       };
       return mockState();
     }
     if (url.startsWith("/api/disconnect/")) {
       MOCK.connections = MOCK.connections.filter((c) => c.provider !== url.split("/").pop());
       return mockState();
+    }
+    if (url === "/api/pause") {
+      MOCK.customer = { ...MOCK.customer, customerPaused: body.paused === true, dueNow: body.paused === true ? false : MOCK.customer.dueNow };
+      return mockState();
+    }
+    if (url === "/api/me" && method === "DELETE") {
+      MOCK.customer = null; MOCK.connections = [];
+      return { ok: true };
     }
     if (url === "/api/access-link") return { link: "https://mcp.pipebot.at/panel/login?key=vorschau-beispiel" };
     if (url === "/api/posts") return { posts: MOCK.posts };

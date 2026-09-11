@@ -18,7 +18,7 @@ um zu sehen, wo der Stand ist.
 | 6 | Stil aus Instagram-Posts lernen | ✅ erledigt |
 | 7 | Kanal-/Formateinstellungen | ✅ erledigt |
 | 8 | Onboarding aufwerten | ✅ Code fertig, ⚠️ nicht in echtem Browser getestet (siehe unten) |
-| 9 | Kunden-Dashboard ausbauen | ⏳ offen |
+| 9 | Kunden-Dashboard ausbauen | ✅ Code fertig, ⚠️ nicht in echtem Browser getestet |
 | 10 | Betrieb absichern (Backup/Health) | ✅ erledigt |
 | 11 | Meta App Review Vorbereitung | ✅ erledigt |
 | 12 | Abschluss & Deploy | ⏳ offen |
@@ -403,6 +403,37 @@ noch existiert.
 abarbeiten (App-Icon fehlt noch, Unternehmensverifizierung, echtes Screencast aufnehmen), und
 `DATENSCHUTZ_ENTWURF.md` juristisch prüfen lassen, bevor daraus eine echte, verlinkte
 Datenschutzerklärung wird.
+
+## Aufgabe 9 – Kunden-Dashboard ausbauen ✅ Code / ⚠️ Browser-Test steht aus
+
+**Erledigt:**
+- Neue Spalte `customer_paused` (additive Migration, Default 0). Bewusst **getrennt** von der
+  bestehenden `status`-Spalte (Admin-Sperre aus Aufgabe 3) - ein pausierter Kunde bleibt
+  eingeloggt und sieht sein Dashboard normal weiter, wird nur nicht mehr bepostet.
+  `POST /panel/api/pause` `{paused: true|false}` schaltet um.
+- `dueNow` berücksichtigt die Pause direkt (kein zusätzliches Flag, das die Routine prüfen
+  müsste): `customer_paused ? false : isDue(...)`. Zusätzlich blockt `getCredentials()` als
+  zweite Absicherung auch bei Pause, genau wie bei abgelaufenem Trial.
+- Die bestehende "Fertig"-Seite wurde zum echten Dashboard ausgebaut (gleicher Pipeline-Schritt,
+  keine neue Navigation nötig):
+  - Status-Badge oben (Aktiv / Trial - noch X Tage / Pausiert / Trial abgelaufen).
+  - Auffälliger Hinweis-Kasten nur wenn ein verbundener Kanal Handlungsbedarf hat
+    (abgelaufen/läuft bald ab) mit direktem Link zum erneuten Verbinden.
+  - "Letzte Beiträge" als Bild-Raster (bis zu 9, aus `/api/posts`).
+  - Einfache Monatsansicht: aktueller Monat, Punkt für Tage mit echtem Post, Ring-Punkt für
+    laut Rhythmus (`frequency`) geplante künftige Tage ohne Post - rein clientseitig aus den
+    schon vorhandenen Daten berechnet, keine neue Backend-Route nötig.
+  - Buttons "Stil bearbeiten" (→ Formular), "Kanäle verwalten" (→ erster Kanal-Schritt),
+    "Posting pausieren/fortsetzen" (mit Bestätigungsdialog beim Pausieren).
+- `npm run test:panel` erweitert um den Pause-Roundtrip (`customerPaused`/`dueNow` korrekt
+  umgeschaltet). **41 passed, 0 failed.**
+
+**⚠️ Gleiche Einschränkung wie Aufgabe 8:** kein echter Browser in dieser Sitzung verfügbar
+(Claude-in-Chrome nicht verbunden). Backend-Logik (Pause-Wirkung auf `dueNow`, Datenbank) wurde
+direkt getestet und funktioniert nachweislich; die neue Dashboard-Optik (Statuszeile,
+Bild-Raster, Kalender) nur per Code-Durchsicht und JS-Syntax-Check geprüft, nicht durch
+tatsächliches Anschauen im Browser. Bitte nach dem Deploy `https://mcp.pipebot.at/panel?demo`
+kurz öffnen und die "Fertig"-Seite als eingeloggter Test-Kunde ansehen.
 
 ---
 *(wird fortgesetzt)*

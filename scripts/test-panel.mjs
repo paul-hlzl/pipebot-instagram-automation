@@ -177,6 +177,26 @@ async function main() {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
   }
 
+  // --- 4a. POST /api/pause (customer's own pause toggle) ---
+  console.log("\nPausieren:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/pause`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ paused: true }),
+    });
+    const body = await res.json();
+    ok("Pausieren -> customerPaused true", body.customer?.customerPaused === true);
+    ok("Pausieren -> dueNow wird false", body.customer?.dueNow === false);
+    const resumeRes = await fetch(`${BASE}${MOUNT}/api/pause`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ paused: false }),
+    });
+    const resumeBody = await resumeRes.json();
+    ok("Fortsetzen -> customerPaused false", resumeBody.customer?.customerPaused === false);
+  }
+
   // --- 4b. DELETE /api/me (self-service account deletion) ---
   console.log("\nKonto löschen:");
   {

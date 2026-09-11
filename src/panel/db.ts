@@ -104,6 +104,10 @@ for (const [column, def] of [
   ["hashtag_pref", "TEXT NOT NULL DEFAULT 'wenige'"],
   ["emojis_enabled", "INTEGER NOT NULL DEFAULT 1"],
   ["language", "TEXT NOT NULL DEFAULT 'de'"],
+  // Customer's own pause toggle (dashboard "Pausieren"/"Fortsetzen") - distinct from the
+  // admin's status column: a paused customer can still log in and see their dashboard, they
+  // just stop being posted for until they resume it themselves.
+  ["customer_paused", "INTEGER NOT NULL DEFAULT 0"],
 ] as const) {
   if (!existingColumns.has(column)) {
     db.exec(`ALTER TABLE customers ADD COLUMN ${column} ${def}`);
@@ -132,6 +136,7 @@ export interface CustomerRow {
   hashtag_pref: string;
   emojis_enabled: number;
   language: string;
+  customer_paused: number;
   login_key_hash: string;
   status: string;
   consent_at: string;
