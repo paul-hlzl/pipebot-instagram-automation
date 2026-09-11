@@ -13,7 +13,7 @@ um zu sehen, wo der Stand ist.
 | 1 | Sicherheitsnetz (Tag/Branch/Staging/Testskript) | ✅ erledigt |
 | 2 | Probekonto (Trial) | ✅ erledigt |
 | 3 | Admin-Dashboard | ✅ erledigt |
-| 4 | Posting-Rhythmus (isDue) | ⏳ offen |
+| 4 | Posting-Rhythmus (isDue) | ✅ erledigt (Code) – Routine-Umstellung durch Paul nötig |
 | 5 | "Mit KI verbessern" | ⏳ offen |
 | 6 | Stil aus Instagram-Posts lernen | ⏳ offen |
 | 7 | Kanal-/Formateinstellungen | ⏳ offen |
@@ -148,6 +148,80 @@ um zu sehen, wo der Stand ist.
 
 **Für Paul:** `PANEL_ADMIN_PASSWORD` in `.env` nachsehen für den Admin-Login unter
 `https://mcp.pipebot.at/panel/admin` (erst nach dem finalen Deploy in Aufgabe 12 live).
+
+## Aufgabe 4 – Posting-Rhythmus wirklich wirksam machen ✅ (Code) / ⚠️ Routine-Umstellung nötig
+
+**Erledigt:**
+- Neues Modul `src/panel/schedule.ts` mit `isDue(customer, now)` und `nextPostAt(customer, now)`.
+  Alles in **Europe/Vienna**-Wanduhrzeit berechnet (via `Intl.DateTimeFormat`, korrekt über
+  CET/CEST-Zeitumstellungen hinweg, kein zusätzliches npm-Paket nötig):
+  - `taeglich` = jeden Tag, `werktags` = Mo–Fr, `3x-woche` = Mo/Mi/Fr.
+  - `isDue`: heute ist ein Posting-Tag UND die eingestellte Uhrzeit ist erreicht UND heute
+    wurde noch kein Post für diesen Kunden geloggt (Abgleich gegen die `posts`-Tabelle).
+  - `nextPostAt`: nächster Termin (Tag+Uhrzeit), für den noch kein Post existiert - überspringt
+    also automatisch bereits erledigte Tage.
+  - Mit synthetischen Testfällen gegen Staging verifiziert, inkl. Spezialfall "nach dem
+    heutigen Post springt `nextPostAt` korrekt auf morgen und `isDue` wird `false`".
+- `list_customers` liefert pro Kunde jetzt `dueNow` (boolean) und `nextPostAt` (ISO). Die
+  Tool-Beschreibung weist die Routine explizit an, **nur** für Kunden mit `dueNow: true` zu
+  generieren/veröffentlichen.
+- Panel zeigt "Nächster Beitrag: Mittwoch, 17:00 Uhr" auf der Fertig-Seite (unter "Rhythmus")
+  und als Satz oben im Verlauf-Tab (ausgeblendet, wenn der Trial abgelaufen ist).
+- `npm run test:panel` erweitert um Checks, dass `nextPostAt`/`dueNow` im Signup-Response
+  vorhanden und plausibel sind. **30 passed, 0 failed.**
+
+**Bekannte, bewusst akzeptierte Einschränkung:** `nextPostAt` verwendet für jeden Kandidatentag
+den Vienna-UTC-Offset an dessen lokalem Mittag - das ist über eine ganze 14-Tage-Vorschau hinweg
+korrekt, mit einer theoretischen Ungenauigkeit von bis zu 1h nur für Slots, die exakt in der
+Umstellungsnacht selbst liegen (letztes Wochenende im März/Oktober, 1-3 Uhr) - für eine reine
+Anzeige unkritisch.
+
+**⚠️ Wichtig – das kann ich nicht selbst ändern:** Die tägliche Cloud-Routine (läuft aktuell
+1×/Tag ca. 15:00 UTC) ruft `list_customers` auf und postet vermutlich für alle Kunden auf
+einmal, unabhängig vom eingestellten Rhythmus/Uhrzeit. Damit `dueNow`/`nextPostAt` tatsächlich
+etwas bewirken, muss die Routine selbst umgestellt werden: **stündlich laufen** und **nur
+Kunden mit `dueNow: true` bearbeiten**. Das kannst nur du auf claude.ai ändern. Fertiger
+Prompt-Text dafür ganz unten in diesem Bericht (Abschnitt "Routine-Prompt-Text").
+
+**Für Paul:** Cloud-Routine auf stündlichen Rhythmus umstellen und den neuen Prompt-Text
+(siehe unten) einfügen - sonst bleibt die Rhythmus-Einstellung im Panel wirkungslos.
+
+---
+
+## Routine-Prompt-Text (für claude.ai einfügen)
+
+Dieser Abschnitt wird während der Sitzung weiter ergänzt (Aufgabe 6 fügt einen Absatz zum
+Stil-Lernen hinzu) und am Ende noch einmal als Ganzes im Abschlussbericht wiederholt.
+
+**Zeitplan der Routine:** von 1×/Tag (~15:00 UTC) auf **stündlich** umstellen (z. B. `0 * * * *`
+UTC), damit für jeden Kunden möglichst nah an seiner eingestellten `postTime` gepostet wird -
+`dueNow` verhindert Mehrfach-Posts an Tagen, an denen schon veröffentlicht wurde.
+
+```
+Du bist die automatische Posting-Routine von Pipeline. Du läufst stündlich. Bei jedem Lauf:
+
+1. Rufe `list_customers` auf.
+2. Gehe jeden Kunden einzeln durch. Überspringe einen Kunden sofort (kein Tool-Aufruf für ihn),
+   wenn `trialExpired` true ist ODER `dueNow` false ist. Nur Kunden mit `dueNow: true` und
+   `trialExpired: false` werden in diesem Lauf bearbeitet.
+3. Für jeden fälligen Kunden:
+   a. Formuliere ein Thema und eine kurze, prägnante Headline (2-4 Wörter) passend zu seinem
+      Briefing (`about`, `industry`, `tone`, `avoidTopics`, `ctaPreference`).
+   b. Erzeuge das Bild mit `generate_post_image` (customer_id angeben) und prüfe kurz, ob der
+      Hintergrund sauber aussieht (keine Artefakte, keine unerwünschten Texte/Icons).
+   c. Veröffentliche mit `publish_generated_post` (customer_id angeben, Caption passend zum
+      Tonfall und `ctaPreference` des Kunden, inkl. sinnvoller Hashtags/Emojis nur wenn zum
+      Ton passend).
+   d. Wiederhole das für jeden Kanal, den der Kunde verbunden hat (`channels`), sofern für
+      LinkedIn ein eigenes Text-Tool nötig ist statt eines Bild-Posts.
+4. Poste NIE für einen Kunden mit `trialExpired: true` oder `dueNow: false` - auch nicht
+   "vorsorglich" oder weil gerade sonst nichts zu tun ist.
+5. Bei einem Fehler für einen Kunden (z. B. abgelaufene Verbindung): den Kunden überspringen,
+   kurz notieren welcher Fehler auftrat, und mit dem nächsten Kunden weitermachen - ein
+   einzelner fehlerhafter Kunde darf den Lauf für alle anderen nicht abbrechen.
+```
+
+*(wird nach Aufgabe 6 um einen Absatz zu `get_customer_style_samples` ergänzt - siehe dort.)*
 
 ---
 *(wird fortgesetzt)*

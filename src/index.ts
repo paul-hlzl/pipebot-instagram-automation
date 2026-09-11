@@ -582,6 +582,11 @@ function createServer(): McpServer {
         "customer has no trial limit). SKIP any customer with `trialExpired: true` - do not generate or " +
         "publish a post for them; the publish tools will also refuse with an error for these customers as " +
         "a backstop, but check `trialExpired` first so you don't waste a generation call. " +
+        "Each customer also has `dueNow` (boolean, Europe/Vienna time: true only when today is one of " +
+        "their posting days per `frequency`, their `postTime` has passed, and nothing has been posted for " +
+        "them yet today) and `nextPostAt` (ISO timestamp of their next planned slot). Only generate/publish " +
+        "for a customer when `dueNow` is true - do not post for customers where it is false, even if you " +
+        "are running anyway; that is what makes each customer's own posting rhythm actually work. " +
         "Never includes access tokens. Use a customer's `customerId` as the `customer_id` argument on the " +
         "publish/generate tools to act on that customer's account instead of your own.",
     },

@@ -108,6 +108,8 @@ async function main() {
       `trialDaysLeft=${body.customer?.trialDaysLeft}`,
     );
     ok("trialExpired ist false fuer neuen Kunden", body.customer?.trialExpired === false);
+    ok("nextPostAt ist ein gueltiges ISO-Datum", !Number.isNaN(Date.parse(body.customer?.nextPostAt ?? "")), `nextPostAt=${body.customer?.nextPostAt}`);
+    ok("dueNow ist ein boolean", typeof body.customer?.dueNow === "boolean");
   }
 
   // --- 3. /api/me ---

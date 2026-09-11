@@ -249,6 +249,13 @@
   const prov = (id) => S.providers.find((p) => p.id === id);
   const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "history"];
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
+  const fmtNextPost = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const weekday = d.toLocaleDateString("de-AT", { weekday: "long", timeZone: "Europe/Vienna" });
+    const time = d.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+    return `${weekday}, ${time} Uhr`;
+  };
 
   /* ================= API ================= */
   async function api(method, url, body) {
@@ -444,6 +451,7 @@
           return `<div><dt>${esc(p.name)}</dt><dd>${k ? esc(k.accountName) + (k.status === "expired" ? " (abgelaufen)" : "") : `<button class="link" data-go="${p.id}">Jetzt verbinden</button>`}</dd></div>`;
         }).join("")}
         <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
+        ${c.nextPostAt && !c.trialExpired ? `<div><dt>Nächster Beitrag</dt><dd>${esc(fmtNextPost(c.nextPostAt))}</dd></div>` : ""}
         <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
         <div><dt>Bild-Akzentfarbe</dt><dd>${c.accentColor ? `<span style="display:inline-block;width:14px;height:14px;background:${esc(c.accentColor)};vertical-align:middle;margin-right:8px;border:1px solid var(--rule)"></span>${esc(c.accentColor)}` : "Standard"}</dd></div>
         <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
@@ -464,10 +472,11 @@
   const PLATFORM_LABEL = (p) => prov(p)?.name || p;
 
   function historyHtml() {
+    const c = S.customer;
     return `
       ${bannerHtml()}
       <h1>Ihre bisherigen Beiträge</h1>
-      <p class="lede">Hier sehen Sie, was in Ihrem Namen veröffentlicht wurde.</p>
+      <p class="lede">Hier sehen Sie, was in Ihrem Namen veröffentlicht wurde.${c.nextPostAt && !c.trialExpired ? ` Nächster Beitrag: ${esc(fmtNextPost(c.nextPostAt))}.` : ""}</p>
       <div id="historylist"><p class="empty">Wird geladen …</p></div>
       <div class="actions">
         <button class="btn" data-go="done">Zurück zur Übersicht</button>
@@ -698,11 +707,12 @@
     if (url === "/api/signup" || (url === "/api/me" && method === "PATCH")) {
       const { consent, ...data } = body;
       const isSignup = url === "/api/signup";
+      const demoNextPost = new Date(Date.now() + 2 * 86400000).toISOString();
       MOCK.customer = {
-        trialDaysLeft: 7, trialExpired: false,
+        trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false,
         ...MOCK.customer,
         ...data,
-        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false } : {}),
+        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false } : {}),
       };
       return mockState();
     }

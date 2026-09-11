@@ -7,6 +7,7 @@ import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
+import { isDue, nextPostAt } from "./schedule.js";
 
 const DAY = 86_400_000;
 
@@ -59,6 +60,10 @@ export interface CustomerOverview {
   trialExpired: boolean;
   /** Whole days left in the trial (0 once expired), or null when trialEndsAt is unset (unlimited / pre-trial customer). */
   trialDaysLeft: number | null;
+  /** True right now (Europe/Vienna) if today is a posting day, postTime has passed, and nothing has been posted yet today. */
+  dueNow: boolean;
+  /** ISO timestamp of this customer's next planned (not yet posted) slot per their frequency/postTime. */
+  nextPostAt: string;
   channels: ChannelOverview[];
 }
 
@@ -90,6 +95,8 @@ function overview(c: CustomerRow): CustomerOverview {
     trialEndsAt: c.trial_ends_at,
     trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
     trialDaysLeft: trialDaysLeft(c.trial_ends_at),
+    dueNow: isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
     channels: channelsFor(c.id),
   };
 }

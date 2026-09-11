@@ -6,6 +6,7 @@ import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
 import { connectionStatus, isTrialExpired, listPostsForCustomer, trialDaysLeft } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
+import { isDue, nextPostAt } from "./schedule.js";
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
 const COOKIE = "pp_session";
@@ -116,6 +117,8 @@ function publicState(c: CustomerRow) {
       trialEndsAt: c.trial_ends_at,
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
+      nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      dueNow: isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
