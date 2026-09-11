@@ -6,9 +6,9 @@ import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
 import { providers, getProvider } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
-import { connectionStatus, isTrialExpired, listContentPillars, listPostsForCustomer, setContentPillars, trialDaysLeft } from "./credentials.js";
+import { connectionStatus, isTrialExpired, listContentPillars, listPostsForCustomer, scheduleInputFor, setContentPillars, trialDaysLeft } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
-import { isDue, nextPostAt } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt } from "./schedule.js";
 import { anthropicAvailable, improveBriefing } from "../anthropic.js";
 
 const VERSION: string = (() => {
@@ -93,6 +93,18 @@ interface BriefingInput {
   igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
   hashtagPreference: string; emojisEnabled: boolean; language: string;
   contentPillars: { title: string; description?: string; weight?: number }[];
+  activeWeekdays: string; instagramWeekdays: string; linkedinWeekdays: string;
+  pauseFrom: string; pauseUntil: string;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Normalizes a "1,3,5"-style weekday list: valid digits 1-7 only, deduplicated, sorted - empty string if nothing usable survives. */
+function cleanWeekdayList(raw: unknown, max: number): string {
+  const s = str(raw, max);
+  if (!s) return "";
+  const days = [...new Set(s.split(",").map((d) => Number(d.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7))].sort((a, b) => a - b);
+  return days.join(",");
 }
 
 /** Content pillars come from the JSON body as an array - validate shape defensively, drop anything malformed instead of erroring the whole save. */
@@ -133,8 +145,20 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     emojisEnabled: bool(body.emojisEnabled, true),
     language: str(body.language, 5) || "de",
     contentPillars: parsePillarsInput(body.contentPillars),
+    activeWeekdays: cleanWeekdayList(body.activeWeekdays, 20),
+    instagramWeekdays: cleanWeekdayList(body.instagramWeekdays, 20),
+    linkedinWeekdays: cleanWeekdayList(body.linkedinWeekdays, 20),
+    pauseFrom: str(body.pauseFrom, 10),
+    pauseUntil: str(body.pauseUntil, 10),
   };
   const errors: Record<string, string> = {};
+  if (data.pauseFrom && !ISO_DATE.test(data.pauseFrom)) data.pauseFrom = "";
+  if (data.pauseUntil && !ISO_DATE.test(data.pauseUntil)) data.pauseUntil = "";
+  // A pause end before its start makes no sense - drop both rather than silently misbehaving.
+  if (data.pauseFrom && data.pauseUntil && data.pauseUntil < data.pauseFrom) {
+    data.pauseFrom = "";
+    data.pauseUntil = "";
+  }
   if (!data.company) errors.company = "Bitte geben Sie Ihren Firmennamen ein.";
   if (!data.contactName) errors.contactName = "Bitte geben Sie Ihren Namen ein.";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email)) errors.email = "Bitte geben Sie eine gültige E-Mail-Adresse ein.";
@@ -161,8 +185,12 @@ function publicState(c: CustomerRow) {
       trialEndsAt: c.trial_ends_at,
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
-      nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
-      dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+      nextPostAt: nextPostAt(scheduleInputFor(c)),
+      dueNow: c.customer_paused ? false : isDue(scheduleInputFor(c)),
+      instagramDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
+      linkedinDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
+      activeWeekdays: c.active_weekdays, instagramWeekdays: c.instagram_weekdays, linkedinWeekdays: c.linkedin_weekdays,
+      pauseFrom: c.pause_from, pauseUntil: c.pause_until,
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
@@ -298,12 +326,14 @@ export function createPanelRouter(): Router {
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
          ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements,
+         active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until,
          login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null,
       sha256(randomToken()), now, now, now);
     setContentPillars(id, data.contentPillars);
     startSession(res, id);
@@ -326,12 +356,14 @@ export function createPanelRouter(): Router {
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
-         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?, updated_at=?
+         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
+         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null,
       nowIso(), c.id);
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));

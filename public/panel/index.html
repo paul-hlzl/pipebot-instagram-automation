@@ -137,6 +137,8 @@
   .seg span:hover { border-color: var(--ink); }
   .seg input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .seg.wd span { padding: 10px 4px; font-size: 13.5px; }
+  @media (max-width: 480px) { .seg.wd { flex-wrap: wrap; } .seg.wd label { flex: 1 1 40px; } }
   .check { display: grid; grid-template-columns: 22px 1fr; gap: 12px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; }
   .check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--ink); }
 
@@ -273,6 +275,21 @@
 
   const TONES = { sachlich: "Sachlich und kompetent", locker: "Locker und nahbar", inspirierend: "Inspirierend", humorvoll: "Mit Humor" };
   const FREQ = { "3x-woche": "3× pro Woche", werktags: "Werktags", taeglich: "Täglich" };
+  const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+  const FREQ_WEEKDAYS = { "3x-woche": [1, 3, 5], werktags: [1, 2, 3, 4, 5], taeglich: [1, 2, 3, 4, 5, 6, 7] };
+  // Pre-fills the weekday picker from an explicit "1,3,5"-style value if the customer already
+  // has one, otherwise derives it from the legacy `frequency` radio choice - so the old and new
+  // controls are never shown/edited at the same time, only one replaces the other on load.
+  const weekdaysFor = (explicit, frequency) => {
+    if (explicit) return explicit.split(",").map(Number).filter((n) => n >= 1 && n <= 7);
+    return FREQ_WEEKDAYS[frequency] || FREQ_WEEKDAYS.werktags;
+  };
+  const classifyFrequency = (days) => {
+    const key = [...days].sort((a, b) => a - b).join(",");
+    if (key === "1,2,3,4,5,6,7") return "taeglich";
+    if (key === "1,3,5") return "3x-woche";
+    return "werktags";
+  };
   const CTAS = { link_bio: "Link in der Bio", anrufen: "Anrufen", nachricht: "Nachricht senden", termin: "Termin buchen", keiner: "Kein Aufruf" };
   const HASHTAGS = { keine: "Keine", wenige: "Wenige (2-3)", viele: "Viele (5+)" };
   const LANGUAGES = { de: "Deutsch", en: "Englisch" };
@@ -452,15 +469,28 @@
             </div>
           </div>
         </div>
+        <fieldset class="field">
+          <legend>An welchen Tagen posten - Instagram?</legend>
+          <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+        </fieldset>
+        <fieldset class="field">
+          <legend>An welchen Tagen posten - LinkedIn?</legend>
+          <div class="seg wd" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+        </fieldset>
         <div class="grid2">
-          <fieldset class="field">
-            <legend>Wie oft posten?</legend>
-            <div class="seg">${Object.entries(FREQ).map(([k, v]) => `<label><input type="radio" name="frequency" value="${k}" ${c.frequency === k ? "checked" : ""}><span>${v}</span></label>`).join("")}</div>
-          </fieldset>
           <div class="field">
             <label for="f-postTime">Um wie viel Uhr?</label>
             <input id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900">
           </div>
+          <div class="field">
+            <label for="f-pauseFrom">Pause/Urlaub von <span class="opt">(optional)</span></label>
+            <input id="f-pauseFrom" name="pauseFrom" type="date" value="${esc(c.pauseFrom || "")}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-pauseUntil">Pause/Urlaub bis <span class="opt">(optional)</span></label>
+          <input id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}">
+          <p class="hint">In diesem Zeitraum wird für Sie nichts veröffentlicht.</p>
         </div>
         <div class="grid2">
           <div class="field">
@@ -977,6 +1007,12 @@
     body.emojisEnabled = !!form.emojisEnabled?.checked;
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
+    const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
+    const liDays = Array.from(form.querySelectorAll('[data-weekday-channel="linkedin"] input:checked')).map((el) => Number(el.value));
+    body.instagramWeekdays = igDays.join(",");
+    body.linkedinWeekdays = liDays.join(",");
+    body.activeWeekdays = body.instagramWeekdays;
+    body.frequency = classifyFrequency(igDays.length ? igDays : [1, 2, 3, 4, 5]);
 
     form.querySelectorAll(".err").forEach((n) => n.remove());
     form.querySelectorAll("[aria-invalid]").forEach((n) => n.removeAttribute("aria-invalid"));

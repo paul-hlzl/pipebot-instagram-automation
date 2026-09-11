@@ -14,7 +14,7 @@ Dieser Bericht wird nach JEDER Aufgabe aktualisiert.
 | 2 | Content-Säulen | ✅ erledigt |
 | 3 | Wortverbote (hart) | ✅ erledigt |
 | 4 | Pflicht-Elemente | ✅ erledigt |
-| 5 | Granulare Zeitplanung | ⏳ offen |
+| 5 | Granulare Zeitplanung | ✅ Code fertig, ⚠️ Weekday-Picker nicht im Browser getestet |
 | 6 | "Jetzt posten"-Button | ⏳ offen |
 | 7 | Freigabe-Modus | ⏳ offen |
 | 8 | Mehrere Farbthemen | ⏳ offen |
@@ -118,6 +118,58 @@ siehe Routine-Prompt-Text weiter unten bzw. im Abschlussbericht.
 - `npm run test:panel` erweitert. **46 passed, 0 failed.**
 
 **Für Paul:** nichts zu tun.
+
+## Aufgabe 5 – Granulare Zeitplanung ✅ Code / ⚠️ Browser-Test steht aus
+
+**Erledigt:**
+- Neue Spalten `active_weekdays`, `instagram_weekdays`, `linkedin_weekdays` (alle TEXT,
+  "1,3,5"-Format, 1=Montag..7=Sonntag), `pause_from`/`pause_until` (TEXT, ISO-Datum). Additiv,
+  alle nullable/opt-in.
+- `schedule.ts` überarbeitet - **bewusst zwei getrennte API-Ebenen**, um einen echten Bug zu
+  vermeiden (siehe unten):
+  - `isDue`/`nextPostAt` (unverändertes v3-Signatur, "pro Gesamtkunde"): nutzen weiterhin
+    `activeWeekdays` (Fallback `frequency`) und einen kanal-**übergreifenden** "heute schon
+    gepostet"-Check - Verhalten 1:1 identisch zu v3, jetzt zusätzlich durch `pauseFrom`/
+    `pauseUntil` gesperrt.
+  - Neue `isDueForChannel`/`nextPostAtForChannel`: nutzen `instagramWeekdays`/
+    `linkedinWeekdays` (Fallback `activeWeekdays`/`frequency`) und einen kanal-**spezifischen**
+    "heute schon gepostet"-Check.
+  - **Bug beim Entwerfen gefunden und vermieden:** Ein naiver kombinierter `dueNow` als
+    "Instagram ODER LinkedIn fällig" hätte für Kunden mit nur einem aktiven Kanal dazu geführt,
+    dass `dueNow` **dauerhaft `true`** bleibt (der nie genutzte zweite Kanal hat ja nie einen
+    Post und sieht deshalb ewig "fällig" aus) - eine alte, kanal-unwissende Routine hätte dann
+    an einem bereits erledigten Tag ein zweites Mal gepostet. Deshalb bleibt `dueNow` bewusst
+    bei der alten, kanalübergreifenden Logik.
+  - Mit echten Szenarien gegen Staging verifiziert: reine Rückwärtskompatibilität (kein
+    v4-Feld gesetzt → identisch zu v3), Pause-Zeitraum blockt `isDue` und verschiebt
+    `nextPostAt` korrekt auf danach, unterschiedliche Wochentage pro Kanal wirken unabhängig,
+    und ein Post auf Instagram markiert **nicht** fälschlich auch LinkedIn als erledigt
+    (während der kombinierte `dueNow` korrekt auf `false` fällt, wie bisher).
+- `list_customers`/`GET /api/me` liefern weiterhin `dueNow`/`nextPostAt` (Gesamtkunde,
+  unverändert) und zusätzlich `instagramDueNow`/`linkedinDueNow`, plus die rohen
+  Zeitplan-Felder zum Bearbeiten im Formular.
+- Panel: Die 3 Frequenz-Radiobuttons sind **ersetzt** durch zwei 7-Tage-Picker ("Mo"-"So",
+  einzeln an/aus), einer für Instagram, einer für LinkedIn - beim ersten Öffnen aus der alten
+  `frequency`/Radiobutton-Logik vorbefüllt (z. B. "werktags" → Mo-Fr angehakt), danach ist nur
+  noch der Picker sichtbar, nie beides gleichzeitig. Zwei Datumsfelder "Pause/Urlaub von/bis".
+  Beim Speichern wird zusätzlich weiterhin ein `frequency`-Wert mitgeschickt (aus dem
+  Instagram-Picker zurück-klassifiziert: alle 7 Tage → "taeglich", Mo-Fr → "werktags", Mo/Mi/Fr
+  → "3x-woche", sonst "werktags") - rein für Altsysteme, die nur `frequency` kennen.
+- `npm run test:panel` erweitert (Zeitplan-Felder-Roundtrip). **Beim Erweitern einen echten
+  Bug im Testskript selbst gefunden und behoben:** die neuen Content-Säulen- und
+  Zeitplan-Tests legten ursprünglich jeweils einen eigenen Kunden per Signup an - zusammen mit
+  den bestehenden Signup-Tests kam das auf 6 Signup-Versuche pro Testlauf, mehr als das
+  5/Stunde-Rate-Limit erlaubt, wodurch der spätere Kontolöschen-Test mit 401 statt 400/200
+  fehlschlug. Fix: die neuen Tests nutzen jetzt `PATCH /api/me` auf den schon vorhandenen
+  Test-Kunden statt eigener Signups (spart Rate-Limit-Budget, realistischer ohnehin - ein
+  Kunde bearbeitet diese Felder nach dem Signup). **51 passed, 0 failed.**
+
+**⚠️ Gleiche Einschränkung wie die bisherigen v3-UI-Aufgaben:** kein echter Browser in dieser
+Sitzung verfügbar. Die Wochentage-Picker-Logik (Vorbefüllung aus `frequency`, Auslesen beim
+Speichern, `classifyFrequency`-Rückübersetzung) wurde per Code-Durchsicht, JS-Syntax-Check und
+HTTP-Ebenen-Tests geprüft, aber nie tatsächlich angeklickt.
+
+**Für Paul:** nichts zu tun, außer dem Browser-Check am Ende der Sitzung.
 
 ---
 *(wird fortgesetzt)*

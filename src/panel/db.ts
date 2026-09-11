@@ -134,6 +134,13 @@ migrateColumns("customers", [
   // Hard-enforced, comma-separated - every element must appear somewhere across the
   // headline/caption texts of a post, or publishing is refused. NULL/empty = no requirement.
   ["required_elements", "TEXT"],
+  // Granular scheduling (v4) - all nullable/opt-in. NULL active_weekdays means "derive from
+  // frequency" exactly as before; NULL instagram/linkedin_weekdays means "use active_weekdays".
+  ["active_weekdays", "TEXT"],
+  ["instagram_weekdays", "TEXT"],
+  ["linkedin_weekdays", "TEXT"],
+  ["pause_from", "TEXT"],
+  ["pause_until", "TEXT"],
 ]);
 
 migrateColumns("posts", [
@@ -168,6 +175,11 @@ export interface CustomerRow {
   customer_paused: number;
   banned_words: string | null;
   required_elements: string | null;
+  active_weekdays: string | null;
+  instagram_weekdays: string | null;
+  linkedin_weekdays: string | null;
+  pause_from: string | null;
+  pause_until: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;

@@ -7,7 +7,7 @@ import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
-import { isDue, nextPostAt } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, type ScheduleInput } from "./schedule.js";
 
 const DAY = 86_400_000;
 
@@ -68,6 +68,12 @@ export interface CustomerOverview {
   dueNow: boolean;
   /** ISO timestamp of this customer's next planned (not yet posted) slot per their frequency/postTime. */
   nextPostAt: string;
+  /** Per-channel due-ness, respecting instagramWeekdays/linkedinWeekdays when set - use these instead of `dueNow` once acting per channel. */
+  instagramDueNow: boolean;
+  linkedinDueNow: boolean;
+  /** Vacation/pause range (Vienna dates, inclusive) - nothing is due for either channel while "now" falls inside it. */
+  pauseFrom: string | null;
+  pauseUntil: string | null;
   /** Channel/format toggles - publish tools refuse to post when the relevant one is false. */
   igFeedEnabled: boolean;
   igStoryEnabled: boolean;
@@ -96,6 +102,19 @@ function channelsFor(customerId: string): ChannelOverview[] {
   }));
 }
 
+export function scheduleInputFor(c: CustomerRow): ScheduleInput {
+  return {
+    customerId: c.id,
+    frequency: c.frequency,
+    postTime: c.post_time,
+    activeWeekdays: c.active_weekdays,
+    instagramWeekdays: c.instagram_weekdays,
+    linkedinWeekdays: c.linkedin_weekdays,
+    pauseFrom: c.pause_from,
+    pauseUntil: c.pause_until,
+  };
+}
+
 function overview(c: CustomerRow): CustomerOverview {
   return {
     customerId: c.id,
@@ -117,8 +136,12 @@ function overview(c: CustomerRow): CustomerOverview {
     trialDaysLeft: trialDaysLeft(c.trial_ends_at),
     // A customer who paused themselves is never "due", same effect as an unmet schedule -
     // the routine doesn't need a separate flag to remember to check.
-    dueNow: c.customer_paused ? false : isDue({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
-    nextPostAt: nextPostAt({ customerId: c.id, frequency: c.frequency, postTime: c.post_time }),
+    dueNow: c.customer_paused ? false : isDue(scheduleInputFor(c)),
+    nextPostAt: nextPostAt(scheduleInputFor(c)),
+    instagramDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
+    linkedinDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
+    pauseFrom: c.pause_from,
+    pauseUntil: c.pause_until,
     igFeedEnabled: Boolean(c.ig_feed_enabled),
     igStoryEnabled: Boolean(c.ig_story_enabled),
     linkedinEnabled: Boolean(c.linkedin_enabled),

@@ -178,15 +178,15 @@ async function main() {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
   }
 
-  // --- 3b. Content-Saeulen (v4) ---
+  // --- 3b. Content-Saeulen (v4) --- reuses the main test customer's session via PATCH
+  // (not a fresh signup) so these extra checks don't eat into the 5/hour signup rate limit.
   console.log("\nContent-Saeulen:");
   {
-    const email = `pillars-${Date.now()}@example.invalid`;
-    const res = await fetch(`${BASE}${MOUNT}/api/signup`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+    const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
       body: JSON.stringify({
-        consent: true, company: "Pillars GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
         contentPillars: [
           { title: "Tipps", description: "Praktische Ratschläge", weight: 3 },
           { title: "Hinter den Kulissen", weight: 1 },
@@ -202,28 +202,38 @@ async function main() {
     const pillars = body.customer?.contentPillars ?? [];
     ok("2 gueltige Saeulen gespeichert (leerer Titel verworfen)", pillars.length === 2, `got ${pillars.length}`);
     ok("erste Saeule korrekt", pillars[0]?.title === "Tipps" && pillars[0]?.weight === 3, JSON.stringify(pillars[0]));
-    const pillarCookie = cookieHeader(res.headers.get("set-cookie"));
 
-    // Ueberschreiben (replace-all) via PATCH
+    // Ueberschreiben (replace-all) via zweites PATCH
     const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
       method: "PATCH",
-      headers: { "content-type": "application/json", cookie: pillarCookie },
+      headers: { "content-type": "application/json", cookie: sessionCookie },
       body: JSON.stringify({
-        company: "Pillars GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
         contentPillars: [{ title: "Nur noch eine", weight: 1 }],
       }),
     });
     const patchBody = await patchRes.json();
     ok("PATCH ersetzt Saeulen komplett", patchBody.customer?.contentPillars?.length === 1 && patchBody.customer.contentPillars[0].title === "Nur noch eine", JSON.stringify(patchBody.customer?.contentPillars));
+  }
 
-    try {
-      const { default: Database } = await import("better-sqlite3");
-      const db = new Database(STAGING_DB);
-      const row = db.prepare("SELECT id FROM customers WHERE email = ?").get(email);
-      if (row) db.prepare("DELETE FROM customers WHERE id = ?").run(row.id);
-    } catch (e) {
-      console.log(`  (Cleanup fehlgeschlagen: ${e.message})`);
-    }
+  // --- 3c. Granulare Zeitplanung (v4) --- ebenfalls per PATCH auf denselben Testkunden.
+  console.log("\nGranulare Zeitplanung:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        instagramWeekdays: "1,3,5", linkedinWeekdays: "2,4",
+        pauseFrom: "2099-01-01", pauseUntil: "2099-01-10", // weit in der Zukunft, beeinflusst "jetzt" nicht
+      }),
+    });
+    const body = await res.json();
+    ok("instagramWeekdays gespeichert", body.customer?.instagramWeekdays === "1,3,5", body.customer?.instagramWeekdays);
+    ok("linkedinWeekdays gespeichert", body.customer?.linkedinWeekdays === "2,4", body.customer?.linkedinWeekdays);
+    ok("pauseFrom/pauseUntil gespeichert", body.customer?.pauseFrom === "2099-01-01" && body.customer?.pauseUntil === "2099-01-10");
+    ok("instagramDueNow ist ein boolean", typeof body.customer?.instagramDueNow === "boolean");
+    ok("linkedinDueNow ist ein boolean", typeof body.customer?.linkedinDueNow === "boolean");
   }
 
   // --- 4a. POST /api/pause (customer's own pause toggle) ---
