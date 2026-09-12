@@ -168,4 +168,23 @@ explizit geprüft statt unverändert übernommen, wie gefordert.
 
 ## Deploy-Status Aufgabe 2
 
-(wird nach dem Produktions-Deploy dieses Abschnitts aktualisiert)
+**Deployed.** `panel-v6` in `main` gemerged (`--no-ff`, Commit `8c56f76`), gepusht, Produktion
+(`pm2 restart instagram-mcp --update-env`) um ca. 2026-09-12 08:24 UTC neu gestartet - außerhalb
+des 14:30-15:45-UTC-Blackouts, mit Abstand zum naechsten stuendlichen Routinen-Lauf (08:43).
+
+Vor dem Neustart: Backup `backups/panel/panel-2026-09-12.db`.
+
+Nach dem Neustart geprüft (alles grün):
+- `/health` -> 200, `/mcp` ohne Bearer -> 401 (unverändert), `/panel/api/health` -> 200
+- `/panel/api/providers` liefert `turnstileSiteKey: null` (CAPTCHA korrekt aus, wie erwartet ohne
+  eingetragene Keys)
+- Log sauber, keine neuen Fehler (nur bekannte, unveränderte LinkedIn-/Pillar-Warnungen aus dem
+  laufenden Betrieb)
+- Echte Produktions-DB direkt (read-only) geprüft: alle 3 echten Kunden (Andrea Hölzl,
+  Testunternehmen, Johannes Reiter) haben `email_verified=1` - Migration hat in Produktion
+  genauso funktioniert wie zuvor gegen die Kopie verifiziert.
+
+Rollback-Bereitschaft: Tag `pre-panel-v6` (Code-Stand vor dieser Sitzung) und das DB-Backup von
+eben vorhanden. Rollback wäre: `git revert` des Merge-Commits `8c56f76` + `npm run build` + `pm2
+restart instagram-mcp` (die Migration selbst ist additiv/idempotent, ein Rollback des Codes muss
+die DB-Spalten nicht zurückrollen - sie werden einfach nicht mehr gelesen/geschrieben).
