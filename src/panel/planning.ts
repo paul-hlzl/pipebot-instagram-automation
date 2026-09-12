@@ -138,6 +138,10 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
     customersChecked++;
     if (row.customer_paused) continue;
     if (row.trial_ends_at && new Date(row.trial_ends_at).getTime() < Date.now()) continue;
+    // Panel v6 Aufgabe 2b: kein einziger Anthropic-/fal.ai-Aufruf fuer einen Kunden, der seine
+    // E-Mail-Adresse noch nicht bestaetigt hat - schliesst genau die Luecke, die diese Aufgabe
+    // beheben sollte (Signup mit Wegwerf-Adresse, nie wiedergekommen, kostet trotzdem jede Nacht).
+    if (!row.email_verified) continue;
 
     const scheduleInput = scheduleInputFor(row);
     const pillars = listContentPillars(row.id);

@@ -139,6 +139,12 @@ function overview(c: CustomerRow): CustomerOverview {
   // Theme-resolved, not the raw columns - a customer with an active saved theme should
   // generate images with that theme's color/watermark, not their old plain fields.
   const branding = effectiveBranding(c);
+  // Panel v6 Aufgabe 2b: an unverified customer must never look "due" to the K1-K9 routine
+  // (list_customers is what it reads) - otherwise K3's fallback would still spontaneously
+  // generate (and pay for) a post for them via K4-K8 even though planning.ts already skips
+  // them, since the routine's prompt itself is off-limits to edit this session (rule 7). Same
+  // mechanism already used for customer_paused, just extended - no routine-prompt change needed.
+  const notReady = Boolean(c.customer_paused) || !c.email_verified;
   return {
     customerId: c.id,
     company: c.company,
@@ -159,10 +165,10 @@ function overview(c: CustomerRow): CustomerOverview {
     trialDaysLeft: trialDaysLeft(c.trial_ends_at),
     // A customer who paused themselves is never "due", same effect as an unmet schedule -
     // the routine doesn't need a separate flag to remember to check.
-    dueNow: c.customer_paused ? false : isDue(scheduleInputFor(c)),
+    dueNow: notReady ? false : isDue(scheduleInputFor(c)),
     nextPostAt: nextPostAt(scheduleInputFor(c)),
-    instagramDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
-    linkedinDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
+    instagramDueNow: notReady ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
+    linkedinDueNow: notReady ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
     pauseFrom: c.pause_from,
     pauseUntil: c.pause_until,
     igFeedEnabled: Boolean(c.ig_feed_enabled),

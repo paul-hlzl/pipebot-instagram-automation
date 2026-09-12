@@ -41,6 +41,9 @@ import {
 } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
+import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
+import { sendMailBestEffort } from "./mailer.js";
+import { verificationEmail } from "./emails.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, improveBriefing, suggestPillarsWithSearch, suggestTopics } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
@@ -65,6 +68,9 @@ const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
 const HASHTAG_PREFS = ["keine", "wenige", "viele"];
 const LANGUAGES = ["de", "en"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+// Panel v6 Aufgabe 2b: einheitliche Meldung ueberall dort, wo ein angemeldeter, aber noch nicht
+// bestaetigter Kunde einen KI-/kostenpflichtigen Endpunkt aufruft.
+const EMAIL_NOT_VERIFIED_MSG = "Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse.";
 
 /** Trial length for newly signed-up customers. Existing customers are never retroactively limited. */
 function trialDays(): number {
@@ -225,12 +231,13 @@ function publicState(c: CustomerRow) {
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
       nextPostAt: nextPostAt(scheduleInputFor(c)),
-      dueNow: c.customer_paused ? false : isDue(scheduleInputFor(c)),
-      instagramDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
-      linkedinDueNow: c.customer_paused ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
+      dueNow: (c.customer_paused || !c.email_verified) ? false : isDue(scheduleInputFor(c)),
+      instagramDueNow: (c.customer_paused || !c.email_verified) ? false : isDueForChannel(scheduleInputFor(c), "instagram"),
+      linkedinDueNow: (c.customer_paused || !c.email_verified) ? false : isDueForChannel(scheduleInputFor(c), "linkedin"),
       activeWeekdays: c.active_weekdays, instagramWeekdays: c.instagram_weekdays, linkedinWeekdays: c.linkedin_weekdays,
       pauseFrom: c.pause_from, pauseUntil: c.pause_until,
       approvalMode: Boolean(c.approval_mode),
+      emailVerified: Boolean(c.email_verified),
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
@@ -281,7 +288,7 @@ export function createPanelRouter(): Router {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-ancestors 'none'; form-action 'self'`,
+      `default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'`,
     );
     next();
   });
@@ -390,6 +397,7 @@ export function createPanelRouter(): Router {
       })),
       aiAvailable: anthropicAvailable(),
       trialDays: trialDays(),
+      turnstileSiteKey: turnstileSiteKey(),
     });
   });
 
@@ -401,6 +409,11 @@ export function createPanelRouter(): Router {
     safe(async (req, res) => {
       if (rateLimited(`improve:${clientIp(req)}`, 6, 10 * 60_000)) {
         res.status(429).json({ error: "Zu viele Anfragen. Bitte in ein paar Minuten erneut versuchen." });
+        return;
+      }
+      const c = currentCustomer(req);
+      if (c && !c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
         return;
       }
       if (!anthropicAvailable()) {
@@ -434,6 +447,11 @@ export function createPanelRouter(): Router {
         res.status(429).json({ error: "Bitte warten Sie eine Minute, bevor Sie es erneut versuchen." });
         return;
       }
+      const c = currentCustomer(req);
+      if (c && !c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
       if (!anthropicAvailable()) {
         res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
         return;
@@ -465,6 +483,10 @@ export function createPanelRouter(): Router {
       const c = currentCustomer(req);
       if (rateLimited(`suggest-pillars:${c ? c.id : clientIp(req)}`, 3, 24 * 3_600_000)) {
         res.status(429).json({ error: "Maximal 3 KI-Vorschläge pro Tag." });
+        return;
+      }
+      if (c && !c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
         return;
       }
       if (!anthropicAvailable()) {
@@ -501,6 +523,10 @@ export function createPanelRouter(): Router {
         res.status(429).json({ error: "Zu viele Anfragen. Bitte in ein paar Minuten erneut versuchen." });
         return;
       }
+      if (!c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
       if (!anthropicAvailable()) {
         res.status(503).json({ error: "KI-Vorschläge sind gerade nicht verfügbar." });
         return;
@@ -533,10 +559,20 @@ export function createPanelRouter(): Router {
     res.json(publicState(c));
   });
 
-  router.post("/api/signup", safe((req, res) => {
+  router.post("/api/signup", safe(async (req, res) => {
     if (rateLimited(`signup:${clientIp(req)}`, 5, 3_600_000)) {
       res.status(429).json({ error: "Zu viele Versuche. Bitte in einer Stunde erneut probieren." });
       return;
+    }
+    // Panel v6 Aufgabe 2a: CAPTCHA vor allem anderen pruefen, solange konfiguriert - lehnt
+    // Bot-Anfragen frueh ab, bevor ueberhaupt Validierung/DB-Schreiben passiert. Ohne
+    // TURNSTILE_SECRET_KEY komplett uebersprungen (Feature aus, siehe turnstile.ts).
+    if (turnstileConfigured()) {
+      const captchaOk = await verifyTurnstileToken(str(req.body?.["cf-turnstile-response"], 3000), clientIp(req));
+      if (!captchaOk) {
+        res.status(400).json({ error: "Sicherheitsprüfung fehlgeschlagen. Bitte laden Sie die Seite neu und versuchen Sie es erneut." });
+        return;
+      }
     }
     if (req.body?.consent !== true) {
       res.status(400).json({ error: "Bitte stimmen Sie der Datenverarbeitung zu.", fields: { consent: "Zustimmung erforderlich." } });
@@ -550,22 +586,28 @@ export function createPanelRouter(): Router {
     const id = `cus_${randomToken(9)}`;
     const now = nowIso();
     const trialEndsAt = new Date(Date.now() + trialDays() * 86_400_000).toISOString();
+    // Panel v6 Aufgabe 2b: E-Mail-Bestaetigung - roher Token nur jetzt kurz im Speicher, in der
+    // DB steht nur der Hash (gleiches Muster wie login_key_hash/access-link).
+    const verifyToken = randomToken(24);
     db.prepare(
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
          ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements,
          active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode,
-         login_key_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         login_key_hash, email_verify_token_hash, consent_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
       data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0,
-      sha256(randomToken()), now, now, now);
+      sha256(randomToken()), sha256(verifyToken), now, now, now);
     setContentPillars(id, data.contentPillars);
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
+    sendMailBestEffort(
+      verificationEmail({ to: data.email, company: data.company, verifyUrl: `${baseUrl()}${MOUNT}/verify-email?token=${verifyToken}` }),
+    );
     const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
     res.status(201).json(publicState(created));
   }));
@@ -608,6 +650,44 @@ export function createPanelRouter(): Router {
     db.prepare("UPDATE customers SET login_key_hash = ?, updated_at = ? WHERE id = ?").run(sha256(key), nowIso(), c.id);
     res.json({ link: `${baseUrl()}${MOUNT}/login?key=${key}` });
   });
+
+  // Panel v6 Aufgabe 2b: Bestaetigungslink aus der E-Mail. Findet den Kunden ueber den
+  // Token-Hash (wie login_key_hash), setzt email_verified, macht den Token einmalig ungueltig
+  // und loggt gleich ein - wer den Link anklicken konnte, hat die E-Mail-Adresse bewiesen.
+  router.get("/verify-email", (req, res) => {
+    const token = str(req.query.token, 100);
+    if (!token) return backTo(res, { error: "verify" });
+    const c = db.prepare("SELECT * FROM customers WHERE email_verify_token_hash = ? AND status = 'active'").get(sha256(token)) as CustomerRow | undefined;
+    if (!c) return backTo(res, { error: "verify" });
+    db.prepare("UPDATE customers SET email_verified = 1, email_verify_token_hash = NULL, updated_at = ? WHERE id = ?").run(nowIso(), c.id);
+    startSession(res, c.id);
+    console.log(`[panel] ${c.id} (${c.company}) hat die E-Mail-Adresse bestätigt.`);
+    res.redirect(303, `${MOUNT}/?verified=1`);
+  });
+
+  // Erneutes Anfordern, solange email_verified noch 0 ist - braucht eine bestehende Session
+  // (nach Signup automatisch vorhanden). Rate-Limit 1x/5min pro Kunde gegen Mail-Flut.
+  router.post("/api/resend-verification", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (c.email_verified) {
+      res.json({ ok: true, alreadyVerified: true });
+      return;
+    }
+    if (rateLimited(`resend-verify:${c.id}`, 1, 5 * 60_000)) {
+      res.status(429).json({ error: "Bitte warten Sie ein paar Minuten, bevor Sie erneut anfordern." });
+      return;
+    }
+    const verifyToken = randomToken(24);
+    db.prepare("UPDATE customers SET email_verify_token_hash = ?, updated_at = ? WHERE id = ?").run(sha256(verifyToken), nowIso(), c.id);
+    sendMailBestEffort(
+      verificationEmail({ to: c.email, company: c.company, verifyUrl: `${baseUrl()}${MOUNT}/verify-email?token=${verifyToken}` }),
+    );
+    res.json({ ok: true });
+  }));
 
   router.get("/login", (req, res) => {
     const key = str(req.query.key, 100);
@@ -721,6 +801,10 @@ export function createPanelRouter(): Router {
         res.status(401).json({ error: "Nicht angemeldet" });
         return;
       }
+      if (!c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
       const plan = getPlannedPostForCustomer(c.id, String(req.params.id));
       if (!plan) {
         res.status(404).json({ error: "Beitrag nicht gefunden." });
@@ -830,6 +914,10 @@ export function createPanelRouter(): Router {
     const c = currentCustomer(req);
     if (!c) {
       res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (!c.email_verified) {
+      res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
       return;
     }
     if (openPostRequestCount(c.id) >= POST_REQUEST_MAX_OPEN) {

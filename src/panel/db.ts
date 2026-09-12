@@ -188,6 +188,10 @@ migrateColumns("pending_approvals", [
   ["channel", "TEXT"],
 ]);
 
+const hadEmailVerifiedColumn = (db.prepare(`PRAGMA table_info(customers)`).all() as { name: string }[]).some(
+  (c) => c.name === "email_verified",
+);
+
 migrateColumns("customers", [
   ["accent_color", "TEXT"],
   ["watermark_text", "TEXT"],
@@ -227,7 +231,33 @@ migrateColumns("customers", [
   // Absolute local file path to an uploaded logo (task 9) - never a public URL, watermark.ts
   // reads it directly off disk. NULL = exactly the previous text-watermark-only behavior.
   ["logo_url", "TEXT"],
+  // Panel v6 task 2b: no AI generation (planning.ts, post-now, improve-briefing, etc.) runs for
+  // a customer until they've clicked the link in their confirmation email - closes the "sign up
+  // with a throwaway address, never come back, we still pay for nightly generation" abuse hole.
+  // Default 0 - the one-time backfill below immediately re-verifies every customer that already
+  // existed before this column did (see comment there), so nothing breaks for them.
+  ["email_verified", "INTEGER NOT NULL DEFAULT 0"],
+  ["email_verify_token_hash", "TEXT"],
+  // Panel v6 task 4d: fires exactly once, at this customer's first-ever successful publish -
+  // NULL until then, set together with the "first post live" email so a retry/duplicate publish
+  // can never send it twice.
+  ["first_post_email_sent_at", "TEXT"],
+  // Panel v6 task 4c: the trial-ending-soon email is one-shot, not a daily nag - NULL until sent.
+  ["trial_ending_email_sent_at", "TEXT"],
+  // Panel v6 task 4b: throttles the "X Beiträge warten auf Ihre Freigabe" summary mail to at
+  // most once per calendar day per customer, regardless of how many pending_approvals rows
+  // appear in that window.
+  ["approval_email_sent_at", "TEXT"],
 ]);
+
+// Panel v6 task 2b: existing customers signed up before e-mail confirmation existed - treat them
+// as already verified so nothing breaks for them. Must run ONLY the one time this column is
+// first created (guarded by hadEmailVerifiedColumn, captured before migrateColumns runs above) -
+// otherwise this would keep silently auto-verifying every future signup on every server restart,
+// which defeats the entire point of task 2b.
+if (!hadEmailVerifiedColumn) {
+  db.prepare("UPDATE customers SET email_verified = 1 WHERE email_verified = 0").run();
+}
 
 migrateColumns("posts", [
   // Which content pillar (if any) this post was generated for - lets pickPillarForToday avoid
@@ -269,6 +299,11 @@ export interface CustomerRow {
   approval_mode: number;
   active_theme_id: string | null;
   logo_url: string | null;
+  email_verified: number;
+  email_verify_token_hash: string | null;
+  first_post_email_sent_at: string | null;
+  trial_ending_email_sent_at: string | null;
+  approval_email_sent_at: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;
