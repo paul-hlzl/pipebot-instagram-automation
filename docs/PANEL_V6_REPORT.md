@@ -210,6 +210,16 @@ neuer Account, wie in der Aufgabenstellung verlangt erst geprüft, was schon da 
   zwischen allen 4 Vorlagen, immer mit `[TEST]`-Präfix im Betreff. Nutzt `sendMail` (nicht
   `sendMailBestEffort`), damit ein echter Fehlschlag beim Testen sichtbar wird statt nur geloggt.
 
+### Deploy-Status
+
+**Deployed.** `panel-v6` in `main` gemerged (Commit `80440a7`), Produktion um ca. 2026-09-12 08:38
+UTC neu gestartet (Backup vorher, `/health`/`/mcp`/`/panel/api/health` danach grün, Log sauber).
+`PANEL_MAIL_DRY_RUN` ist in Produktion NICHT gesetzt - echte Mails funktionieren dort ab jetzt
+technisch (nutzt dieselbe msmtp/Hostinger-Verbindung, mit der `weekly-report.mjs` seit Längerem
+echte Mails verschickt), aber ich habe in dieser Sitzung selbst KEINE einzige echte Mail
+verschickt (Regel 3). **Bitte als Erstes den neuen "Test-E-Mail senden"-Button im Admin-Bereich
+an Ihre eigene Adresse nutzen**, um den echten Versand einmal selbst zu bestätigen.
+
 ### Verifikation
 
 - `npm run test:panel`: 104/104 grün (6 neue Tests für `/admin/api/test-email`: Auth-Gate,
