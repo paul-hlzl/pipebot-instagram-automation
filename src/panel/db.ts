@@ -186,6 +186,12 @@ migrateColumns("pending_approvals", [
   // loses exactly the distinction the panel UI and a later publish-approved-post run need.
   // NULL on rows written before this column existed - callers fall back to `provider` there.
   ["channel", "TEXT"],
+  // Panel v7 fix (Teil 2 - Herkunft sichtbar machen): 'planning' when filed via
+  // submit_planned_post_for_approval (the nightly pre-planning's own content, submitted as-is),
+  // 'routine' when filed via the plain save_pending_approval tool (spontaneously generated on
+  // the spot - K2 "Jetzt posten" or the K4-K8 fallback). NULL on rows written before this column
+  // existed - the panel falls back to a generic "automatisch erstellt" wording for those.
+  ["source", "TEXT"],
 ]);
 
 const hadEmailVerifiedColumn = (db.prepare(`PRAGMA table_info(customers)`).all() as { name: string }[]).some(
@@ -365,6 +371,7 @@ export interface PendingApprovalRow {
   caption: string | null;
   image_url: string | null;
   pillar_title: string | null;
+  source: string | null;
   status: string;
   created_at: string;
   updated_at: string;

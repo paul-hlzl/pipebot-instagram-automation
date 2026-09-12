@@ -33,6 +33,7 @@ import {
   resolveInstagramCredentials,
   resolveLinkedInCredentials,
   savePendingApproval,
+  submitPlannedPostForApproval,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
 import {
@@ -806,6 +807,37 @@ function createServer(): McpServer {
         return textResult({ ok: Boolean(post) });
       } catch (error) {
         console.error("mark_planned_post_published:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "submit_planned_post_for_approval",
+    {
+      description:
+        "For an approvalMode customer whose `get_planned_post` returned status 'planned' or 'edited': files that " +
+        "ALREADY-PREPARED post (its existing headline/caption/image, exactly as the customer saw or edited it in " +
+        "their panel's \"Vorschau\" tab) into the customer's approval queue - like `save_pending_approval`, but " +
+        "WITHOUT generating anything new. Use this INSTEAD of generate_post_image/generate_story_image + " +
+        "save_pending_approval whenever `get_planned_post` already returned a usable post for an approvalMode " +
+        "customer - do NOT discard it and generate a fresh one, that would show the customer a different post " +
+        "than the one they already reviewed and double the generation cost for the same slot. Returns an error " +
+        "if the planned post doesn't exist or was already submitted/approved/rejected/published (safe to treat " +
+        "as a K9-style skip, not a real failure). The customer then reviews/approves it in their panel exactly " +
+        "like any other `save_pending_approval` entry - a later run's `list_approved_pending_posts` (K1) is what " +
+        "actually publishes it once approved.",
+      inputSchema: { id: z.string().describe("The `id` of the planned post, from `get_planned_post`.") },
+    },
+    async ({ id }) => {
+      try {
+        const approval = submitPlannedPostForApproval(id);
+        if (!approval) {
+          return errorResult(new Error("Planned post not found, or already submitted/approved/rejected/published - do not retry, skip like any other K9 case."));
+        }
+        return textResult(approval);
+      } catch (error) {
+        console.error("submit_planned_post_for_approval:", toToolMessage(error));
         return errorResult(error);
       }
     },

@@ -43,6 +43,7 @@
 
   /* ---------- Die Pipeline (Fortschritt) ---------- */
   .rail { position: sticky; top: 40px; align-self: start; }
+  .rail-current-mobile { display: none; }
   .rail ol { list-style: none; margin: 0; padding: 0; }
   .rail li { position: relative; padding-bottom: 40px; }
   .rail li:last-child { padding-bottom: 0; }
@@ -259,6 +260,31 @@
   .lightbox-close { position: fixed; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
   .lightbox-close:hover { background: rgba(255,255,255,.3); }
 
+  /* ---------- Eigener Bestaetigungs-/Hinweis-Dialog (ersetzt confirm()/alert()) ---------- */
+  .confirm-overlay { position: fixed; inset: 0; z-index: 1100; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 24px; }
+  .confirm-overlay[hidden] { display: none; }
+  .confirm-dialog { background: var(--paper); border: 2px solid var(--ink); border-radius: 2px; padding: 32px; width: 100%; max-width: 420px; }
+  .confirm-title { margin: 0 0 12px; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  .confirm-message { margin: 0; color: var(--stone); font-size: 15px; line-height: 1.5; white-space: pre-line; }
+  .confirm-typecheck { margin-top: 20px; }
+  .confirm-typecheck label { display: block; font-size: 13px; color: var(--stone); margin-bottom: 6px; }
+  .confirm-typecheck input { width: 100%; height: 48px; padding: 0 14px; border: 2px solid var(--rule); border-radius: 2px; font: inherit; }
+  .confirm-typecheck input:focus-visible { border-color: var(--ink); outline: none; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
+  .confirm-actions button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 22px; border: 2px solid var(--ink); border-radius: 2px; font: inherit; font-size: 15px; font-weight: 500; cursor: pointer; }
+  .confirm-cancel { background: var(--paper); color: var(--ink); }
+  .confirm-cancel:hover { background: var(--wash); }
+  .confirm-ok { background: var(--ink); color: var(--paper); }
+  .confirm-ok:hover { background: var(--paper); color: var(--ink); }
+  .confirm-ok.danger { background: var(--stop); border-color: var(--stop); color: var(--paper); }
+  .confirm-ok.danger:hover { background: var(--paper); color: var(--stop); }
+  .confirm-ok[disabled] { background: var(--wash); border-color: var(--rule); color: var(--stone); cursor: not-allowed; }
+  @media (max-width: 480px) {
+    .confirm-dialog { padding: 24px 20px; }
+    .confirm-actions { flex-direction: column-reverse; }
+    .confirm-actions button { width: 100%; }
+  }
+
   /* ---------- Hilfe-Chat (Panel v6, Aufgabe 6) ---------- */
   #help-chat-widget { position: fixed; right: 20px; bottom: 20px; z-index: 900; }
   #help-chat-toggle { width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--ink); background: var(--ink); color: var(--paper); font-size: 24px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.2); display: grid; place-items: center; }
@@ -299,13 +325,29 @@
     .demo { padding: 10px 20px; }
     .shell { grid-template-columns: 1fr; gap: 36px; padding: 28px 20px 96px; }
     .rail { position: static; }
+    /* Panel v7 fix (Teil 5): die fruehere Mobile-Korrektur zeigte weiterhin alle 6 Label-Texte
+       nebeneinander (nur kleiner, unter dem Symbol gestapelt) - bei "grid-auto-columns: 1fr" mit
+       "white-space: nowrap" bekommt jede Spalte zwar rechnerisch ein Sechstel der Breite, aber ein
+       Grid-Item schrumpft Inhalt mit fixer (nowrap) Breite nicht automatisch auf die Spurbreite
+       ("Grid Blowout") - der Text lief deshalb ueber die eigene Spalte hinaus in die naechste
+       hinein und ueberlappte dort lesbar bis unleserlich (Screenshot-Beweis von Andrea Hölzl).
+       Fix: auf schmalen Screens zeigt die Kette nur noch die Symbole + Verbindungslinie (fixe,
+       kleine Breite, kein Fliesstext, kann nicht ueberlaufen); der Name des AKTUELLEN Schritts
+       steht separat und einzeln als eigene Zeile darueber (#rail-current), niemals mit einem
+       Nachbar-Label ueberlappend, weil dort immer nur genau ein Text auf einmal steht. Die
+       einzelnen Schritt-Labels bleiben fuer Screenreader vorhanden (.vh-Muster), nur visuell
+       versteckt - kein Informationsverlust, nur kein sichtbarer Text mehr, der ueberlaufen koennte. */
+    .rail-current-mobile { display: block; margin: 0 0 12px; font-size: 15px; font-weight: 700; text-align: center; }
     .rail ol { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
     .rail li { padding-bottom: 0; }
-    .pipe { left: 14px; right: 0; top: 5px; bottom: auto; width: auto; height: 4px; }
+    /* left:0/right:0 statt eines fixen 14px-Versatzes, weil das Symbol jetzt (siehe .node
+       weiter unten) mittig statt linksbuendig in seiner Spalte sitzt - so verlaeuft die
+       Verbindungslinie durchgehend mittig durch jede Spalte, exakt unter den Symbolen. */
+    .pipe { left: 0; right: 0; top: 5px; bottom: auto; width: auto; height: 4px; }
     .pipe i { transform: scaleX(0); transform-origin: left; }
-    .node { grid-template-columns: 14px; row-gap: 8px; }
+    .node { grid-template-columns: 1fr; row-gap: 0; justify-items: center; min-height: 44px; }
     .sq { margin-top: 0; }
-    .node .lbl { grid-column: 1 / -1; font-size: 12px; white-space: nowrap; }
+    .node .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     .node .meta { display: none; }
     h1 { font-size: 32px; }
     .lede { font-size: 17px; margin-bottom: 32px; }
@@ -407,7 +449,7 @@
 <div id="trialbar" class="trialbar" style="display:none" role="status"></div>
 
 <div class="shell">
-  <nav class="rail" aria-label="Fortschritt"><ol id="rail"></ol></nav>
+  <nav class="rail" aria-label="Fortschritt"><p id="rail-current" class="rail-current-mobile" aria-hidden="true"></p><ol id="rail"></ol></nav>
   <main class="stage" id="stage" tabindex="-1"><p class="loading">Wird geladen …</p></main>
 </div>
 
@@ -430,6 +472,21 @@
     </form>
   </div>
   <button type="button" id="help-chat-toggle" aria-label="Hilfe-Chat öffnen">💬</button>
+</div>
+
+<div id="confirm-overlay" class="confirm-overlay" hidden>
+  <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h2 id="confirm-title" class="confirm-title"></h2>
+    <p id="confirm-message" class="confirm-message"></p>
+    <div class="confirm-typecheck" id="confirm-typecheck" hidden>
+      <label for="confirm-type-input" id="confirm-type-label"></label>
+      <input type="text" id="confirm-type-input" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="confirm-actions">
+      <button type="button" class="confirm-cancel" id="confirm-cancel">Abbrechen</button>
+      <button type="button" class="confirm-ok" id="confirm-ok">OK</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -492,6 +549,25 @@
     const time = d.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
     return `${weekday}, ${time} Uhr`;
   };
+  // Panel v7 (Teil 2 - Zeitstempel/Herkunft): "heute/gestern, HH:MM Uhr" fuer ganz frische
+  // Eintraege, sonst Datum + Uhrzeit - alles in Europe/Vienna, wie der Rest des Panels.
+  const fmtCreated = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const now = new Date();
+    const vDate = (x) => x.toLocaleDateString("de-AT", { timeZone: "Europe/Vienna" });
+    const time = d.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+    if (now - d < 5 * 60_000) return "gerade eben";
+    const yesterday = new Date(now.getTime() - 86_400_000);
+    if (vDate(d) === vDate(now)) return `heute, ${time} Uhr`;
+    if (vDate(d) === vDate(yesterday)) return `gestern, ${time} Uhr`;
+    return `${d.toLocaleDateString("de-AT", { day: "numeric", month: "long", timeZone: "Europe/Vienna" })}, ${time} Uhr`;
+  };
+  // Panel v7 (Teil 2): 'planning' = aus der naechtlichen Vorausplanung uebernommen (siehe
+  // submit_planned_post_for_approval), 'routine'/null = spontan von der stuendlichen Routine
+  // erstellt (K2 "Jetzt posten" oder K4-K8-Fallback) - null deckt Eintraege von vor diesem Fix ab.
+  const ORIGIN_LABEL = { planning: "aus der Vorausplanung", routine: "spontan erstellt" };
+  const originLabel = (source) => ORIGIN_LABEL[source] || "automatisch erstellt";
 
   /* ================= API ================= */
   async function api(method, url, body) {
@@ -512,7 +588,7 @@
     // Panel v6 Aufgabe 3: die Schritt-Kette bleibt fuer den Erst-Assistenten unveraendert (siehe
     // unten), zeigt sich aber gar nicht erst, sobald das neue Dashboard der Landepunkt ist - dort
     // uebernehmen die Dashboard-Kacheln die Navigation.
-    if (S.step === "dashboard") { $("#rail").innerHTML = ""; return; }
+    if (S.step === "dashboard") { $("#rail").innerHTML = ""; const rc = $("#rail-current"); if (rc) rc.textContent = ""; return; }
     const list = steps();
     const cur = list.indexOf(S.step);
     const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : prov(id).name;
@@ -524,6 +600,12 @@
       return S.skipped.has(id) ? "Übersprungen" : "Nicht verbunden";
     };
     const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "preview" || id === "history") ? false : !!conn(id) && conn(id).status !== "expired";
+
+    // Panel v7 fix (Teil 5): einzige sichtbare Textquelle fuer den aktuellen Schritt auf
+    // schmalen Screens (siehe CSS-Kommentar bei .rail-current-mobile) - immer nur EIN Label auf
+    // einmal, kann also nie mit einem Nachbar-Schritt ueberlappen.
+    const railCurrent = $("#rail-current");
+    if (railCurrent) railCurrent.textContent = `Schritt ${cur + 1} von ${list.length} · ${label(S.step)}`;
 
     $("#rail").innerHTML = list.map((id, i) => {
       const state = id === S.step ? "is-current" : isDone(id) ? "is-done" : "is-todo";
@@ -1166,7 +1248,7 @@
   function approvalCardHtml(a) {
     const badge = channelBadgeLabel(a);
     const pillarPart = a.pillarTitle ? `, basierend auf Ihrer Content-Säule „${esc(a.pillarTitle)}“` : "";
-    const context = `Automatisch erstellt für ${esc(badge || "Ihren Kanal")} am ${esc(fmtDate(a.createdAt))}${pillarPart}. Prüfen Sie Text und Bild, dann geben Sie frei oder lehnen Sie ab.`;
+    const context = `Erstellt ${esc(fmtCreated(a.createdAt))} für ${esc(badge || "Ihren Kanal")} (${esc(originLabel(a.source))})${pillarPart}. Prüfen Sie Text und Bild, dann geben Sie frei oder lehnen Sie ab.`;
     return `<div class="approval-card" data-approval-id="${esc(a.id)}">
       ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`}
       <div class="approval-body">
@@ -1222,7 +1304,7 @@
 
   /* ================= Vorschau (Panel v5, Aufgabe 5) ================= */
   const PP_CHANNEL_LABEL = { ig_feed: "Instagram Feed", ig_story: "Instagram Story", linkedin: "LinkedIn" };
-  const PP_STATUS_LABEL = { planned: "Geplant", edited: "Bearbeitet", approved: "Freigegeben", rejected: "Übersprungen", published: "Veröffentlicht" };
+  const PP_STATUS_LABEL = { planned: "Geplant", edited: "Bearbeitet", approved: "Freigegeben", rejected: "Übersprungen", published: "Veröffentlicht", submitted: "Wartet auf Ihre Freigabe" };
   let previewCache = { posts: [], maxRegenerate: 3 };
   let previewSelectedDate = null;
 
@@ -1274,7 +1356,10 @@
 
   function previewCardHtml(p) {
     const atMax = p.regenerateCount >= previewCache.maxRegenerate;
-    const editable = p.status !== "published";
+    // Panel v7 fix: 'submitted' bedeutet, der Beitrag wurde schon 1:1 in die Freigabe-
+    // Warteschlange uebernommen (siehe "Wartet auf Ihre Freigabe") - ab dann lebt der Inhalt dort,
+    // ein Bearbeiten/Ueberspringen hier haette keine Wirkung mehr.
+    const editable = p.status !== "published" && p.status !== "submitted";
     const canSkip = editable && p.status !== "rejected";
     const canApprove = S.customer.approvalMode && editable && p.status !== "approved" && p.status !== "rejected";
     return `<div class="preview-card" data-plan-id="${esc(p.id)}">
@@ -1286,6 +1371,7 @@
           <span class="channel-badge">${esc(PP_CHANNEL_LABEL[p.channel] || p.channel)}</span>
           <span class="channel-badge">${esc(PP_STATUS_LABEL[p.status] || p.status)}</span>
         </div>
+        <p class="hint" style="margin:2px 0 8px">Erstellt ${esc(fmtCreated(p.createdAt))} (Vorausplanung).</p>
         <label class="vh" for="pp-headline-${esc(p.id)}">Headline</label>
         <input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Headline" ${editable ? "" : "disabled"}>
         ${p.channel !== "ig_story" ? `<label class="vh" for="pp-caption-${esc(p.id)}">Caption</label>
@@ -1457,12 +1543,12 @@
     if (uploadBtn) uploadBtn.disabled = true;
     if (!file) return;
     if (!["image/png", "image/jpeg"].includes(file.type)) {
-      alert("Bitte eine PNG- oder JPG-Datei wählen.");
+      showAlert({ title: "Ungültige Datei", message: "Bitte eine PNG- oder JPG-Datei wählen." });
       e.target.value = "";
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      alert("Datei zu groß - maximal 2 MB.");
+      showAlert({ title: "Datei zu groß", message: "Bitte eine Datei bis maximal 2 MB wählen." });
       e.target.value = "";
       return;
     }
@@ -1565,6 +1651,110 @@
       btn.disabled = false;
       btn.textContent = oldLabel;
     }
+  }
+
+  /* ================= Eigener Bestaetigungs-/Hinweis-Dialog ================= */
+  /* Ersetzt window.confirm()/window.alert() ueberall im Panel durch ein Overlay im
+     bestehenden Design (statt haesslichem, browserabhaengigem nativen Popup). Fokus wird beim
+     Oeffnen in den Dialog gesetzt, Tab bleibt darin gefangen, Klick daneben oder Escape wirkt
+     wie Abbrechen. showConfirm() kann optional per typeToConfirm einen Eintipp-Schutz verlangen
+     (ersetzt an der Loesch-Konto-Stelle das bisherige confirm()+prompt()-Duo durch einen
+     einzigen Dialog). */
+  const confirmOverlay = $("#confirm-overlay");
+  const confirmDialog = confirmOverlay.querySelector(".confirm-dialog");
+  const confirmTitleEl = $("#confirm-title");
+  const confirmMessageEl = $("#confirm-message");
+  const confirmCancelBtn = $("#confirm-cancel");
+  const confirmOkBtn = $("#confirm-ok");
+  const confirmTypecheck = $("#confirm-typecheck");
+  const confirmTypeLabel = $("#confirm-type-label");
+  const confirmTypeInput = $("#confirm-type-input");
+
+  let confirmResolve = null;
+  let confirmLastFocused = null;
+  let confirmTypeToConfirm = null;
+
+  function confirmFocusables() {
+    return Array.from(confirmDialog.querySelectorAll("button, input, [href], [tabindex]"))
+      .filter((el) => !el.hidden && !el.disabled);
+  }
+
+  function confirmUpdateOkState() {
+    if (confirmTypeToConfirm === null) return;
+    confirmOkBtn.disabled = confirmTypeInput.value !== confirmTypeToConfirm;
+  }
+
+  function closeConfirm(result) {
+    confirmOverlay.hidden = true;
+    document.removeEventListener("keydown", onConfirmKeydown, true);
+    confirmTypeInput.removeEventListener("input", confirmUpdateOkState);
+    const resolve = confirmResolve;
+    confirmResolve = null;
+    if (confirmLastFocused && confirmLastFocused.focus) confirmLastFocused.focus();
+    if (resolve) resolve(result);
+  }
+
+  function onConfirmKeydown(e) {
+    if (e.key === "Escape") { e.preventDefault(); closeConfirm(false); return; }
+    if (e.key !== "Tab") return;
+    const els = confirmFocusables();
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+
+  confirmOverlay.addEventListener("mousedown", (e) => { if (e.target === confirmOverlay) closeConfirm(false); });
+  confirmCancelBtn.addEventListener("click", () => closeConfirm(false));
+  confirmOkBtn.addEventListener("click", () => {
+    if (confirmTypeToConfirm !== null && confirmTypeInput.value !== confirmTypeToConfirm) return;
+    closeConfirm(true);
+  });
+  confirmTypeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !confirmOkBtn.disabled) { e.preventDefault(); confirmOkBtn.click(); }
+  });
+
+  function showConfirm({ title, message, confirmLabel = "Bestätigen", cancelLabel = "Abbrechen", danger = false, typeToConfirm = null, typeToConfirmLabel = null } = {}) {
+    return new Promise((resolve) => {
+      if (confirmResolve) closeConfirm(false); // falls schon einer offen ist (sollte nicht vorkommen): sauber schliessen statt zu stapeln
+      confirmLastFocused = document.activeElement;
+      confirmResolve = resolve;
+      confirmTitleEl.textContent = title || "";
+      confirmMessageEl.textContent = message || "";
+      confirmOkBtn.textContent = confirmLabel;
+      confirmOkBtn.className = "confirm-ok" + (danger ? " danger" : "");
+      if (cancelLabel === null) {
+        confirmCancelBtn.hidden = true;
+      } else {
+        confirmCancelBtn.hidden = false;
+        confirmCancelBtn.textContent = cancelLabel;
+      }
+      confirmTypeToConfirm = typeToConfirm;
+      if (typeToConfirm !== null) {
+        confirmTypecheck.hidden = false;
+        confirmTypeLabel.textContent = typeToConfirmLabel || `Zur Bestätigung "${typeToConfirm}" eingeben:`;
+        confirmTypeInput.value = "";
+        confirmOkBtn.disabled = true;
+        confirmTypeInput.addEventListener("input", confirmUpdateOkState);
+      } else {
+        confirmTypecheck.hidden = true;
+        confirmOkBtn.disabled = false;
+      }
+      confirmOverlay.hidden = false;
+      document.addEventListener("keydown", onConfirmKeydown, true);
+      // Bei gefaehrlichen Aktionen ohne Eintipp-Schutz startet der Fokus auf "Abbrechen" - ein
+      // versehentliches Enter darf nichts Destruktives auslösen.
+      const initialFocus = typeToConfirm !== null ? confirmTypeInput : danger && !confirmCancelBtn.hidden ? confirmCancelBtn : confirmOkBtn;
+      requestAnimationFrame(() => initialFocus.focus());
+    });
+  }
+
+  function showAlert({ title, message, okLabel = "OK" } = {}) {
+    return showConfirm({ title, message, confirmLabel: okLabel, cancelLabel: null });
+  }
+
+  function showError(message) {
+    return showAlert({ title: "Fehler", message: message || "Etwas ist schiefgelaufen." });
   }
 
   /* ================= Events ================= */
@@ -1731,7 +1921,7 @@
         const { post } = await api("POST", `/api/planned-posts/${id}/regenerate-image`, { accentColor });
         updatePlannedPostInCache(post);
       } catch (err) {
-        alert(err.message || "Das Bild konnte nicht neu erstellt werden.");
+        showError(err.message || "Das Bild konnte nicht neu erstellt werden.");
         ppRegen.disabled = false;
         ppRegen.textContent = oldLabel;
       }
@@ -1739,14 +1929,14 @@
     }
     const ppSkip = e.target.closest("[data-pp-skip]");
     if (ppSkip) {
-      if (!confirm("Diesen Beitrag wirklich überspringen? Er wird dann nicht veröffentlicht.")) return;
+      if (!(await showConfirm({ title: "Beitrag überspringen?", message: "Er wird dann nicht veröffentlicht.", confirmLabel: "Überspringen" }))) return;
       const id = ppSkip.dataset.ppSkip;
       ppSkip.classList.add("busy");
       try {
         const { post } = await api("POST", `/api/planned-posts/${id}/skip`);
         updatePlannedPostInCache(post);
       } catch (err) {
-        alert(err.message || "Konnte nicht übersprungen werden.");
+        showError(err.message || "Konnte nicht übersprungen werden.");
         ppSkip.classList.remove("busy");
       }
       return;
@@ -1759,7 +1949,7 @@
         const { post } = await api("POST", `/api/planned-posts/${id}/approve`);
         updatePlannedPostInCache(post);
       } catch (err) {
-        alert(err.message || "Konnte nicht freigegeben werden.");
+        showError(err.message || "Konnte nicht freigegeben werden.");
         ppApprove.classList.remove("busy");
       }
       return;
@@ -1793,19 +1983,22 @@
         const section = $("#logo-section");
         if (section) section.innerHTML = logoSectionHtml(S.customer);
       } catch (err) {
-        alert(err.message || "Hochladen fehlgeschlagen.");
+        showError(err.message || "Hochladen fehlgeschlagen.");
         btn.classList.remove("busy");
       }
       return;
     }
     if (e.target.closest("#logo-remove")) {
-      if (!confirm("Logo entfernen? Danach wird wieder die Text-Beschriftung verwendet.")) return;
+      const btn = e.target.closest("#logo-remove");
+      if (!(await showConfirm({ title: "Logo entfernen?", message: "Danach wird wieder die Text-Beschriftung verwendet." }))) return;
+      btn.disabled = true;
       try {
         applyState(await api("DELETE", "/api/logo"));
         const section = $("#logo-section");
         if (section) section.innerHTML = logoSectionHtml(S.customer);
       } catch (err) {
-        alert(err.message || "Konnte nicht entfernt werden.");
+        showError(err.message || "Konnte nicht entfernt werden.");
+        btn.disabled = false;
       }
       return;
     }
@@ -1820,7 +2013,7 @@
         const section = $("#themes-section");
         if (section) section.innerHTML = themesSectionHtml(S.customer);
       } catch (err) {
-        alert(err.message || "Konnte nicht gespeichert werden.");
+        showError(err.message || "Konnte nicht gespeichert werden.");
       }
       return;
     }
@@ -1831,7 +2024,7 @@
         const section = $("#themes-section");
         if (section) section.innerHTML = themesSectionHtml(S.customer);
       } catch (err) {
-        alert(err.message || "Konnte nicht aktiviert werden.");
+        showError(err.message || "Konnte nicht aktiviert werden.");
       }
       return;
     }
@@ -1841,7 +2034,7 @@
         const section = $("#themes-section");
         if (section) section.innerHTML = themesSectionHtml(S.customer);
       } catch (err) {
-        alert(err.message || "Konnte nicht geändert werden.");
+        showError(err.message || "Konnte nicht geändert werden.");
       }
       return;
     }
@@ -1908,7 +2101,7 @@
       const btn = approveBtn || rejectBtn;
       const id = btn.dataset.approve || btn.dataset.reject;
       const action = approveBtn ? "approve" : "reject";
-      if (action === "reject" && !confirm("Diesen Beitrag ablehnen? Er wird dann nicht veröffentlicht.")) return;
+      if (action === "reject" && !(await showConfirm({ title: "Beitrag ablehnen?", message: "Er wird dann nicht veröffentlicht.", confirmLabel: "Ablehnen" }))) return;
       btn.classList.add("busy");
       try {
         await api("POST", `/api/approvals/${id}/${action}`);
@@ -1916,7 +2109,7 @@
         const box = $("#dash-approvals");
         if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
       } catch (err) {
-        alert(err.message || "Aktion fehlgeschlagen.");
+        showError(err.message || "Aktion fehlgeschlagen.");
         btn.classList.remove("busy");
       }
       return;
@@ -1931,7 +2124,7 @@
         S.banner = { kind: "ok", text: "Angefragt - wir kümmern uns beim nächsten Lauf darum." };
         render(true);
       } catch (err) {
-        alert(err.message || "Anfrage fehlgeschlagen.");
+        showError(err.message || "Anfrage fehlgeschlagen.");
         btn.classList.remove("busy");
       }
       return;
@@ -1970,23 +2163,32 @@
       return;
     }
     if (e.target.closest("#toggle-pause")) {
+      const btn = e.target.closest("#toggle-pause");
       const nextPaused = !S.customer.customerPaused;
-      if (nextPaused && !confirm("Posting pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht, bis Sie es wieder fortsetzen.")) return;
+      if (nextPaused && !(await showConfirm({ title: "Posting pausieren?", message: "Es werden dann keine neuen Beiträge mehr veröffentlicht, bis Sie es wieder fortsetzen.", confirmLabel: "Pausieren" }))) return;
+      btn.disabled = true;
       try {
         applyState(await api("POST", "/api/pause", { paused: nextPaused }));
         render();
       } catch (err) {
-        alert(err.message || "Konnte nicht geändert werden.");
+        showError(err.message || "Konnte nicht geändert werden.");
+        btn.disabled = false;
       }
       return;
     }
     if (e.target.closest("#delete-account")) {
+      const btn = e.target.closest("#delete-account");
       const company = S.customer?.company || "Ihr Konto";
-      if (!confirm(`"${company}" inkl. aller verbundenen Kanäle und des Beitrags-Verlaufs endgültig löschen? Das kann nicht rückgängig gemacht werden.`)) return;
-      if (prompt(`Zur Bestätigung: tippen Sie den Firmennamen ein (${company})`) !== company) {
-        alert("Firmenname stimmt nicht überein. Nichts wurde gelöscht.");
-        return;
-      }
+      const ok = await showConfirm({
+        title: "Konto endgültig löschen?",
+        message: `"${company}" inkl. aller verbundenen Kanäle und des Beitrags-Verlaufs wird endgültig gelöscht. Das kann nicht rückgängig gemacht werden.`,
+        confirmLabel: "Endgültig löschen",
+        danger: true,
+        typeToConfirm: company,
+        typeToConfirmLabel: `Zur Bestätigung "${company}" eingeben:`,
+      });
+      if (!ok) return;
+      btn.disabled = true;
       try {
         if (DEMO) {
           MOCK.customer = null; MOCK.connections = [];
@@ -1998,7 +2200,8 @@
         S.banner = { kind: "ok", text: "Konto und alle Daten wurden gelöscht." };
         render(true);
       } catch (err) {
-        alert(err.message || "Löschen fehlgeschlagen.");
+        showError(err.message || "Löschen fehlgeschlagen.");
+        btn.disabled = false;
       }
       return;
     }
@@ -2015,10 +2218,17 @@
 
     if (t.dataset.disconnect) {
       const p = prov(t.dataset.disconnect);
-      if (!confirm(`${p.name} wirklich trennen? Danach veröffentlichen wir dort nichts mehr.`)) return;
-      applyState(await api("POST", `/api/disconnect/${p.id}`));
-      S.banner = { kind: "", text: `${p.name} getrennt.` };
-      return render();
+      if (!(await showConfirm({ title: `${p.name} trennen?`, message: "Danach veröffentlichen wir dort nichts mehr.", confirmLabel: "Trennen", danger: true }))) return;
+      t.disabled = true;
+      try {
+        applyState(await api("POST", `/api/disconnect/${p.id}`));
+        S.banner = { kind: "", text: `${p.name} getrennt.` };
+        return render();
+      } catch (err) {
+        showError(err.message || "Trennen fehlgeschlagen.");
+        t.disabled = false;
+      }
+      return;
     }
     if (t.id === "mklink") {
       t.classList.add("busy");
@@ -2203,10 +2413,11 @@
       if (!MOCK.plannedPosts) {
         const today = localDateStr(new Date());
         const tomorrow = localDateStr(new Date(Date.now() + 86400000));
+        const createdAt = new Date(Date.now() - 6 * 3600000).toISOString();
         MOCK.plannedPosts = [
-          { id: "plan1", channel: "ig_feed", scheduledFor: today, status: "planned", headline: "Mobilität neu entdecken", caption: "Ein Beispieltext für die Vorschau. (Vorschau-Beispiel)", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 0 },
-          { id: "plan2", channel: "ig_story", scheduledFor: today, status: "planned", headline: "Tipp des Tages", caption: "", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 0 },
-          { id: "plan3", channel: "linkedin", scheduledFor: tomorrow, status: "planned", headline: "Ein Blick hinter die Kulissen", caption: "Ein Beispieltext für die Vorschau. (Vorschau-Beispiel)", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 1 },
+          { id: "plan1", channel: "ig_feed", scheduledFor: today, status: "planned", headline: "Mobilität neu entdecken", caption: "Ein Beispieltext für die Vorschau. (Vorschau-Beispiel)", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 0, createdAt },
+          { id: "plan2", channel: "ig_story", scheduledFor: today, status: "planned", headline: "Tipp des Tages", caption: "", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 0, createdAt },
+          { id: "plan3", channel: "linkedin", scheduledFor: tomorrow, status: "planned", headline: "Ein Blick hinter die Kulissen", caption: "Ein Beispieltext für die Vorschau. (Vorschau-Beispiel)", imageUrl: "", pillarTitle: null, accentColorUsed: null, regenerateCount: 1, createdAt },
         ];
       }
       return { posts: MOCK.plannedPosts, maxRegenerate: 3 };

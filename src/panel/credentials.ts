@@ -656,6 +656,9 @@ export interface PendingApproval {
   caption: string | null;
   imageUrl: string | null;
   pillarTitle: string | null;
+  /** Panel v7: 'planning' (filed as-is from the nightly pre-planning) or 'routine' (spontaneously
+   *  generated on the spot). Null for rows written before this field existed. */
+  source: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -671,6 +674,7 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
     caption: r.caption,
     imageUrl: r.image_url,
     pillarTitle: r.pillar_title,
+    source: r.source,
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -691,13 +695,16 @@ export function savePendingApproval(input: {
   caption?: string;
   imageUrl?: string;
   pillarTitle?: string;
+  /** Panel v7: defaults to 'routine' (the MCP tool wrapper never passes this - every call through
+   *  it IS a spontaneous generation). submitPlannedPostForApproval passes 'planning' explicitly. */
+  source?: string;
 }): PendingApproval {
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-  ).run(id, input.customerId, input.provider, input.channel, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, now, now);
+    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+  ).run(id, input.customerId, input.provider, input.channel, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, input.source ?? "routine", now, now);
   maybeSendApprovalsSummaryEmail(input.customerId);
   return toPendingApproval(
     db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow,
@@ -873,6 +880,49 @@ export function markPlannedPostStatus(id: string, status: string): PlannedPost |
   const result = db.prepare("UPDATE planned_posts SET status = ?, updated_at = ? WHERE id = ?").run(status, nowIso(), id);
   if (result.changes === 0) return null;
   return getPlannedPost(id);
+}
+
+/**
+ * Panel v7 fix: used by the `submit_planned_post_for_approval` MCP tool (K3b, approvalMode
+ * customers) to file an ALREADY-PREPARED planned_post into pending_approvals AS-IS, without
+ * generating anything new. Fixes a real customer-visible bug (Andrea Hölzl): the previous K3b
+ * behavior discarded the exact post the customer already saw/edited in "Vorschau" and generated
+ * a completely different one at due-time, so the "Wartet auf Ihre Freigabe" card never matched
+ * what the customer had reviewed - and doubled Anthropic/fal.ai cost for the same slot (once in
+ * planning.ts overnight, once again here).
+ *
+ * Re-checks bannedWords/requiredElements before filing (same backstop `save_pending_approval`'s
+ * tool wrapper applies) - the text was already checked when planning.ts first created it and
+ * again on every customer edit, but a customer could edit their bannedWords/requiredElements
+ * list AFTER a post was already prepared, so re-checking here is not redundant.
+ *
+ * Only acts on status 'planned'/'edited' - returns null (no-op) for anything else, so calling it
+ * twice (e.g. a retried tool call) can never file the same planned_post twice; marks the row
+ * 'submitted' on success so a later run's K3b treats it as already handled instead of dueNow
+ * re-triggering it.
+ */
+export function submitPlannedPostForApproval(plannedPostId: string): PendingApproval | null {
+  const plan = getPlannedPost(plannedPostId);
+  if (!plan) return null;
+  if (plan.status !== "planned" && plan.status !== "edited") return null;
+
+  const checkTexts = plan.channel === "ig_story" ? [plan.headline ?? undefined] : [plan.headline ?? undefined, plan.caption ?? undefined];
+  assertNoBannedWords(plan.customerId, ...checkTexts);
+  assertRequiredElements(plan.customerId, ...checkTexts);
+
+  const provider = plan.channel === "linkedin" ? "linkedin" : "instagram";
+  const approval = savePendingApproval({
+    customerId: plan.customerId,
+    provider,
+    channel: plan.channel,
+    headline: plan.headline ?? undefined,
+    caption: plan.caption ?? undefined,
+    imageUrl: plan.imageUrl ?? undefined,
+    pillarTitle: plan.pillarTitle ?? undefined,
+    source: "planning",
+  });
+  markPlannedPostStatus(plan.id, "submitted");
+  return approval;
 }
 
 /**

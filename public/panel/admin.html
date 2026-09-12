@@ -82,6 +82,25 @@
   .posts-list time { color: var(--stone); display: block; font-size: 12px; }
   .loading { color: var(--stone); padding: 60px 0; text-align: center; }
 
+  /* ---------- Eigener Bestaetigungs-/Hinweis-Dialog (ersetzt confirm()/alert()) ---------- */
+  .confirm-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 20px; }
+  .confirm-overlay[hidden] { display: none; }
+  .confirm-dialog { background: var(--paper); border: 2px solid var(--ink); border-radius: 2px; padding: 28px; width: 100%; max-width: 400px; }
+  .confirm-title { margin: 0 0 10px; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+  .confirm-message { margin: 0; color: var(--stone); font-size: 14px; line-height: 1.5; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+  .confirm-actions button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 18px; border: 2px solid var(--ink); border-radius: 2px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+  .confirm-cancel { background: var(--paper); color: var(--ink); }
+  .confirm-cancel:hover { background: var(--wash); }
+  .confirm-ok { background: var(--ink); color: var(--paper); }
+  .confirm-ok:hover { background: var(--paper); color: var(--ink); }
+  .confirm-ok.danger { background: var(--stop); border-color: var(--stop); color: var(--paper); }
+  .confirm-ok.danger:hover { background: var(--paper); color: var(--stop); }
+  @media (max-width: 480px) {
+    .confirm-actions { flex-direction: column-reverse; }
+    .confirm-actions button { width: 100%; }
+  }
+
   @media (max-width: 900px) {
     .metrics { grid-template-columns: repeat(3, 1fr); }
     table, thead, tbody, tr, th, td { display: block; }
@@ -110,6 +129,17 @@
 
 <main id="app"><p class="loading">Wird geladen …</p></main>
 
+<div id="confirm-overlay" class="confirm-overlay" hidden>
+  <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h2 id="confirm-title" class="confirm-title"></h2>
+    <p id="confirm-message" class="confirm-message"></p>
+    <div class="confirm-actions">
+      <button type="button" class="confirm-cancel" id="confirm-cancel">Abbrechen</button>
+      <button type="button" class="confirm-ok" id="confirm-ok">OK</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   const MOUNT = "/panel/admin";
@@ -129,6 +159,68 @@
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || "Unbekannter Fehler"), { status: res.status });
     return data;
+  }
+
+  /* ---------------- Eigener Bestaetigungs-/Hinweis-Dialog ---------------- */
+  const confirmOverlay = $("#confirm-overlay");
+  const confirmDialog = confirmOverlay.querySelector(".confirm-dialog");
+  const confirmTitleEl = $("#confirm-title");
+  const confirmMessageEl = $("#confirm-message");
+  const confirmCancelBtn = $("#confirm-cancel");
+  const confirmOkBtn = $("#confirm-ok");
+  let confirmResolve = null;
+  let confirmLastFocused = null;
+
+  function confirmFocusables() {
+    return Array.from(confirmDialog.querySelectorAll("button, [href], [tabindex]")).filter((el) => !el.hidden && !el.disabled);
+  }
+
+  function closeConfirm(result) {
+    confirmOverlay.hidden = true;
+    document.removeEventListener("keydown", onConfirmKeydown, true);
+    const resolve = confirmResolve;
+    confirmResolve = null;
+    if (confirmLastFocused && confirmLastFocused.focus) confirmLastFocused.focus();
+    if (resolve) resolve(result);
+  }
+
+  function onConfirmKeydown(e) {
+    if (e.key === "Escape") { e.preventDefault(); closeConfirm(false); return; }
+    if (e.key !== "Tab") return;
+    const els = confirmFocusables();
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+
+  confirmOverlay.addEventListener("mousedown", (e) => { if (e.target === confirmOverlay) closeConfirm(false); });
+  confirmCancelBtn.addEventListener("click", () => closeConfirm(false));
+  confirmOkBtn.addEventListener("click", () => closeConfirm(true));
+
+  function showConfirm({ title, message, confirmLabel = "Bestätigen", cancelLabel = "Abbrechen", danger = false } = {}) {
+    return new Promise((resolve) => {
+      if (confirmResolve) closeConfirm(false);
+      confirmLastFocused = document.activeElement;
+      confirmResolve = resolve;
+      confirmTitleEl.textContent = title || "";
+      confirmMessageEl.textContent = message || "";
+      confirmOkBtn.textContent = confirmLabel;
+      confirmOkBtn.className = "confirm-ok" + (danger ? " danger" : "");
+      confirmCancelBtn.hidden = cancelLabel === null;
+      if (cancelLabel !== null) confirmCancelBtn.textContent = cancelLabel;
+      confirmOverlay.hidden = false;
+      document.addEventListener("keydown", onConfirmKeydown, true);
+      requestAnimationFrame(() => (danger && !confirmCancelBtn.hidden ? confirmCancelBtn : confirmOkBtn).focus());
+    });
+  }
+
+  function showAlert({ title, message, okLabel = "OK" } = {}) {
+    return showConfirm({ title, message, confirmLabel: okLabel, cancelLabel: null });
+  }
+
+  function showError(message) {
+    return showAlert({ title: "Fehler", message: message || "Etwas ist schiefgelaufen." });
   }
 
   /* ---------------- Login ---------------- */
@@ -315,20 +407,20 @@
         await loadOverview();
       }
       if (action === "unlimited") {
-        if (!confirm("Diesen Kunden unbefristet freischalten (kein Trial-Ablauf mehr)?")) return;
+        if (!(await showConfirm({ title: "Unbefristet freischalten?", message: "Dieser Kunde hat danach keinen Trial-Ablauf mehr.", confirmLabel: "Freischalten" }))) return;
         btn.classList.add("busy");
         await api("POST", `/api/customers/${id}/unlimited`);
         await loadOverview();
       }
       if (action === "toggle-status") {
         const status = btn.dataset.status;
-        if (status === "paused" && !confirm("Kunde pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht.")) return;
+        if (status === "paused" && !(await showConfirm({ title: "Kunde pausieren?", message: "Es werden dann keine neuen Beiträge mehr veröffentlicht.", confirmLabel: "Pausieren", danger: true }))) return;
         btn.classList.add("busy");
         await api("POST", `/api/customers/${id}/status`, { status });
         await loadOverview();
       }
     } catch (err) {
-      alert(err.message || "Aktion fehlgeschlagen.");
+      showError(err.message || "Aktion fehlgeschlagen.");
       btn.classList.remove("busy");
     }
   });

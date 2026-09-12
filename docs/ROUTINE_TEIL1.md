@@ -12,6 +12,12 @@ Beiträge aus `planned_posts`, siehe `docs/PANEL_V5_REPORT.md` und `docs/ROUTINE
 Direkt per `RemoteTrigger`/API in die live laufende Routine eingespielt, nicht nur hier
 dokumentiert - dieser Datei-Inhalt entspricht dem tatsächlichen Live-Stand der Routine.
 
+**Update Panel v7 (2026-09-12, Bugfix):** K3b's approvalMode-true-Zweig korrigiert - verwarf
+bisher einen bereits vorbereiteten Beitrag und generierte spontan einen komplett anderen (echtes
+Kundenfeedback, siehe `docs/ROUTINE_TEIL1_V7.md` und `docs/PANEL_V7_REPORT.md`). Nutzt jetzt das
+neue Tool `submit_planned_post_for_approval` statt generate_*/save_pending_approval, plus ein
+neuer Status 'submitted'. Ebenfalls per `RemoteTrigger`/API live eingespielt.
+
 ---
 
 ```
@@ -88,11 +94,18 @@ K3b. Before proceeding to K4 for this due customer/channel, call get_planned_pos
      - status 'planned' or 'edited': check this customer's approvalMode (from list_customers).
        - approvalMode false: publish it directly, exactly as for 'approved' above (existing
          content, mark_planned_post_published after success, skip K4-K8).
-       - approvalMode true: this hasn't been reviewed by the customer yet - do NOT publish it
-         and do NOT call mark_planned_post_published. Proceed to K4-K8 exactly as before
-         (unchanged behavior: generate a fresh post and file it via save_pending_approval, same
-         as if nothing had been pre-planned). This is intentional, not a bug - a pre-planned post
-         only skips the normal flow once actually approved or once approvalMode is off.
+       - approvalMode true: this hasn't been reviewed by the customer yet, but it already exists
+         (headline/caption/image) - call submit_planned_post_for_approval with this planned
+         post's id. This files the EXISTING content into the customer's approval queue exactly
+         as-is - do NOT call generate_post_image/generate_story_image, do NOT call
+         save_pending_approval yourself, do NOT proceed to K4-K8 at all for this customer/channel.
+         The tool call itself handles marking the planned post so it isn't submitted twice. On
+         failure (e.g. the planned post was already submitted by an earlier run), treat it like
+         any other K9 case - skip and continue, do not retry differently than usual.
+     - status 'submitted': this was already filed into the customer's approval queue on an
+       earlier run via submit_planned_post_for_approval - do NOT regenerate, do NOT resubmit,
+       treat it exactly like 'rejected' (skip, move on). It now lives in the approval queue
+       (list_approved_pending_posts / K1 handles it from here once the customer approves it).
      - status 'published': should not normally occur here (already handled on an earlier run) -
        if it does, treat it like 'rejected' (skip, do not regenerate) and move on.
 
