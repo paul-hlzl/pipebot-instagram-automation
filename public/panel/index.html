@@ -259,6 +259,27 @@
   .lightbox-close { position: fixed; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
   .lightbox-close:hover { background: rgba(255,255,255,.3); }
 
+  /* ---------- Hilfe-Chat (Panel v6, Aufgabe 6) ---------- */
+  #help-chat-widget { position: fixed; right: 20px; bottom: 20px; z-index: 900; }
+  #help-chat-toggle { width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--ink); background: var(--ink); color: var(--paper); font-size: 24px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.2); display: grid; place-items: center; }
+  #help-chat-toggle:hover { background: var(--paper); color: var(--ink); }
+  #help-chat-panel { position: fixed; right: 20px; bottom: 88px; width: 340px; max-width: calc(100vw - 40px); height: 460px; max-height: calc(100vh - 140px); background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 8px 30px rgba(0,0,0,.25); display: flex; flex-direction: column; overflow: hidden; }
+  #help-chat-panel[hidden] { display: none; }
+  .help-chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--rule); font-weight: 600; }
+  .help-chat-header button { width: 32px; height: 32px; border: 0; background: none; cursor: pointer; font-size: 16px; color: var(--stone); }
+  #help-chat-messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .help-chat-msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+  .help-chat-msg.user { align-self: flex-end; background: var(--ink); color: var(--paper); border-bottom-right-radius: 2px; }
+  .help-chat-msg.bot { align-self: flex-start; background: var(--wash); color: var(--ink); border-bottom-left-radius: 2px; }
+  .help-chat-msg.pending { color: var(--stone); font-style: italic; }
+  #help-chat-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--rule); }
+  #help-chat-input { flex: 1; height: 40px; padding: 0 12px; border: 1px solid #C9C9C9; border-radius: 2px; font: inherit; }
+  #help-chat-form button { min-width: 44px; height: 40px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); border-radius: 2px; cursor: pointer; }
+  @media (max-width: 480px) {
+    #help-chat-panel { right: 12px; left: 12px; width: auto; max-width: none; bottom: 84px; height: calc(100vh - 140px); }
+    #help-chat-widget { right: 12px; bottom: 12px; }
+  }
+
   /* ---------- Horizontal scrollende 7-Tage-Reiter: Hinweis auf Mobil ---------- */
   .preview-hint { display: none; font-size: 12.5px; color: var(--stone); margin: -10px 0 14px; }
 
@@ -393,6 +414,22 @@
 <div id="lightbox-overlay" class="lightbox-overlay" hidden role="dialog" aria-modal="true" aria-label="Bild vergrößert">
   <button type="button" class="lightbox-close" id="lightbox-close" aria-label="Schließen">✕</button>
   <img id="lightbox-img" src="" alt="">
+</div>
+
+<div id="help-chat-widget" hidden>
+  <div id="help-chat-panel" hidden role="dialog" aria-label="Hilfe-Chat">
+    <div class="help-chat-header">
+      <span>Hilfe</span>
+      <button type="button" id="help-chat-close" aria-label="Chat schließen">✕</button>
+    </div>
+    <div id="help-chat-messages"></div>
+    <form id="help-chat-form">
+      <label for="help-chat-input" class="vh">Ihre Frage</label>
+      <input type="text" id="help-chat-input" placeholder="Ihre Frage …" maxlength="500" autocomplete="off">
+      <button type="submit">Senden</button>
+    </form>
+  </div>
+  <button type="button" id="help-chat-toggle" aria-label="Hilfe-Chat öffnen">💬</button>
 </div>
 
 <script>
@@ -1546,7 +1583,69 @@
     const img = $("#lightbox-img");
     if (img) img.src = "";
   }
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLightbox(); });
+  /* ================= Hilfe-Chat (Panel v6, Aufgabe 6) ================= */
+  // Verlauf bewusst nur im Speicher dieser Seiten-Sitzung (kein localStorage/Server-Speicher
+  // noetig laut Aufgabenstellung) - ein Neuladen der Seite startet den Chat einfach neu.
+  const helpChat = { messages: [], open: false, busy: false };
+
+  function updateHelpChatVisibility() {
+    const widget = $("#help-chat-widget");
+    if (widget) widget.hidden = !S.aiAvailable;
+  }
+
+  function renderHelpChatMessages() {
+    const box = $("#help-chat-messages");
+    if (!box) return;
+    box.innerHTML = helpChat.messages.map((m) =>
+      `<div class="help-chat-msg ${m.role === "user" ? "user" : "bot"}${m.pending ? " pending" : ""}">${esc(m.content)}</div>`
+    ).join("") || `<div class="help-chat-msg bot">Hallo! Fragen Sie mich etwas zum Panel - z. B. "Wie verbinde ich Instagram?" oder "Was bedeutet Freigabe-Modus?".</div>`;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function openHelpChat() {
+    helpChat.open = true;
+    const panel = $("#help-chat-panel");
+    if (panel) panel.hidden = false;
+    renderHelpChatMessages();
+    $("#help-chat-input")?.focus();
+  }
+  function closeHelpChat() {
+    helpChat.open = false;
+    const panel = $("#help-chat-panel");
+    if (panel) panel.hidden = true;
+  }
+
+  async function sendHelpChatMessage(text) {
+    if (!text || helpChat.busy) return;
+    helpChat.messages.push({ role: "user", content: text });
+    helpChat.messages.push({ role: "assistant", content: "…", pending: true });
+    helpChat.busy = true;
+    renderHelpChatMessages();
+    try {
+      const history = helpChat.messages.filter((m) => !m.pending).map((m) => ({ role: m.role, content: m.content }));
+      const { reply } = await api("POST", "/api/help-chat", { messages: history });
+      helpChat.messages.pop();
+      helpChat.messages.push({ role: "assistant", content: reply });
+    } catch (err) {
+      helpChat.messages.pop();
+      helpChat.messages.push({ role: "assistant", content: err.message || "Der Hilfe-Chat konnte gerade nicht antworten. Bitte später erneut versuchen." });
+    } finally {
+      helpChat.busy = false;
+      renderHelpChatMessages();
+    }
+  }
+
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); closeHelpChat(); } });
+
+  document.addEventListener("submit", async (e) => {
+    if (e.target.id !== "help-chat-form") return;
+    e.preventDefault();
+    const input = $("#help-chat-input");
+    const text = (input?.value || "").trim();
+    if (!text) return;
+    input.value = "";
+    await sendHelpChatMessage(text);
+  });
 
   document.addEventListener("click", async (e) => {
     const lightboxTrigger = e.target.closest("[data-lightbox]");
@@ -1556,6 +1655,14 @@
     }
     if (e.target.id === "lightbox-close" || e.target.id === "lightbox-overlay") {
       closeLightbox();
+      return;
+    }
+    if (e.target.closest("#help-chat-toggle")) {
+      if (helpChat.open) closeHelpChat(); else openHelpChat();
+      return;
+    }
+    if (e.target.closest("#help-chat-close")) {
+      closeHelpChat();
       return;
     }
 
@@ -2016,6 +2123,7 @@
       S.aiAvailable = Boolean(p.aiAvailable);
       S.trialDays = Number(p.trialDays) || 7;
       S.turnstileSiteKey = p.turnstileSiteKey || null;
+      updateHelpChatVisibility();
     } catch {
       $("#stage").innerHTML = `<div class="banner bad" role="alert">Das Panel ist gerade nicht erreichbar. Bitte laden Sie die Seite in ein paar Minuten neu.</div>`;
       return;
@@ -2206,6 +2314,7 @@
     }
     if (url === "/api/access-link") return { link: "https://mcp.pipebot.at/panel/login?key=vorschau-beispiel" };
     if (url === "/api/recover-access") return { ok: true, message: "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt. (Vorschau-Beispiel)" };
+    if (url === "/api/help-chat") return { reply: "Das ist eine Vorschau ohne echte KI-Antwort - im echten Panel beantwortet der Hilfe-Chat hier Ihre Frage zum Ablauf, zu Instagram/LinkedIn oder zum Freigabe-Modus. (Vorschau-Beispiel)" };
     if (url === "/api/posts") return { posts: MOCK.posts };
     if (url === "/api/logout") { MOCK.customer = null; MOCK.connections = []; return { ok: true }; }
     throw new Error("Unbekannt");

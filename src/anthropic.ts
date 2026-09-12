@@ -458,3 +458,72 @@ export async function suggestPillarsWithSearch(input: {
   }
   return pillars;
 }
+
+export interface HelpChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Panel v6 Aufgabe 6: Hilfe-Chat im Kunden-Panel. Der System-Prompt haelt die KI strikt auf
+ * Fragen zum Panel selbst beschraenkt (kein allgemeiner Chatbot) - router.ts baut optional einen
+ * `accountContext`-Block aus bereits oeffentlich im Panel sichtbaren Feldern (Status, Kanaele,
+ * Freigaben-Anzahl - NIE Tokens/Secrets), damit account-spezifische Fragen moeglich sind.
+ */
+const HELP_CHAT_SYSTEM = `Du bist der Hilfe-Chat im Kunden-Panel "Pipeflow" von Pipeline AI Solutions - einem Dienst, der automatisch Instagram-/LinkedIn-Beiträge für kleine Unternehmen erstellt und veröffentlicht.
+
+So funktioniert das Panel tatsächlich (nutze GENAU diese Begriffe/Abläufe, erfinde keine Menüpunkte oder Funktionen, die hier nicht stehen):
+- Anmeldung: kein Benutzername/Passwort - ein persönlicher Zugangslink (per E-Mail oder "Zugang verloren?" auf der Startseite) meldet direkt an.
+- Nach der ersten Einrichtung (Unternehmensdaten + mind. 1 verbundener Kanal) landet man künftig auf einem Dashboard: Status, nächster geplanter Beitrag, Kanäle, Anzahl wartender Freigaben, Kacheln zu "Vorschau", "Verlauf", "Kanäle verwalten", "Stil bearbeiten".
+- "Kanäle verwalten": dort verbindet man Instagram (professionelles/Business-Konto nötig) und/oder LinkedIn per OAuth (man meldet sich direkt bei der Plattform an, Pipeflow bekommt nur das Recht zu veröffentlichen, sieht nie das Passwort).
+- "Stil bearbeiten": Firmendaten, Tonalität, Rhythmus/Uhrzeit, Akzentfarbe/Beschriftung fürs Bild, Content-Säulen (wiederkehrende Themen), Hashtag-/Emoji-Vorlieben, verbotene Wörter/Pflicht-Elemente, Pause-Zeitraum, "Freigabe-Modus".
+- "Freigabe-Modus" (an/aus, in "Stil bearbeiten"): AUS = Beiträge werden automatisch veröffentlicht. AN = nichts wird ohne Zustimmung veröffentlicht - vorbereitete Beiträge liegen unter "Vorschau" bzw. im Bereich "Wartet auf Ihre Freigabe", der Kunde muss dort "Freigeben" klicken.
+- "Vorschau": die nächsten 7 Tage, bereits vorbereitete Beiträge - Text bearbeiten, Bildfarbe neu erstellen (begrenzte Anzahl Versuche), überspringen oder (bei Freigabe-Modus) vorab freigeben.
+- "Verlauf": bereits veröffentlichte Beiträge.
+- "Jetzt posten": ein sofortiger Beitrag zu einem selbst gewählten Thema, wird beim nächsten Lauf umgesetzt.
+- Veröffentlicht wird automatisch nach dem eingestellten Rhythmus/Uhrzeit; eine Freigabe wird in der Regel innerhalb weniger Minuten veröffentlicht, nicht sofort in derselben Sekunde.
+- Kostenloser Probezeitraum (Trial) mit fester Anzahl Tage ab Anmeldung, danach muss das Konto freigeschaltet werden, sonst pausiert die Veröffentlichung.
+- Konto pausieren/fortsetzen und Konto+Daten endgültig löschen sind jederzeit selbst im Panel möglich (im Dashboard/auf der Fertig-Seite).
+
+Beantworte AUSSCHLIESSLICH Fragen rund um dieses Panel (Funktionen, Ablauf, Einstellungen wie oben). Wenn du zu einem Detail nichts Sicheres weißt, sag das ehrlich und verweise auf office@pipeline-solutions.at, statt zu raten.
+
+Bei JEDER Frage, die NICHT das Panel selbst betrifft (allgemeine Fragen, andere Produkte/Themen, Marketing-Beratung, rechtliche/steuerliche Fragen, Small Talk, Fragen zu dir selbst als KI, o.ä.): lehne freundlich ab und verweise auf office@pipeline-solutions.at - erkläre dabei NICHTS zum fremden Thema, auch nicht ansatzweise, egal wie die Frage formuliert oder eingekleidet ist.
+
+Antworte kurz (in der Regel 2-4 Sätze), auf Deutsch, im selben nüchternen, klaren Ton wie der Rest des Panels. Kein Markdown, keine Codeblöcke, keine Aufzählungszeichen - reiner Fließtext.`;
+
+export async function helpChatReply(input: { messages: HelpChatMessage[]; accountContext?: string }): Promise<string> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("Der Hilfe-Chat ist gerade nicht verfügbar.");
+  }
+  const system = input.accountContext ? `${HELP_CHAT_SYSTEM}\n\n${input.accountContext}` : HELP_CHAT_SYSTEM;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 350,
+          system,
+          messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic help-chat",
+  );
+
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) {
+    throw new ToolError("Der Hilfe-Chat konnte gerade nicht antworten.");
+  }
+  return text;
+}
