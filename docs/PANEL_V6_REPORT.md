@@ -22,7 +22,7 @@ tatsächlichen Produktions-Stand widerspiegelt.
       nachgebaut, wie gefordert.
 - [x] Aufgabe 3 - Dashboard-Umbau (siehe unten - UI-only, NICHT in einem echten Browser getestet)
 - [x] Aufgabe 4 - Kunden-E-Mails (siehe unten)
-- [ ] Aufgabe 5 - Zugangslink-Wiederherstellung
+- [x] Aufgabe 5 - Zugangslink-Wiederherstellung (siehe unten)
 - [ ] Aufgabe 6 - Chatbot-Hilfe
 - [ ] Aufgabe 7 - Abschluss-Deploy
 
@@ -232,6 +232,29 @@ an Ihre eigene Adresse nutzen**, um den echten Versand einmal selbst zu bestäti
   hintereinander für denselben Kunden aufgerufen (genau 1 Mail-Versuch geloggt, `pending count`
   trotzdem korrekt 2) und `logPost()` zweimal (genau 1 "erster Beitrag"-Mail-Versuch geloggt) -
   beide Drossel-Mechanismen funktionieren wie vorgesehen.
+
+## Aufgabe 5 - Zugangslink-Wiederherstellung
+
+- Neuer, eingeklappter Bereich ("Sie haben schon ein Konto? Zugang verloren?") unterhalb des
+  Signup-Formulars auf der Panel-Startseite, nur für nicht angemeldete Besucher (`!edit` in
+  `companyHtml()`).
+- `POST /panel/api/recover-access`: bei Treffer wird - genau wie beim bestehenden "Persönlichen
+  Link erzeugen"-Button - ein neuer `login_key_hash` gesetzt (ersetzt jeden älteren Link
+  automatisch) und per Mail verschickt. **Antwort ist in JEDEM Fall identisch** (geprüft: Text
+  bei bekannter und unbekannter Adresse ist wortgleich) - verrät nie, ob ein Konto existiert.
+- Zwei Rate-Limit-Ebenen: 3x/Stunde pro E-Mail-Adresse (wie gefordert) UND zusätzlich 10x/Stunde
+  pro IP (Backstop gegen das Durchprobieren vieler verschiedener Adressen von einem Absender).
+- **Bekannte Grenze, offen benannt:** die Antwortzeit selbst ist NICHT künstlich angeglichen -
+  ein Treffer schreibt in die DB und stößt einen echten Mail-Versand an, ein Nicht-Treffer tut
+  nichts davon, was einen minimalen Zeitunterschied verursachen könnte (Timing-Seitenkanal). Für
+  dieses Panel als vertretbar eingeschätzt (kein hochsensibles Ziel, keine großen Nutzerzahlen),
+  aber bewusst nicht verschwiegen.
+
+### Verifikation
+
+`npm run test:panel`: 110/110 grün (6 neue Tests: ungültiges Format, unbekannte vs. bekannte
+Adresse mit identischer Antwort, alter Link nach Wiederherstellung tatsächlich ungültig,
+Rate-Limit greift nach 3 Anfragen). Kein echter Mail-Versand (`PANEL_MAIL_DRY_RUN=1`).
 
 ## Kosteneinschätzung (Regel 11)
 

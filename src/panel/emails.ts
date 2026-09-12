@@ -30,6 +30,22 @@ export function verificationEmail(input: { to: string; company: string; verifyUr
   };
 }
 
+/** Panel v6 Aufgabe 5: neuer persönlicher Zugangslink nach "Zugang verloren?". */
+export function accessRecoveryEmail(input: { to: string; company: string; loginUrl: string }): MailInput {
+  return {
+    to: input.to,
+    subject: "Ihr neuer Zugangslink - Pipeflow",
+    text:
+      `Hallo,\n\n` +
+      `hier ist Ihr neuer persönlicher Zugangslink für "${input.company}":\n${input.loginUrl}\n\n` +
+      `Der Link ersetzt jeden älteren Zugangslink - falls Sie noch einen gespeichert hatten, funktioniert ` +
+      `dieser ab jetzt nicht mehr. Behandeln Sie diesen Link wie ein Passwort.\n\n` +
+      `Falls Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail einfach - es passiert nichts, ` +
+      `solange Sie den Link nicht selbst öffnen.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
 /**
  * Panel v6 Aufgabe 4b: "X Beiträge warten auf Ihre Freigabe" - gesammelt, max. 1x/Tag pro Kunde
  * (der Aufrufer in credentials.ts entscheidet, WANN das gilt; diese Funktion baut nur den Text,

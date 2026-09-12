@@ -43,7 +43,7 @@ import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
-import { verificationEmail } from "./emails.js";
+import { accessRecoveryEmail, verificationEmail } from "./emails.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, improveBriefing, suggestPillarsWithSearch, suggestTopics } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
@@ -650,6 +650,31 @@ export function createPanelRouter(): Router {
     db.prepare("UPDATE customers SET login_key_hash = ?, updated_at = ? WHERE id = ?").run(sha256(key), nowIso(), c.id);
     res.json({ link: `${baseUrl()}${MOUNT}/login?key=${key}` });
   });
+
+  // Panel v6 Aufgabe 5: "Zugang verloren?" fuer jemanden OHNE Session. Verraet nie, ob eine
+  // E-Mail-Adresse zu einem Konto gehoert (Datenschutz) - IMMER dieselbe neutrale Erfolgs-
+  // meldung, ob ein Kunde gefunden wurde oder nicht. Erzeugt bei Treffer denselben
+  // login_key_hash neu wie /api/access-link (ersetzt jeden aelteren Link automatisch).
+  router.post("/api/recover-access", safe(async (req, res) => {
+    const email = str(req.body?.email, 200).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      res.status(400).json({ error: "Bitte geben Sie eine gültige E-Mail-Adresse ein." });
+      return;
+    }
+    // Zwei Ebenen: pro E-Mail-Adresse (Aufgabenstellung, 3x/Stunde) UND pro IP (Backstop gegen
+    // das Durchprobieren vieler verschiedener Adressen von einem Absender aus).
+    if (rateLimited(`recover-ip:${clientIp(req)}`, 10, 3_600_000) || rateLimited(`recover-email:${email}`, 3, 3_600_000)) {
+      res.status(429).json({ error: "Zu viele Anfragen. Bitte in einer Stunde erneut versuchen." });
+      return;
+    }
+    const found = db.prepare("SELECT * FROM customers WHERE email = ? AND status = 'active'").get(email) as CustomerRow | undefined;
+    if (found) {
+      const key = randomToken(24);
+      db.prepare("UPDATE customers SET login_key_hash = ?, updated_at = ? WHERE id = ?").run(sha256(key), nowIso(), found.id);
+      sendMailBestEffort(accessRecoveryEmail({ to: found.email, company: found.company, loginUrl: `${baseUrl()}${MOUNT}/login?key=${key}` }));
+    }
+    res.json({ ok: true, message: "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt." });
+  }));
 
   // Panel v6 Aufgabe 2b: Bestaetigungslink aus der E-Mail. Findet den Kunden ueber den
   // Token-Hash (wie login_key_hash), setzt email_verified, macht den Token einmalig ungueltig
