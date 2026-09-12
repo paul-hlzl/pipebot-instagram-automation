@@ -398,6 +398,40 @@ async function main() {
     }
   }
 
+  // --- Hilfe-Chat (v6, Aufgabe 6) - funktioniert auch ohne Login, deshalb IP-Rate-Limit statt
+  // Auth-Gate als erste Pruefung. KEIN echter Anthropic-Aufruf in dieser Suite (Kosten) - nur die
+  // Validierung, die VOR dem eigentlichen KI-Aufruf greift. Der volle Roundtrip (inkl. des
+  // account-spezifischen Kontexts) wurde manuell gegen Staging verifiziert (siehe Report).
+  console.log("\nHilfe-Chat:");
+  {
+    const emptyRes = await fetch(`${BASE}${MOUNT}/api/help-chat`, {
+      method: "POST", headers: { "content-type": "application/json", cookie: sessionCookie }, body: JSON.stringify({ messages: [] }),
+    });
+    ok("help-chat ohne Nachrichten -> 400", emptyRes.status === 400, `status=${emptyRes.status}`);
+
+    const missingRes = await fetch(`${BASE}${MOUNT}/api/help-chat`, {
+      method: "POST", headers: { "content-type": "application/json", cookie: sessionCookie }, body: JSON.stringify({}),
+    });
+    ok("help-chat ohne 'messages'-Feld -> 400", missingRes.status === 400, `status=${missingRes.status}`);
+
+    const badRoleRes = await fetch(`${BASE}${MOUNT}/api/help-chat`, {
+      method: "POST", headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ messages: [{ role: "assistant", content: "nur eine Bot-Nachricht, keine Frage" }] }),
+    });
+    ok("help-chat ohne abschließende User-Nachricht -> 400", badRoleRes.status === 400, `status=${badRoleRes.status}`);
+
+    const providersRes2 = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const { aiAvailable: aiAvailable2 } = await providersRes2.json();
+    if (!aiAvailable2) {
+      const res = await fetch(`${BASE}${MOUNT}/api/help-chat`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "Wie verbinde ich Instagram?" }] }),
+      });
+      ok("help-chat ohne ANTHROPIC_API_KEY -> 503", res.status === 503, `status=${res.status}`);
+    } else {
+      console.log("  skip - ANTHROPIC_API_KEY ist gesetzt, 503-Check nicht anwendbar (kein echter Aufruf in dieser Suite)");
+    }
+  }
+
   // --- 3e-2. Content-Säulen per KI + Web-Suche (Zusatz-Aufgabe) - laeuft auch ohne Login
   // (waehrend des Signups), wie improve-briefing/analyze-website. KEIN echter Anthropic/Web-
   // Search-Aufruf in dieser Suite - ein Web-Search-Aufruf kostet echtes Geld pro Suche, und das

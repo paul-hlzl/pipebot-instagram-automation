@@ -45,7 +45,7 @@ import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./t
 import { sendMailBestEffort } from "./mailer.js";
 import { accessRecoveryEmail, verificationEmail } from "./emails.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
-import { anthropicAvailable, improveBriefing, suggestPillarsWithSearch, suggestTopics } from "../anthropic.js";
+import { anthropicAvailable, helpChatReply, improveBriefing, suggestPillarsWithSearch, suggestTopics, type HelpChatMessage } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 
@@ -546,6 +546,70 @@ export function createPanelRouter(): Router {
       } catch (err) {
         console.error("[panel] suggest-topics fehlgeschlagen:", err);
         res.status(502).json({ error: "Die Vorschläge konnten gerade nicht erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
+
+  // Panel v6 Aufgabe 6: Hilfe-Chat. Funktioniert auch ohne Login (z. B. ein Interessent vor dem
+  // Signup) - Rate-Limit-Schluessel ist dann die IP statt der Kunden-ID, wie bei
+  // improve-briefing/analyze-website. Verlauf lebt nur clientseitig fuer die Sitzung, der Server
+  // ist pro Anfrage zustandslos (der Client schickt die bisherigen Nachrichten mit).
+  router.post(
+    "/api/help-chat",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (rateLimited(`help-chat:${c ? c.id : clientIp(req)}`, 20, 3_600_000)) {
+        res.status(429).json({ error: "Zu viele Nachrichten. Bitte in einer Stunde erneut versuchen." });
+        return;
+      }
+      if (c && !c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "Der Hilfe-Chat ist gerade nicht verfügbar." });
+        return;
+      }
+      const rawMessages: unknown[] = Array.isArray(req.body?.messages) ? req.body.messages : [];
+      // Serverseitig auf die letzten 10 Nachrichten begrenzt (unabhaengig davon, was der Client
+      // schickt) - deckelt die Anthropic-Kosten pro Anfrage, auch bei einem sehr langen Verlauf.
+      const messages: HelpChatMessage[] = rawMessages
+        .filter((m: unknown): m is { role: string; content: string } =>
+          Boolean(m) && typeof m === "object" && ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") && typeof (m as { content?: unknown }).content === "string",
+        )
+        .slice(-10)
+        .map((m) => ({ role: m.role as "user" | "assistant", content: str(m.content, 2000) }));
+      if (!messages.length || messages[messages.length - 1].role !== "user") {
+        res.status(400).json({ error: "Bitte schreiben Sie zuerst eine Frage." });
+        return;
+      }
+
+      let accountContext: string | undefined;
+      if (c) {
+        const connections = db.prepare("SELECT * FROM connections WHERE customer_id = ?").all(c.id) as ConnectionRow[];
+        const channelLines = ["instagram", "linkedin"].map((provider) => {
+          const conn = connections.find((r) => r.provider === provider);
+          const label = conn ? connectionStatus(conn) : "nicht verbunden";
+          return `${provider}: ${label}`;
+        });
+        const approvalsWaiting = c.approval_mode ? listPendingApprovalsForCustomer(c.id).length : 0;
+        accountContext =
+          `Kontostand dieses angemeldeten Kunden (nur zur Beantwortung nutzen, nicht als Rohdaten-Liste zurückgeben):\n` +
+          `- Firma: ${c.company}\n` +
+          `- Status: ${c.status === "active" ? "aktiv" : "pausiert (vom Admin)"}${c.customer_paused ? ", vom Kunden selbst pausiert" : ""}\n` +
+          `- Trial: ${isTrialExpired({ trialEndsAt: c.trial_ends_at }) ? "abgelaufen" : c.trial_ends_at ? `noch ${trialDaysLeft(c.trial_ends_at)} Tage` : "kein Trial-Limit"}\n` +
+          `- E-Mail bestätigt: ${c.email_verified ? "ja" : "nein"}\n` +
+          `- Freigabe-Modus: ${c.approval_mode ? "an" : "aus"}\n` +
+          `- Kanäle: ${channelLines.join(", ")}\n` +
+          `- Wartende Freigaben: ${approvalsWaiting}`;
+      }
+
+      try {
+        const reply = await helpChatReply({ messages, accountContext });
+        res.json({ reply });
+      } catch (err) {
+        console.error("[panel] help-chat fehlgeschlagen:", err);
+        res.status(502).json({ error: "Der Hilfe-Chat konnte gerade nicht antworten. Bitte später erneut versuchen." });
       }
     }),
   );

@@ -23,7 +23,7 @@ tatsächlichen Produktions-Stand widerspiegelt.
 - [x] Aufgabe 3 - Dashboard-Umbau (siehe unten - UI-only, NICHT in einem echten Browser getestet)
 - [x] Aufgabe 4 - Kunden-E-Mails (siehe unten)
 - [x] Aufgabe 5 - Zugangslink-Wiederherstellung (siehe unten)
-- [ ] Aufgabe 6 - Chatbot-Hilfe
+- [x] Aufgabe 6 - Chatbot-Hilfe (siehe unten)
 - [ ] Aufgabe 7 - Abschluss-Deploy
 
 ## Zwischenfall (Transparenz)
@@ -250,11 +250,57 @@ an Ihre eigene Adresse nutzen**, um den echten Versand einmal selbst zu bestäti
   dieses Panel als vertretbar eingeschätzt (kein hochsensibles Ziel, keine großen Nutzerzahlen),
   aber bewusst nicht verschwiegen.
 
+### Deploy-Status
+
+**Deployed.** `panel-v6` in `main` gemerged (Commit `9f08aab`). Neustart bewusst um ca. 3 Minuten
+verzögert (Merge/Build lagen direkt vor dem 08:43-UTC-Routinenlauf), dann um ca. 08:43:43 UTC neu
+gestartet - Backup vorher, `/health`/`/mcp`/`/panel/api/health` danach grün, Log sauber (nur die
+bekannte, unveränderte LinkedIn-Warnung).
+
 ### Verifikation
 
 `npm run test:panel`: 110/110 grün (6 neue Tests: ungültiges Format, unbekannte vs. bekannte
 Adresse mit identischer Antwort, alter Link nach Wiederherstellung tatsächlich ungültig,
 Rate-Limit greift nach 3 Anfragen). Kein echter Mail-Versand (`PANEL_MAIL_DRY_RUN=1`).
+
+## Aufgabe 6 - Chatbot-Hilfe im Panel
+
+- Kleines Chat-Widget unten rechts (💬-Button, öffnet ein Panel), nur sichtbar wenn
+  `ANTHROPIC_API_KEY` konfiguriert ist (`updateHelpChatVisibility()`, wie bei den anderen
+  KI-Buttons). Verlauf lebt nur im Browser-Speicher der aktuellen Sitzung (kein
+  Server-/localStorage-Speicher), wie gefordert.
+- `POST /panel/api/help-chat` - funktioniert mit UND ohne Login (ein Interessent kann vor dem
+  Signup allgemeine Fragen stellen); Rate-Limit 20 Nachrichten/Stunde pro Kunde bzw. IP.
+  Angemeldete, aber noch nicht per E-Mail bestätigte Kunden werden wie bei allen anderen
+  KI-Endpunkten mit 403 abgewiesen (dieselbe Konsequenz wie in Aufgabe 2b, hier neu ergänzt).
+- System-Prompt (`src/anthropic.ts`, `HELP_CHAT_SYSTEM`) beschreibt den TATSÄCHLICHEN Panel-Ablauf
+  in eigenen Worten (Dashboard, Kanäle verwalten, Stil bearbeiten, Freigabe-Modus, Vorschau,
+  Verlauf, Jetzt posten, Trial) und weist die KI an, bei Unsicherheit ehrlich zu sagen, dass sie
+  es nicht weiß, statt zu raten - und JEDE panel-fremde Frage freundlich mit Verweis auf
+  office@pipeline-solutions.at abzulehnen, ohne auch nur ansatzweise darauf einzugehen.
+- **Account-Kontext:** ist der Kunde eingeloggt, bekommt der System-Prompt einen zusätzlichen
+  Block mit Status, Trial-Tagen, Freigabe-Modus, Kanal-Status (verbunden/abgelaufen/nicht
+  verbunden) und Anzahl wartender Freigaben - ausschließlich Felder, die der Kunde im Panel
+  ohnehin selbst sieht, NIE Tokens/Secrets (die werden dem Prompt gar nicht erst übergeben,
+  es gibt in diesem Code-Pfad keinen Zugriff darauf).
+- Kosten-Deckelung unabhängig vom Client: der Server begrenzt den an Anthropic geschickten
+  Verlauf serverseitig auf die letzten 10 Nachrichten (`messages.slice(-10)`), unabhängig davon,
+  wie viel der Client mitschickt, plus das 20/h-Rate-Limit.
+
+### Verifikation
+
+- `npm run test:panel`: 113/113 grün (4 neue Tests - Validierung vor dem eigentlichen
+  KI-Aufruf: leere/fehlende Nachrichten, fehlende User-Nachricht am Ende, 503 ohne Key).
+- **Echter, bewusst risikoarmer Smoke-Test gegen Staging** (Regel 3 verbietet echte
+  Test-E-Mails/Veröffentlichungen, nicht aber einen einzelnen günstigen Haiku-Aufruf zur
+  Funktionsprüfung - anders als bei Mailversand/Veröffentlichung gibt es hier kein Risiko für
+  echte Kunden/Daten): 5 echte Anfragen gegen die Staging-Instanz, insgesamt Bruchteile eines
+  Cents. Ergebnis: Panel-Fragen (Instagram verbinden, Freigabe-Modus) korrekt und konkret
+  beantwortet (nach der ersten, noch zu generischen Testantwort wurde der System-Prompt mit den
+  echten Panel-Begriffen angereichert, siehe oben); eine Fremdthema-Frage ("Gedicht über Katzen")
+  korrekt abgelehnt mit Verweis auf office@pipeline-solutions.at; eine account-spezifische Frage
+  ("Warten Beiträge auf meine Freigabe, ist Instagram verbunden?") gegen einen echten
+  Test-Kunden korrekt mit "nein" beantwortet (beides stimmte tatsächlich).
 
 ## Kosteneinschätzung (Regel 11)
 
@@ -269,6 +315,15 @@ Rate-Limit greift nach 3 Anfragen). Kein echter Mail-Versand (`PANEL_MAIL_DRY_RU
   KI-/kostenpflichtiger Dienst beteiligt) - reiner SMTP-Versand über das bestehende Postfach, mit
   eigenen Drossel-Mechanismen (max. 1x/24h bzw. genau 1x einmalig) statt eines klassischen
   Rate-Limits, da es hier nicht um Missbrauch durch Dritte geht, sondern um "nicht zuspammen".
+- Aufgabe 6 (Hilfe-Chat): nutzt dasselbe günstige Haiku-Modell wie die übrigen KI-Buttons im
+  Panel (`ANTHROPIC_MODEL`, Standard `claude-haiku-4-5-20251001`). Grobe Schätzung (Haiku-typische
+  Preisklasse, nicht in dieser Sitzung live gegen die aktuelle Preisliste nachgeschlagen - bei
+  Bedarf über die Anthropic-Preisseite/das `claude-api`-Referenzmaterial verifizieren): eine
+  einzelne Antwort liegt bei System-Prompt + bis zu 10 Verlauf-Nachrichten + Antwort im Bereich
+  von deutlich unter einem Cent; das 20-Nachrichten/Stunde-Limit pro Kunde deckelt den
+  Extremfall auf einen niedrigen Cent-Betrag pro Kunde und Stunde. Rate-Limit UND
+  serverseitige Verlaufs-Kürzung (max. 10 Nachrichten an Anthropic, unabhängig vom Client)
+  wie in Regel 11 verlangt vorhanden.
 
 ## Bekannte Grenzen (nicht beschönigt)
 
