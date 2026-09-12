@@ -36,14 +36,43 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/** Splits a short headline into 1-2 lines for the left-of-center layout (see styleguide.md). */
-function wrapHeadline(headline: string): string[] {
+// Panel v7 fix (Teil 6): approximate average glyph width for this serif font at 1x font-size -
+// used both to decide where to wrap and, as a last-resort safety net, as the `textLength`
+// clamp on each rendered line (see addHeadlineText). Kept as one named constant so the wrap
+// estimate and the render-time safety net can never drift apart from each other.
+const AVG_GLYPH_WIDTH_FACTOR = 0.56;
+
+function estimateTextWidth(text: string, fontSize: number): number {
+  return text.length * fontSize * AVG_GLYPH_WIDTH_FACTOR;
+}
+
+/**
+ * Greedily wraps a headline into as many lines as actually needed at the given font size, based
+ * on estimated rendered width (not a blind word-count split) - a headline with more/longer words
+ * than the original short "2-4 words" case (increasingly common with content-pillar-driven
+ * headlines, e.g. "Rückenschmerzen? Beweglichkeit zurückgewinnen") now wraps onto as many lines
+ * as its actual length requires instead of forcing an uneven 2-line split that could still run a
+ * single long line past the image edge (the original bug, screenshot-confirmed by a customer).
+ * A single word longer than maxWidth on its own is kept on its own line regardless (nothing left
+ * to break it on) - the render-time `textLength` safety net in addHeadlineText still keeps it
+ * from actually overflowing the image.
+ */
+function wrapHeadline(headline: string, fontSize: number, maxWidth: number): string[] {
   const words = headline.trim().split(/\s+/).filter(Boolean);
-  if (words.length <= 2) {
-    return [words.join(" ")];
+  if (!words.length) return [""];
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (current && estimateTextWidth(candidate, fontSize) > maxWidth) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
   }
-  const mid = Math.ceil(words.length / 2);
-  return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
+  if (current) lines.push(current);
+  return lines;
 }
 
 /**
@@ -66,9 +95,6 @@ export async function addHeadlineText(
   const width = meta.width ?? 1024;
   const height = meta.height ?? 1024;
 
-  const lines = wrapHeadline(headline);
-  const longestLine = Math.max(...lines.map((line) => line.length));
-
   const zone = getHeadlineSafeZone(format);
   const safeZoneLeft = width * zone.left;
   const safeZoneRight = width * zone.right;
@@ -77,31 +103,48 @@ export async function addHeadlineText(
   const safeBottom = height * zone.bottom;
   const maxTextHeight = safeBottom - safeTop;
 
-  const avgGlyphWidthFactor = 0.56; // approximate average glyph width for this serif at 1x font-size
-  let fontSize = Math.floor(maxTextWidth / (longestLine * avgGlyphWidthFactor));
-  fontSize = Math.max(Math.round(height * 0.06), Math.min(fontSize, Math.round(height * 0.12)));
+  const MAX_FONT_SIZE = Math.round(height * 0.12);
+  const MIN_FONT_SIZE = Math.round(height * 0.035);
+  const MAX_LINES = 4; // beyond this, keep shrinking the font instead of adding still more lines
+
+  // Panel v7 fix (Teil 6): the original code guessed a font size from ONE assumed "longest
+  // line" BEFORE wrapping, wrapped headlines longer than 2 words into a blind 50/50 word-count
+  // split, and only ever re-checked the TOTAL block HEIGHT afterwards - never each line's actual
+  // WIDTH. A longer, unevenly-split headline (content pillars now produce these more often than
+  // the original short 2-4-word case, e.g. "Rückenschmerzen? Beweglichkeit zurückgewinnen") could
+  // therefore still render past the right edge with no fallback catching it - screenshot-
+  // confirmed by a customer (Andrea Hölzl). Fixed by iterating: wrap at the current font size,
+  // check the actual widest resulting line (not a pre-wrap guess) AND the total block height,
+  // shrink and re-wrap if either is still too big, down to a sane minimum font size.
+  let fontSize = MAX_FONT_SIZE;
+  let lines = wrapHeadline(headline, fontSize, maxTextWidth);
+  for (;;) {
+    const lineHeight = fontSize * 1.15;
+    const totalTextHeight = lineHeight * lines.length;
+    const widestLine = Math.max(...lines.map((line) => estimateTextWidth(line, fontSize)));
+    const fits = widestLine <= maxTextWidth && totalTextHeight <= maxTextHeight && lines.length <= MAX_LINES;
+    if (fits || fontSize <= MIN_FONT_SIZE) break;
+    fontSize = Math.max(MIN_FONT_SIZE, fontSize - Math.max(1, Math.round(fontSize * 0.08)));
+    lines = wrapHeadline(headline, fontSize, maxTextWidth);
+  }
 
   const lineHeight = fontSize * 1.15;
-  let totalTextHeight = lineHeight * lines.length;
-  // Belt-and-suspenders for the story format's tighter vertical band (60% of height,
-  // vs. the feed's unconstrained full height): shrink further if the text block would
-  // still overflow the safe zone (e.g. very long single-line headline).
-  if (totalTextHeight > maxTextHeight) {
-    const scale = maxTextHeight / totalTextHeight;
-    fontSize = Math.max(Math.round(height * 0.04), Math.floor(fontSize * scale));
-    totalTextHeight = fontSize * 1.15 * lines.length;
-  }
-  const scaledLineHeight = fontSize * 1.15;
-
+  const totalTextHeight = lineHeight * lines.length;
   const startX = Math.round(safeZoneLeft);
   const verticalCenter = (safeTop + safeBottom) / 2;
   const firstBaselineY = verticalCenter - totalTextHeight / 2 + fontSize * 0.8;
 
   const tspans = lines
-    .map(
-      (line, i) =>
-        `<tspan x="${startX}" y="${Math.round(firstBaselineY + i * scaledLineHeight)}">${escapeXml(line)}</tspan>`,
-    )
+    .map((line, i) => {
+      // Hard safety net, last resort: even if the estimate above is still off for this exact
+      // text/font (real glyph widths vary per character, this is only an average), `textLength`
+      // + `lengthAdjust="spacingAndGlyphs"` tells the SVG renderer to compress or stretch the
+      // glyphs so the line is rendered at EXACTLY this width - never wider than the safe zone,
+      // no matter what the estimate got wrong. Clamped to maxTextWidth even in the (should be
+      // unreachable after the loop above, except at the MIN_FONT_SIZE floor) worst case.
+      const clampedWidth = Math.min(estimateTextWidth(line, fontSize), maxTextWidth);
+      return `<tspan x="${startX}" y="${Math.round(firstBaselineY + i * lineHeight)}" textLength="${Math.round(clampedWidth)}" lengthAdjust="spacingAndGlyphs">${escapeXml(line)}</tspan>`;
+    })
     .join("");
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">

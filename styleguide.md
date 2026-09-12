@@ -21,7 +21,7 @@ Scale AI Systems"
 "Pipeline" (von unten nach oben lesbar, wie ein Wasserzeichen)
 
 ## TEXT-VORGABEN
-- **Headline:** 2-4 Wörter, kurz & prägnant (kürzer ist besser: bei Flux Schnell rendert 2-3-Wort-Text spürbar zuverlässiger als 5 Wörter — eigener Test 2026-09-05: 2/2 korrekt bei 2 Wörtern, 0/3 korrekt bei 3-5 Wörtern)
+- **Headline:** kurz & prägnant bleibt die stilistische Vorgabe (2-4 Wörter als Zielwert für einen wirkungsvollen, dominanten Headline-Look). **Panel v7 Klarstellung:** der urspüngliche Grund für dieses Limit (Flux Schnell rendert 2-3-Wort-Text spürbar zuverlässiger als 5 Wörter — eigener Test 2026-09-05: 2/2 korrekt bei 2 Wörtern, 0/3 korrekt bei 3-5 Wörtern) betraf das direkte Rendern von Text DURCH Flux selbst - das passiert seit der Umstellung auf Code-seitiges Compositing gar nicht mehr (siehe BILDGENERIERUNG unten, `fal.ts`'s Hintergrund-Prompt enthält explizit KEINEN Text mehr). Das Limit ist also kein technisches Zuverlässigkeits-Erfordernis mehr, sondern reine Gestaltungsempfehlung. `addHeadlineText` in `src/watermark.ts` wurde entsprechend robust gegen LÄNGERE, durch Content-Säulen mittlerweile häufigere Headlines gemacht (variable Zeilenzahl statt starrem 2-Zeilen-Split, iterative Schriftgrößen-Anpassung anhand der tatsächlich umgebrochenen Zeilen statt einer Vorab-Schätzung, plus ein hartes `textLength`-Sicherheitsnetz gegen jedes Überlaufen über den Bildrand) - ein Beitrag mit einer längeren Headline läuft nicht mehr über den Rand, sieht aber bei deutlich mehr als 4-6 Wörtern gestalterisch weniger "dominant" aus als beabsichtigt.
 - **Ton:** Professionell, elegant, nicht verspielt
 - **Sprache:** Englisch (oder Deutsch, je nach Post)
 - **Keine Hashtags im Bild selbst** (die gehen in Caption)
