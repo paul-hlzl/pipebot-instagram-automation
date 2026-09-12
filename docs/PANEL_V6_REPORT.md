@@ -24,7 +24,7 @@ tatsächlichen Produktions-Stand widerspiegelt.
 - [x] Aufgabe 4 - Kunden-E-Mails (siehe unten)
 - [x] Aufgabe 5 - Zugangslink-Wiederherstellung (siehe unten)
 - [x] Aufgabe 6 - Chatbot-Hilfe (siehe unten)
-- [ ] Aufgabe 7 - Abschluss-Deploy
+- [x] Aufgabe 7 - Abschluss-Deploy (siehe Abschlussbericht unten)
 
 ## Zwischenfall (Transparenz)
 
@@ -128,6 +128,29 @@ bleibt sinnvoll als Bremse gegen das Verbrauchen des Mail-Versand-Kontingents/de
 Sender-Reputation (viele Bestätigungsmails an ungültige/gemeldete Adressen könnten dem
 office@pipebot.at-Ruf schaden) und gegen reines DB-Zumüllen - keine Änderung vorgenommen, aber
 explizit geprüft statt unverändert übernommen, wie gefordert.
+
+### Deploy-Status Aufgabe 2
+
+**Deployed.** `panel-v6` in `main` gemerged (`--no-ff`, Commit `8c56f76`), gepusht, Produktion
+(`pm2 restart instagram-mcp --update-env`) um ca. 2026-09-12 08:24 UTC neu gestartet - außerhalb
+des 14:30-15:45-UTC-Blackouts, mit Abstand zum naechsten stuendlichen Routinen-Lauf (08:43).
+
+Vor dem Neustart: Backup `backups/panel/panel-2026-09-12.db`.
+
+Nach dem Neustart geprüft (alles grün):
+- `/health` -> 200, `/mcp` ohne Bearer -> 401 (unverändert), `/panel/api/health` -> 200
+- `/panel/api/providers` liefert `turnstileSiteKey: null` (CAPTCHA korrekt aus, wie erwartet ohne
+  eingetragene Keys)
+- Log sauber, keine neuen Fehler (nur bekannte, unveränderte LinkedIn-/Pillar-Warnungen aus dem
+  laufenden Betrieb)
+- Echte Produktions-DB direkt (read-only) geprüft: alle 3 echten Kunden (Andrea Hölzl,
+  Testunternehmen, Johannes Reiter) haben `email_verified=1` - Migration hat in Produktion
+  genauso funktioniert wie zuvor gegen die Kopie verifiziert.
+
+Rollback-Bereitschaft: Tag `pre-panel-v6` (Code-Stand vor dieser Sitzung) und das DB-Backup von
+eben vorhanden. Rollback wäre: `git revert` des Merge-Commits `8c56f76` + `npm run build` + `pm2
+restart instagram-mcp` (die Migration selbst ist additiv/idempotent, ein Rollback des Codes muss
+die DB-Spalten nicht zurückrollen - sie werden einfach nicht mehr gelesen/geschrieben).
 
 ## Verifikation vor Deploy
 
@@ -342,25 +365,94 @@ Rate-Limit greift nach 3 Anfragen). Kein echter Mail-Versand (`PANEL_MAIL_DRY_RU
   In-Memory (kein DB-Zähler) - überlebt einen Server-Neustart nicht. Bewusst genauso belassen wie
   alle anderen bestehenden Rate-Limits im Panel (Konsistenz), kein neues Risiko gegenüber vorher.
 
-## Deploy-Status Aufgabe 2
 
-**Deployed.** `panel-v6` in `main` gemerged (`--no-ff`, Commit `8c56f76`), gepusht, Produktion
-(`pm2 restart instagram-mcp --update-env`) um ca. 2026-09-12 08:24 UTC neu gestartet - außerhalb
-des 14:30-15:45-UTC-Blackouts, mit Abstand zum naechsten stuendlichen Routinen-Lauf (08:43).
+## Abschlussbericht
 
-Vor dem Neustart: Backup `backups/panel/panel-2026-09-12.db`.
+### 1. Was erledigt/teilweise/nicht ist
 
-Nach dem Neustart geprüft (alles grün):
-- `/health` -> 200, `/mcp` ohne Bearer -> 401 (unverändert), `/panel/api/health` -> 200
-- `/panel/api/providers` liefert `turnstileSiteKey: null` (CAPTCHA korrekt aus, wie erwartet ohne
-  eingetragene Keys)
-- Log sauber, keine neuen Fehler (nur bekannte, unveränderte LinkedIn-/Pillar-Warnungen aus dem
-  laufenden Betrieb)
-- Echte Produktions-DB direkt (read-only) geprüft: alle 3 echten Kunden (Andrea Hölzl,
-  Testunternehmen, Johannes Reiter) haben `email_verified=1` - Migration hat in Produktion
-  genauso funktioniert wie zuvor gegen die Kopie verifiziert.
+Alle 7 Aufgaben sind erledigt UND deployed, in der geforderten Reihenfolge, Aufgabe 2 zuerst und
+sofort für sich live geschaltet, danach die übrigen Aufgaben jeweils einzeln nach Fertigstellung:
 
-Rollback-Bereitschaft: Tag `pre-panel-v6` (Code-Stand vor dieser Sitzung) und das DB-Backup von
-eben vorhanden. Rollback wäre: `git revert` des Merge-Commits `8c56f76` + `npm run build` + `pm2
-restart instagram-mcp` (die Migration selbst ist additiv/idempotent, ein Rollback des Codes muss
-die DB-Spalten nicht zurückrollen - sie werden einfach nicht mehr gelesen/geschrieben).
+| Aufgabe | Status | Hinweis |
+|---|---|---|
+| 1 Sicherheitsnetz | ✅ vollständig | Tag `pre-panel-v6`, Branch `panel-v6` |
+| 2 Missbrauchsschutz | ✅ **vollständig deployed** | siehe wichtige Einschränkung unten (2a) |
+| 2.5 Verifikation | ✅ geprüft, unverändert vorhanden | nichts neu gebaut |
+| 3 Dashboard-Umbau | ✅ vollständig deployed | UI-only, nicht in echtem Browser getestet |
+| 4 Kunden-E-Mails | ✅ vollständig deployed | kein echter Mailversand in dieser Sitzung |
+| 5 Zugangslink-Wiederherstellung | ✅ vollständig deployed | |
+| 6 Chatbot-Hilfe | ✅ vollständig deployed | echter (günstiger) Smoke-Test durchgeführt |
+| 7 Abschluss-Deploy | ✅ | gestaffelt, nicht am Ende gebündelt |
+
+**Der wichtigste Einzelpunkt: Aufgabe 2 ist vollständig deployed**, ABER nur zur Hälfte scharf:
+- **2b (E-Mail-Bestätigung) ist voll wirksam, sofort, ohne dass Sie etwas tun müssen.** Ab jetzt
+  generiert die nächtliche Vorausplanung UND die stündliche Routine keinen einzigen
+  Anthropic-/fal.ai-Aufruf mehr für einen Kunden, der seine E-Mail nicht bestätigt hat - das war
+  die eigentliche, dringende Kostenlücke, und die ist geschlossen.
+- **2a (CAPTCHA) ist gebaut, aber MANGELS Ihres Cloudflare-Accounts noch nicht scharf** - das
+  Signup-Formular läuft aktuell komplett ohne CAPTCHA, nur mit dem bestehenden 5/Stunde-IP-Limit.
+  Das ist keine stillschweigende Lücke, sondern eine bewusste, im Report und weiter unten klar
+  benannte Baustelle, die von Ihnen selbst abhängt (siehe Punkt 2).
+
+### 2. Was Sie manuell einrichten müssen
+
+1. **Cloudflare Turnstile (dringend, für vollen Schutz von Aufgabe 2a):**
+   dash.cloudflare.com → kostenloser Account (falls noch keiner vorhanden) → Turnstile → "Add
+   widget" → Domain `mcp.pipebot.at` eintragen, Modus "Managed" reicht → Site-Key + Secret-Key in
+   `.env` als `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` eintragen → `pm2 restart
+   instagram-mcp`. Kein Code-Deploy nötig, nur die zwei Werte.
+2. **E-Mail-Versand real bestätigen:** technisch sollte er funktionieren (dieselbe
+   msmtp/Hostinger-Verbindung, die `weekly-report.mjs` schon lange nutzt), aber ich habe in
+   dieser Sitzung selbst keine einzige echte Mail verschickt (Regel 3). Bitte im Admin-Bereich
+   (`/panel/admin`) den neuen Button **"Test-E-Mail senden"** einmal an Ihre eigene Adresse
+   nutzen, um das selbst zu bestätigen.
+3. Kein weiterer Einrichtungsschritt nötig - alles andere (Migration, Rate-Limits, Scheduler)
+   läuft automatisch mit dem bereits erfolgten Deploy.
+
+### 3. Kosten-/Risikoeinschätzung: wie gut schützt 2a+2b wirklich?
+
+- **Gegen den eigentlichen Auslöser dieser Aufgabe (nächtliche Kosten für nie aktivierte
+  Accounts) schützt 2b bereits vollständig und unabhängig von 2a** - ein Account, der nie
+  bestätigt wird, verursacht schlicht keine KI-Kosten mehr, egal wie viele davon angelegt werden.
+- **Gegen einen entschlossenen einzelnen Menschen mit einer Wegwerf-E-Mail-Adresse schützt 2b
+  NICHT** - das offen benannt, nicht beschönigt: eine Bestätigungsmail beweist nur "jemand
+  kontrolliert kurz ein Postfach", nicht "das ist ein echtes Unternehmen". Wer sich die Mühe
+  macht, eine 10-Minuten-Mail-Adresse zu nutzen, ist danach ein ganz normaler "verifizierter"
+  Kunde und könnte theoretisch trotzdem Kanäle verbinden und Inhalte generieren lassen (wobei
+  ohne echtes Instagram/LinkedIn-Konto am Ende nichts veröffentlicht werden kann - der Schaden
+  wäre verschwendete Generierungs-Kosten, nicht ein echter Missbrauch der Veröffentlichung).
+- **2a (sobald scharf) schützt zusätzlich gegen VOLLAUTOMATISIERTE Massen-Angriffe** (ein Skript,
+  das den gesamten Ablauf inkl. Wegwerf-Postfach-Abruf automatisiert durchspielt) - das ist ein
+  wirklicher zusätzlicher Schutzgewinn, den 2b allein nicht bietet.
+- **Fazit:** Die akute, den Auftrag auslösende Kostenlücke ist geschlossen. Der verbleibende
+  Rest-Risiko (entschlossener Einzeltäter mit Wegwerf-Mail) ist eine grundsätzliche Grenze von
+  E-Mail-Bestätigung als Methode, kein Konstruktionsfehler dieser Umsetzung - eine echte weitere
+  Verschärfung (Zahlungsmethode, Identitätsprüfung) wäre ein separates, deutlich größeres Thema.
+
+### 4. Bekannte Risiken, insbesondere ungetestete UI-Teile
+
+- **Kein Browser-Werkzeug in dieser Sitzung verfügbar** (wie schon in den letzten Sitzungen) -
+  ALLE clientseitigen Neuerungen (neues Dashboard, CAPTCHA-Widget-Einbindung, "Zugang
+  verloren?"-Bereich, Hilfe-Chat-Widget) wurden nur per `node --check` (Syntax), Code-Review und
+  dem HTTP-Backend-Testlauf verifiziert, NICHT visuell in einem echten Browser/Handy. Bitte vor
+  dem nächsten größeren Kundenzugriff einmal selbst durchklicken, insbesondere:
+  - Landet ein Kunde mit mindestens einem verbundenen Kanal nach dem Login wirklich auf dem neuen
+    Dashboard, funktionieren alle vier Kacheln?
+  - Falls Sie Turnstile-Keys eintragen: erscheint das Widget korrekt auf Formular-Seite 2 und
+    lässt sich das Formular danach normal abschicken?
+  - Der Hilfe-Chat-Button unten rechts: öffnet/schließt er sauber, auch auf einem schmalen Handy-
+    Bildschirm?
+- **Turnstile ist mangels Account nicht live getestet** (siehe oben) - die Server-Verifizierung
+  wurde gegen die offizielle Doku implementiert (fail-closed bei Netzwerkfehlern), aber nie gegen
+  einen echten Cloudflare-Widget-Roundtrip ausprobiert.
+- **E-Mail-Zustellung nicht selbst live bestätigt** (Regel 3) - siehe Punkt 2 oben, bitte selbst
+  über den Admin-Test-Button prüfen.
+- **Timing-Seitenkanal bei "Zugang verloren?"** (Aufgabe 5): Antwortzeit ist nicht künstlich
+  angeglichen zwischen Treffer/Nicht-Treffer - als vertretbar eingeschätzt, aber nicht verschwiegen.
+- Alle übrigen Risiken sind in den jeweiligen Aufgaben-Abschnitten oben im Detail dokumentiert.
+
+**Sicherheitsnetz für den Notfall:** Tag `pre-panel-v6` (Stand vor dieser gesamten Sitzung) sowie
+DB-Backups vor jedem einzelnen Deploy-Schritt in `backups/panel/`. Ein Rollback auf den
+Vor-Sitzungs-Stand wäre: `git checkout pre-panel-v6 -- .` + `npm run build` + `pm2 restart
+instagram-mcp` (Datenbank-Migrationen sind additiv, ein Code-Rollback muss sie nicht rückgängig
+machen).
