@@ -114,6 +114,21 @@
   .approval-card .approval-body { flex: 1; min-width: 0; }
   .approval-card .approval-body p { color: var(--stone); font-size: 14px; }
   .channel-badge { display: inline-block; margin-bottom: 6px; padding: 2px 10px; border: 1px solid var(--ink); border-radius: 20px; font-size: 11.5px; font-weight: 500; letter-spacing: .02em; }
+  .channel-badge.warn { border-color: var(--stop); color: var(--stop); }
+
+  /* ---------- Dashboard (Panel v6, Aufgabe 3) ---------- */
+  .shell.no-rail { grid-template-columns: minmax(0, 1fr); }
+  .shell.no-rail .rail { display: none; }
+  .dash-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
+  .dash-tile { display: flex; flex-direction: column; gap: 4px; min-height: 64px; padding: 16px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper); color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+  .dash-tile:hover { border-color: var(--ink); background: var(--wash); }
+  .dash-tile-lbl { font-weight: 600; font-size: 15px; }
+  .dash-tile-sub { font-size: 13px; color: var(--stone); }
+  .dash-channels { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 24px; }
+  .dash-channel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 12px 16px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper); color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+  .dash-channel-row:hover { border-color: var(--ink); background: var(--wash); }
+  @media (max-width: 720px) { .dash-tiles { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 420px) { .dash-tiles { grid-template-columns: 1fr; } }
 
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
   .chip { min-height: 32px; padding: 4px 14px; border: 1px solid var(--ink); border-radius: 20px; background: var(--paper); color: var(--ink); cursor: pointer; font-size: 13.5px; text-align: left; }
@@ -455,6 +470,10 @@
 
   /* ================= Rendering: Pipeline ================= */
   function renderRail() {
+    // Panel v6 Aufgabe 3: die Schritt-Kette bleibt fuer den Erst-Assistenten unveraendert (siehe
+    // unten), zeigt sich aber gar nicht erst, sobald das neue Dashboard der Landepunkt ist - dort
+    // uebernehmen die Dashboard-Kacheln die Navigation.
+    if (S.step === "dashboard") { $("#rail").innerHTML = ""; return; }
     const list = steps();
     const cur = list.indexOf(S.step);
     const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : prov(id).name;
@@ -793,7 +812,8 @@
     const c = conn(p.id);
     const list = steps();
     const nextId = list[list.indexOf(p.id) + 1];
-    const nextName = nextId === "done" ? "Zusammenfassung" : prov(nextId).name;
+    const nextTarget = nextId === "done" ? overviewStep() : nextId;
+    const nextName = nextId === "done" ? (nextTarget === "dashboard" ? "Übersicht" : "Zusammenfassung") : prov(nextId).name;
     const connectBtn = (label) => p.available
       ? `<a class="btn" href="${CONFIG.mount}/connect/${p.id}" data-connect="${p.id}">${label}</a>`
       : `<span class="btn" aria-disabled="true">${label}</span>`;
@@ -820,7 +840,7 @@
       ${statusBox}
       ${c && c.status === "ok" ? `
         <div class="actions">
-          <button class="btn" data-go="${nextId}">Weiter zu ${esc(nextName)}</button>
+          <button class="btn" data-go="${nextTarget}">Weiter zu ${esc(nextName)}</button>
           <a class="link" href="${CONFIG.mount}/connect/${p.id}" data-connect="${p.id}">Anderes Konto verbinden</a>
         </div>` : `
         <h2>So geht's</h2>
@@ -832,7 +852,7 @@
         </ol>
         <div class="actions">
           ${connectBtn(c ? `${esc(p.name)} neu verbinden` : `Mit ${esc(p.name)} verbinden`)}
-          <button class="link" data-skip="${p.id}" data-go="${nextId}">Später verbinden</button>
+          <button class="link" data-skip="${p.id}" data-go="${nextTarget}">Später verbinden</button>
         </div>
         <p class="fine">${p.available ? "Wir bekommen nur das Recht, Beiträge zu veröffentlichen. Ihr Passwort sehen wir nie." : "Diese Verbindung ist gerade nicht verfügbar. Schreiben Sie uns, wir schalten sie frei."}</p>
       `}
@@ -887,36 +907,13 @@
     </div>`;
   }
 
-  function doneHtml() {
-    const connected = S.providers.filter((p) => conn(p.id) && conn(p.id).status !== "expired");
-    const missing = S.providers.filter((p) => !connected.includes(p));
-    const c = S.customer;
+  // Panel v6 Aufgabe 3: der Teil ab "Warten auf Ihre Freigabe" war urspruenglich Teil von
+  // doneHtml() allein - jetzt geteilt zwischen doneHtml() (Erst-Setup-Abschluss, unveraendertes
+  // Aussehen) und dashboardHtml() (neuer Landepunkt fuer wiederkehrende Kunden), damit beide
+  // dieselbe Logik (Freigaben/Vorschau/Jetzt-posten/Beitraege/Kalender/Konto) nutzen, ohne sie
+  // zu duplizieren.
+  function dashboardSectionsHtml(c) {
     return `
-      ${bannerHtml()}
-      ${statusHtml(c)}
-      ${emailVerifyBannerHtml(c)}
-      <h1>${missing.length ? "Fast geschafft." : "Alles verbunden."}</h1>
-      <p class="lede">${missing.length
-        ? `Noch offen: ${missing.map((p) => esc(p.name)).join(" und ")}. Sie können das jederzeit nachholen.`
-        : "Ab jetzt kümmern wir uns um Ihre Beiträge. Sie müssen nichts weiter tun."}</p>
-      ${needsActionHtml()}
-      <dl class="sum">
-        <div><dt>Unternehmen</dt><dd>${esc(c.company)}</dd></div>
-        ${S.providers.map((p) => {
-          const k = conn(p.id);
-          return `<div><dt>${esc(p.name)}</dt><dd>${k ? esc(k.accountName) + (k.status === "expired" ? " (abgelaufen)" : "") : `<button class="link" data-go="${p.id}">Jetzt verbinden</button>`}</dd></div>`;
-        }).join("")}
-        <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
-        ${c.nextPostAt && !c.trialExpired && !c.customerPaused ? `<div><dt>Nächster Beitrag</dt><dd>${esc(fmtNextPost(c.nextPostAt))}</dd></div>` : ""}
-        <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
-        <div><dt>Bild-Akzentfarbe</dt><dd>${c.accentColor ? `<span style="display:inline-block;width:14px;height:14px;background:${esc(c.accentColor)};vertical-align:middle;margin-right:8px;border:1px solid var(--rule)"></span>${esc(c.accentColor)}` : "Standard"}</dd></div>
-        <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
-      </dl>
-      <div class="actions">
-        <button class="btn" data-go="company">Stil bearbeiten</button>
-        <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
-        <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
-      </div>
       ${c.approvalMode ? `<h2>Warten auf Ihre Freigabe</h2>
       <p class="lede" id="dash-approvals-intro" style="font-size:16px;margin-bottom:16px"></p>
       <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
@@ -949,6 +946,90 @@
       <h2>Konto</h2>
       <p style="color:var(--stone)">Konto und alle gespeicherten Daten (Angaben, verbundene Kanäle, Beitrags-Verlauf) endgültig löschen. Das kann nicht rückgängig gemacht werden.</p>
       <div class="actions"><button class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button></div>`;
+  }
+
+  function doneHtml() {
+    const connected = S.providers.filter((p) => conn(p.id) && conn(p.id).status !== "expired");
+    const missing = S.providers.filter((p) => !connected.includes(p));
+    const c = S.customer;
+    return `
+      ${bannerHtml()}
+      ${statusHtml(c)}
+      ${emailVerifyBannerHtml(c)}
+      <h1>${missing.length ? "Fast geschafft." : "Alles verbunden."}</h1>
+      <p class="lede">${missing.length
+        ? `Noch offen: ${missing.map((p) => esc(p.name)).join(" und ")}. Sie können das jederzeit nachholen.`
+        : "Ab jetzt kümmern wir uns um Ihre Beiträge. Sie müssen nichts weiter tun."}</p>
+      ${needsActionHtml()}
+      <dl class="sum">
+        <div><dt>Unternehmen</dt><dd>${esc(c.company)}</dd></div>
+        ${S.providers.map((p) => {
+          const k = conn(p.id);
+          return `<div><dt>${esc(p.name)}</dt><dd>${k ? esc(k.accountName) + (k.status === "expired" ? " (abgelaufen)" : "") : `<button class="link" data-go="${p.id}">Jetzt verbinden</button>`}</dd></div>`;
+        }).join("")}
+        <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
+        ${c.nextPostAt && !c.trialExpired && !c.customerPaused ? `<div><dt>Nächster Beitrag</dt><dd>${esc(fmtNextPost(c.nextPostAt))}</dd></div>` : ""}
+        <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
+        <div><dt>Bild-Akzentfarbe</dt><dd>${c.accentColor ? `<span style="display:inline-block;width:14px;height:14px;background:${esc(c.accentColor)};vertical-align:middle;margin-right:8px;border:1px solid var(--rule)"></span>${esc(c.accentColor)}` : "Standard"}</dd></div>
+        <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
+      </dl>
+      <div class="actions">
+        <button class="btn" data-go="company">Stil bearbeiten</button>
+        <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
+        <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
+      </div>
+      ${dashboardSectionsHtml(c)}`;
+  }
+
+  /* ================= Dashboard (Panel v6, Aufgabe 3) ================= */
+  // Neuer Landepunkt fuer wiederkehrende Kunden (mind. 1 Kanal je verbunden) - ersetzt die
+  // Schritt-Kette als Startpunkt, entfernt aber nichts: "Stil bearbeiten"/"Kanäle verwalten"
+  // bleiben ueber die Kacheln unten jederzeit erreichbar, der Rest (Freigaben/Vorschau/Jetzt
+  // posten/Beitraege/Kalender/Konto) ist exakt dieselbe Logik wie zuvor auf der "Fertig"-Seite
+  // (dashboardSectionsHtml, s.o.), nur umsortiert.
+  function dashboardTilesHtml() {
+    const tiles = [
+      { go: "preview", lbl: "Vorschau", sub: "Die nächsten 7 Tage" },
+      { go: "history", lbl: "Verlauf", sub: "Veröffentlichte Beiträge" },
+      { go: S.providers[0]?.id || "company", lbl: "Kanäle verwalten", sub: "Verbindungen prüfen" },
+      { go: "company", lbl: "Stil bearbeiten", sub: "Angaben ändern" },
+    ];
+    return `<div class="dash-tiles">${tiles.map((t) => `
+      <button type="button" class="dash-tile" data-go="${t.go}">
+        <span class="dash-tile-lbl">${esc(t.lbl)}</span>
+        <span class="dash-tile-sub">${esc(t.sub)}</span>
+      </button>`).join("")}</div>`;
+  }
+
+  const CHANNEL_STATUS_LABEL = { ok: "Verbunden", "renew-soon": "Läuft bald ab", expired: "Abgelaufen" };
+  function channelsSummaryHtml() {
+    return `<div class="dash-channels">${S.providers.map((p) => {
+      const k = conn(p.id);
+      const label = k ? CHANNEL_STATUS_LABEL[k.status] || k.status : "Nicht verbunden";
+      return `<button type="button" class="dash-channel-row" data-go="${p.id}">
+        <span>${esc(p.name)}</span>
+        <span class="channel-badge${k && k.status !== "ok" ? " warn" : ""}">${esc(label)}</span>
+      </button>`;
+    }).join("")}</div>`;
+  }
+
+  function dashboardHtml() {
+    const c = S.customer;
+    return `
+      ${bannerHtml()}
+      ${statusHtml(c)}
+      ${emailVerifyBannerHtml(c)}
+      <h1>Willkommen zurück.</h1>
+      <p class="lede">${c.trialExpired || c.customerPaused
+        ? "Aktuell wird nichts automatisch veröffentlicht."
+        : c.nextPostAt
+          ? `Nächster Beitrag: ${esc(fmtNextPost(c.nextPostAt))}.`
+          : "Aktuell ist kein nächster Beitrag geplant."}</p>
+      ${needsActionHtml()}
+      ${dashboardTilesHtml()}
+      <h2>Ihre Kanäle</h2>
+      ${channelsSummaryHtml()}
+      ${dashboardSectionsHtml(c)}`;
   }
 
   function calendarHtml(posts, frequency) {
@@ -1055,7 +1136,7 @@
       <p class="lede">Hier sehen Sie, was in Ihrem Namen veröffentlicht wurde.${c.nextPostAt && !c.trialExpired ? ` Nächster Beitrag: ${esc(fmtNextPost(c.nextPostAt))}.` : ""}</p>
       <div id="historylist"><p class="empty">Wird geladen …</p></div>
       <div class="actions">
-        <button class="btn" data-go="done">Zurück zur Übersicht</button>
+        <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
       </div>`;
   }
 
@@ -1111,7 +1192,7 @@
       <p class="preview-hint">← Tage seitlich wischen, um sie zu wechseln.</p>
       <div id="preview-detail"></div>
       <div class="actions">
-        <button class="btn" data-go="done">Zurück zur Übersicht</button>
+        <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
       </div>`;
   }
 
@@ -1249,8 +1330,10 @@
   function render(focus) {
     renderTrialBar();
     renderRail();
+    $(".shell")?.classList.toggle("no-rail", S.step === "dashboard");
     const stage = $("#stage");
-    if (S.step === "company") stage.innerHTML = companyHtml();
+    if (S.step === "dashboard") { stage.innerHTML = dashboardHtml(); loadDashboardExtras(); }
+    else if (S.step === "company") stage.innerHTML = companyHtml();
     else if (S.step === "done") { stage.innerHTML = doneHtml(); loadDashboardExtras(); }
     else if (S.step === "preview") { stage.innerHTML = previewHtml(); loadPreview(); }
     else if (S.step === "history") { stage.innerHTML = historyHtml(); loadHistory(); }
@@ -1259,11 +1342,27 @@
   }
 
   function go(step) {
-    if (!steps().includes(step)) return;
+    if (step !== "dashboard" && !steps().includes(step)) return;
     if (step !== "company" && !S.customer) step = "company";
     S.step = step; S.banner = null;
     history.replaceState(null, "", location.pathname + (DEMO && location.search.includes("demo") ? "?demo" : ""));
     render(true);
+  }
+
+  // Panel v6 Aufgabe 3: wo bisher hart "done" verlinkt war ("Zurück zur Übersicht" etc.), soll
+  // ein wiederkehrender Kunde (mind. 1 Kanal je verbunden) zum neuen Dashboard zurückkehren
+  // statt zur alten Schritt-Kette - fuer einen noch mitten im Erst-Setup befindlichen Kunden
+  // bleibt "done" exakt wie bisher das Ziel.
+  function overviewStep() {
+    return (S.customer && S.connections.length > 0) ? "dashboard" : "done";
+  }
+
+  // Fuer automatische Weiterleitungen (Seitenaufruf, Speichern im Formular) - anders als
+  // overviewStep() faellt das bei einem noch nicht wiederkehrenden Kunden auf firstOpenStep()
+  // zurueck, damit die Schritt-Kette (naechster noch offener Kanal) exakt wie bisher
+  // weiterlaeuft, statt verfrueht auf "done" zu springen.
+  function landingStep() {
+    return (S.customer && S.connections.length > 0) ? "dashboard" : firstOpenStep();
   }
 
   function firstOpenStep() {
@@ -1843,7 +1942,7 @@
     btn.classList.add("busy");
     try {
       applyState(await api(edit ? "PATCH" : "POST", edit ? "/api/me" : "/api/signup", body));
-      S.step = edit ? firstOpenStep() : S.providers[0]?.id || "done";
+      S.step = edit ? landingStep() : S.providers[0]?.id || "done";
       S.banner = edit ? { kind: "ok", text: "Angaben gespeichert." } : null;
       render(true);
     } catch (err) {
@@ -1893,13 +1992,15 @@
       S.banner = { kind: "ok", text: `${prov(id).name} ist verbunden.` };
     } else if (q.get("verified")) {
       S.banner = { kind: "ok", text: "E-Mail-Adresse bestätigt - danke! Beiträge werden ab jetzt vorbereitet." };
-      S.step = firstOpenStep();
+      S.step = landingStep();
     } else if (q.get("error")) {
       const fn = ERRORS[q.get("error")] || ERRORS.failed;
       S.banner = { kind: "bad", text: fn(pName) };
       S.step = S.customer && prov(q.get("provider")) ? q.get("provider") : firstOpenStep();
     } else {
-      S.step = firstOpenStep();
+      // Panel v6 Aufgabe 3: wiederkehrender Kunde (mind. 1 Kanal je verbunden) landet direkt auf
+      // dem neuen Dashboard statt wieder bei "Unternehmen"/der Schritt-Kette.
+      S.step = landingStep();
     }
     if (q.has("connected") || q.has("error") || q.has("verified")) history.replaceState(null, "", location.pathname);
     render(false);

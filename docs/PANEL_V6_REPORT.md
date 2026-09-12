@@ -16,8 +16,11 @@ tatsächlichen Produktions-Stand widerspiegelt.
 - [x] Aufgabe 1 - Sicherheitsnetz (Tag + Branch + vorheriger Stand nachcommitet)
 - [x] Aufgabe 2 - Missbrauchsschutz (CAPTCHA + E-Mail-Bestätigung) - **siehe unten, mit einer
       wichtigen Einschränkung: 2a ist bei mir nur teilweise scharf, siehe "Was Paul noch tun muss"**
-- [ ] Aufgabe 2.5 - Verifikation (nur prüfen, nicht neu bauen)
-- [ ] Aufgabe 3 - Dashboard-Umbau
+- [x] Aufgabe 2.5 - Verifikation: Teil A-D aus der letzten Sitzung sind unverändert vorhanden
+      (routine-trigger.ts, alle 3 triggerRoutineNow-Aufrufstellen, ROUTINE_TRIGGER_URL/TOKEN in
+      .env, Lightbox-Overlay, Mobile-Tap-Ziel-CSS, Erklärtexte) - per grep geprüft, nichts
+      nachgebaut, wie gefordert.
+- [x] Aufgabe 3 - Dashboard-Umbau (siehe unten - UI-only, NICHT in einem echten Browser getestet)
 - [ ] Aufgabe 4 - Kunden-E-Mails
 - [ ] Aufgabe 5 - Zugangslink-Wiederherstellung
 - [ ] Aufgabe 6 - Chatbot-Hilfe
@@ -139,6 +142,48 @@ explizit geprüft statt unverändert übernommen, wie gefordert.
   nach der Migration korrekt `email_verified=1` und `email_verify_token_hash=NULL`, Admin-Übersicht
   lädt normal weiter. Kopie danach gelöscht.
 
+## Aufgabe 3 - Dashboard-Umbau für wiederkehrende Kunden
+
+Rein clientseitig (`public/panel/index.html`), kein neuer/geänderter Server-Endpunkt, kein
+Kosten-Impact.
+
+- Neuer Schritt `"dashboard"` (parallel zu, nicht Teil von, der bestehenden `steps()`-Kette) -
+  die Pipeline-Navigation links (`renderRail()`) bleibt für die Schritt-Kette bytegleich
+  unverändert, zeigt sich aber gar nicht mehr, sobald `S.step === "dashboard"` ist (leeres Rail,
+  `.shell` bekommt `no-rail` und nutzt die volle Breite).
+- **Landepunkt-Logik** (`landingStep()`): ein Kunde landet künftig auf `"dashboard"`, sobald
+  `S.customer` existiert UND mindestens eine Verbindung (`S.connections.length > 0`) je
+  hergestellt wurde - unabhängig davon, ob ALLE Kanäle verbunden sind (bewusst niedrigere Hürde
+  als die alte `firstOpenStep()`-Logik, die "alle Anbieter verbunden" für "done" verlangte, exakt
+  wie in der Aufgabenstellung "mindestens ein Kanal"). Angewendet beim Seitenaufruf/Login, nach
+  E-Mail-Bestätigung und nach dem Speichern im Formular (`"Speichern und weiter"` im
+  Bearbeiten-Modus). Ein Kunde OHNE jede Verbindung durchläuft die Schritt-Kette exakt wie bisher
+  (`landingStep()` fällt dann auf die unveränderte `firstOpenStep()` zurück).
+- **Nichts entfernt:** der komplette bisherige Inhalt der "Fertig"-Seite (Freigaben, 7-Tage-
+  Vorschau-Verweis, Jetzt-posten, Letzte Beiträge, Kalender, Später-wiederkommen-Link,
+  Konto-löschen) wurde in eine gemeinsame Funktion `dashboardSectionsHtml(c)` ausgelagert und wird
+  von BEIDEN Seiten (`doneHtml()` unverändert für den Erst-Abschluss, `dashboardHtml()` neu für
+  wiederkehrende Kunden) genutzt - keine Logik dupliziert, `loadDashboardExtras()` befüllt exakt
+  dieselben Element-IDs auf beiden Seiten.
+- **Neu auf dem Dashboard:** vier Navigations-Kacheln oben (Vorschau/Verlauf/Kanäle
+  verwalten/Stil bearbeiten, `.dash-tiles`, 4→2→1 Spalten je nach Breite), eine kompakte
+  Kanal-Status-Liste (`.dash-channel-row`, min. 44px hoch, tippbar -> springt direkt zur
+  jeweiligen Anbieter-Seite) und eine Statuszeile mit dem nächsten geplanten Beitrag.
+  "Zurück zur Übersicht"-Buttons (Vorschau/Verlauf-Seite) und die "Weiter"-Buttons am Ende der
+  Anbieter-Kette (`overviewStep()`) führen jetzt ebenfalls zum Dashboard statt zu "Fertig", sobald
+  ein Kunde als wiederkehrend gilt.
+- Mobile: `.dash-tiles`/`.dash-channels` nutzen dieselben Breakpoints/Tap-Ziel-Vorgaben (≥44px)
+  wie der Rest des Panels aus der letzten Sitzung (Teil C).
+
+**Nicht in einem echten Browser getestet** (kein Browser-Werkzeug in dieser Sitzung verfügbar,
+wie schon beim Panel-v5-Report vermerkt) - geprüft wurden: `node --check` auf beiden extrahierten
+Inline-Skript-Blöcken (fehlerfrei), Grep-Zählung aller neuen/veränderten Funktionen (keine
+Duplikate), und der komplette `test:panel`-Lauf (98/98 grün, unverändert - dieser Task berührt
+keinen Server-Endpunkt). Bitte vor dem nächsten echten Kundenzugriff einmal mit einem Kunden mit
+mindestens einem verbundenen Kanal durchklicken, insbesondere: landet man nach Login wirklich auf
+dem Dashboard, funktionieren alle vier Kacheln, sieht die Kanal-Liste auf einem echten Handy gut
+aus.
+
 ## Kosteneinschätzung (Regel 11)
 
 - Turnstile-Verifizierung: kostenlos (siehe oben), ein zusätzlicher schneller HTTP-Aufruf pro
@@ -168,4 +213,23 @@ explizit geprüft statt unverändert übernommen, wie gefordert.
 
 ## Deploy-Status Aufgabe 2
 
-(wird nach dem Produktions-Deploy dieses Abschnitts aktualisiert)
+**Deployed.** `panel-v6` in `main` gemerged (`--no-ff`, Commit `8c56f76`), gepusht, Produktion
+(`pm2 restart instagram-mcp --update-env`) um ca. 2026-09-12 08:24 UTC neu gestartet - außerhalb
+des 14:30-15:45-UTC-Blackouts, mit Abstand zum naechsten stuendlichen Routinen-Lauf (08:43).
+
+Vor dem Neustart: Backup `backups/panel/panel-2026-09-12.db`.
+
+Nach dem Neustart geprüft (alles grün):
+- `/health` -> 200, `/mcp` ohne Bearer -> 401 (unverändert), `/panel/api/health` -> 200
+- `/panel/api/providers` liefert `turnstileSiteKey: null` (CAPTCHA korrekt aus, wie erwartet ohne
+  eingetragene Keys)
+- Log sauber, keine neuen Fehler (nur bekannte, unveränderte LinkedIn-/Pillar-Warnungen aus dem
+  laufenden Betrieb)
+- Echte Produktions-DB direkt (read-only) geprüft: alle 3 echten Kunden (Andrea Hölzl,
+  Testunternehmen, Johannes Reiter) haben `email_verified=1` - Migration hat in Produktion
+  genauso funktioniert wie zuvor gegen die Kopie verifiziert.
+
+Rollback-Bereitschaft: Tag `pre-panel-v6` (Code-Stand vor dieser Sitzung) und das DB-Backup von
+eben vorhanden. Rollback wäre: `git revert` des Merge-Commits `8c56f76` + `npm run build` + `pm2
+restart instagram-mcp` (die Migration selbst ist additiv/idempotent, ein Rollback des Codes muss
+die DB-Spalten nicht zurückrollen - sie werden einfach nicht mehr gelesen/geschrieben).
