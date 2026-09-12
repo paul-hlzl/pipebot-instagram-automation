@@ -204,6 +204,65 @@ async function main() {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
   }
 
+  // --- E-Mail-Bestätigung (v6, Aufgabe 2b) --- prüft die Sperre VOR und das Freischalten NACH
+  // der Bestätigung, bevor der Rest der Suite weiterläuft: alle folgenden Abschnitte (Jetzt
+  // posten, Themenvorschläge, ...) gehen von einem verifizierten Kunden aus, genau wie nach
+  // einer echten Bestätigung. Kein echter Mail-Versand nötig, um den Ablauf zu prüfen (die
+  // eigentliche Zustellung ist mailer.js/msmtp - hier reicht die reine HTTP/DB-Logik).
+  console.log("\nE-Mail-Bestätigung:");
+  {
+    const meRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } });
+    const meBody = await meRes.json();
+    ok("frisch angemeldeter Kunde ist noch nicht verifiziert", meBody.customer?.emailVerified === false, JSON.stringify(meBody.customer?.emailVerified));
+
+    const blockedPostNow = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "x" }),
+    });
+    ok("post-now vor Bestätigung -> 403", blockedPostNow.status === 403, `status=${blockedPostNow.status}`);
+
+    const blockedImprove = await fetch(`${BASE}${MOUNT}/api/improve-briefing`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ company: "x", about: "Stichworte" }),
+    });
+    ok("improve-briefing vor Bestätigung (eingeloggt) -> 403", blockedImprove.status === 403, `status=${blockedImprove.status}`);
+
+    if (!customerId) {
+      ok("verify-email-Ablauf übersprungen (customerId unbekannt)", false, "customerId leer");
+    } else {
+      const { default: Database } = await import("better-sqlite3");
+      const { createHash } = await import("node:crypto");
+      const rawToken = "test-verify-token-nicht-geheim";
+      const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+      const db = new Database(STAGING_DB);
+      db.prepare("UPDATE customers SET email_verify_token_hash = ? WHERE id = ?").run(tokenHash, customerId);
+      db.close();
+
+      const badVerify = await fetch(`${BASE}${MOUNT}/verify-email?token=falscher-token`, { redirect: "manual" });
+      ok("verify-email mit falschem Token -> redirect error=verify", (badVerify.headers.get("location") ?? "").includes("error=verify"), badVerify.headers.get("location"));
+
+      const goodVerify = await fetch(`${BASE}${MOUNT}/verify-email?token=${rawToken}`, { redirect: "manual" });
+      const location = goodVerify.headers.get("location") ?? "";
+      ok("verify-email mit korrektem Token -> redirect verified=1", location.includes("verified=1"), location);
+      ok("verify-email setzt eine Session (Set-Cookie)", Boolean(goodVerify.headers.get("set-cookie")), "kein Set-Cookie");
+
+      const meAfterRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } });
+      const meAfterBody = await meAfterRes.json();
+      ok("nach Bestätigung: emailVerified true", meAfterBody.customer?.emailVerified === true, JSON.stringify(meAfterBody.customer?.emailVerified));
+
+      const reuseVerify = await fetch(`${BASE}${MOUNT}/verify-email?token=${rawToken}`, { redirect: "manual" });
+      ok("Token nach Gebrauch ungültig (einmalig) -> redirect error=verify", (reuseVerify.headers.get("location") ?? "").includes("error=verify"), reuseVerify.headers.get("location"));
+      // Kein eigener post-now-Aufruf hier, um den "max. 1 offene Anfrage"-Test im "Jetzt
+      // posten"-Abschnitt weiter unten nicht zu verfälschen - dessen "post-now -> 200" dort
+      // beweist implizit schon, dass die Sperre nach der Bestätigung wieder weg ist.
+    }
+
+    const resendRes = await fetch(`${BASE}${MOUNT}/api/resend-verification`, { method: "POST", headers: { cookie: sessionCookie } });
+    const resendBody = await resendRes.json();
+    ok("resend-verification bei bereits verifiziertem Kunden -> ok, alreadyVerified", resendRes.status === 200 && resendBody.alreadyVerified === true, JSON.stringify(resendBody));
+
+    const noAuthResend = await fetch(`${BASE}${MOUNT}/api/resend-verification`, { method: "POST" });
+    ok("resend-verification ohne Login -> 401", noAuthResend.status === 401, `status=${noAuthResend.status}`);
+  }
+
   // --- 3b. Content-Saeulen (v4) --- reuses the main test customer's session via PATCH
   // (not a fresh signup) so these extra checks don't eat into the 5/hour signup rate limit.
   console.log("\nContent-Saeulen:");

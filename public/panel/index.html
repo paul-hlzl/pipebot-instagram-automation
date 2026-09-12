@@ -419,10 +419,11 @@
     failed: (n) => `Die Verbindung mit ${n || "der Plattform"} hat nicht geklappt. Bitte versuchen Sie es erneut oder schreiben Sie uns.`,
     login: () => "Dieser Zugangslink ist ungültig oder wurde durch einen neueren ersetzt.",
     session: () => "Bitte geben Sie zuerst Ihre Unternehmensdaten ein.",
+    verify: () => "Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.",
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, trialDays: 7, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [] };
+  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [] };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -704,7 +705,8 @@
         ${edit ? "" : `
         <label class="check"><input type="checkbox" name="consent" id="f-consent">
           <span>Ich stimme zu, dass Pipeline AI Solutions meine Angaben und die Freigaben der verbundenen Konten speichert, um in meinem Namen Beiträge zu veröffentlichen. Ich kann das jederzeit widerrufen. <a href="${esc(CONFIG.privacyUrl)}" target="_blank" rel="noopener">Datenschutzerklärung</a></span>
-        </label>`}`;
+        </label>
+        ${S.turnstileSiteKey ? `<div class="field"><div id="turnstile-widget"></div></div>` : ""}`}`;
 
     const actionsHtml = !twoPart
       ? `<div class="actions" style="margin-top:${edit ? 32 : 0}px"><button class="btn" type="submit">${edit ? "Speichern und weiter" : `Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}`}</button></div>`
@@ -734,6 +736,39 @@
       : `<div class="formpart-nav"><button class="btn ghost" type="button" data-formpart="1">Zurück</button><button class="btn" type="submit">Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}</button></div>`;
   }
 
+  /* ================= Cloudflare Turnstile (Panel v6, Aufgabe 2a) ================= */
+  // Nur bei tatsaechlich konfiguriertem TURNSTILE_SITE_KEY ueberhaupt geladen/gerendert - ohne
+  // Key existiert weder das Skript-Tag noch der Platzhalter-Div (siehe companyHtml()).
+  let turnstileScriptRequested = false;
+  let turnstileWidgetId = null;
+  function loadTurnstileScript(cb) {
+    if (window.turnstile) { cb(); return; }
+    if (!turnstileScriptRequested) {
+      turnstileScriptRequested = true;
+      const s = document.createElement("script");
+      s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      s.async = true;
+      s.defer = true;
+      document.head.appendChild(s);
+    }
+    const check = () => { if (window.turnstile) cb(); else setTimeout(check, 100); };
+    check();
+  }
+  // Explizit statt implizit gerendert (render=explicit + eigener render()-Aufruf hier), weil der
+  // Platzhalter-Div erst auf Formular-Seite 2 sichtbar wird - ein automatisches Rendern beim
+  // Laden waere noch versteckt (display:none von Seite 1) und wuerde sich nicht zuverlaessig
+  // sauber aufbauen. Rendert nur einmal (turnstileWidgetId-Guard), auch wenn der Kunde
+  // mehrmals zwischen Seite 1/2 wechselt.
+  function renderTurnstileIfNeeded() {
+    if (!S.turnstileSiteKey || turnstileWidgetId !== null) return;
+    const container = document.getElementById("turnstile-widget");
+    if (!container) return;
+    loadTurnstileScript(() => {
+      if (turnstileWidgetId !== null) return;
+      turnstileWidgetId = window.turnstile.render(container, { sitekey: S.turnstileSiteKey });
+    });
+  }
+
   /** Switches between the two signup form pages without re-rendering (would wipe unsaved input in the other page). */
   function switchFormPart(n) {
     S.formPart = n;
@@ -749,6 +784,7 @@
     if (lede) lede.textContent = formPartLede(n);
     const actions = document.getElementById("formpart-actions");
     if (actions) actions.innerHTML = formPartActionsHtml(n);
+    if (n === 2) renderTurnstileIfNeeded();
     window.scrollTo({ top: 0 });
     $("#stage")?.focus({ preventScroll: true });
   }
@@ -837,6 +873,20 @@
     }).join("<br>")}</div>`;
   }
 
+  // Panel v6 Aufgabe 2b: solange email_verified false ist, keine KI-Generierung (Server lehnt
+  // ohnehin ab) - hier nur die dazugehoerige, klare Anzeige mit Resend-Moeglichkeit. Kanäle
+  // verbinden bleibt ausdrücklich möglich (kostet nichts), nur das wird hier klargestellt.
+  function emailVerifyBannerHtml(c) {
+    if (!c || c.emailVerified) return "";
+    return `<div class="needs-action" id="verify-banner">
+      <strong>Bitte bestätigen Sie Ihre E-Mail-Adresse.</strong> Wir haben einen Link an ${esc(c.email)} geschickt.
+      Instagram/LinkedIn können Sie schon jetzt verbinden - das kostet nichts. Beiträge werden aber erst nach der
+      Bestätigung vorbereitet und veröffentlicht.
+      <div style="margin-top:8px"><button type="button" class="link" id="resend-verify">Bestätigungsmail erneut senden</button>
+      <span id="resend-verify-status" aria-live="polite"></span></div>
+    </div>`;
+  }
+
   function doneHtml() {
     const connected = S.providers.filter((p) => conn(p.id) && conn(p.id).status !== "expired");
     const missing = S.providers.filter((p) => !connected.includes(p));
@@ -844,6 +894,7 @@
     return `
       ${bannerHtml()}
       ${statusHtml(c)}
+      ${emailVerifyBannerHtml(c)}
       <h1>${missing.length ? "Fast geschafft." : "Alles verbunden."}</h1>
       <p class="lede">${missing.length
         ? `Noch offen: ${missing.map((p) => esc(p.name)).join(" und ")}. Sie können das jederzeit nachholen.`
@@ -1659,6 +1710,20 @@
       }
       return;
     }
+    if (e.target.closest("#resend-verify")) {
+      const btn = e.target.closest("#resend-verify");
+      const status = $("#resend-verify-status");
+      btn.disabled = true;
+      try {
+        await api("POST", "/api/resend-verification");
+        if (status) status.textContent = " Erneut verschickt.";
+      } catch (err) {
+        if (status) status.textContent = ` ${err.message || "Konnte nicht verschickt werden."}`;
+      } finally {
+        setTimeout(() => { btn.disabled = false; }, 3000);
+      }
+      return;
+    }
     if (e.target.closest("#toggle-pause")) {
       const nextPaused = !S.customer.customerPaused;
       if (nextPaused && !confirm("Posting pausieren? Es werden dann keine neuen Beiträge mehr veröffentlicht, bis Sie es wieder fortsetzen.")) return;
@@ -1812,6 +1877,7 @@
       S.providers = p.providers;
       S.aiAvailable = Boolean(p.aiAvailable);
       S.trialDays = Number(p.trialDays) || 7;
+      S.turnstileSiteKey = p.turnstileSiteKey || null;
     } catch {
       $("#stage").innerHTML = `<div class="banner bad" role="alert">Das Panel ist gerade nicht erreichbar. Bitte laden Sie die Seite in ein paar Minuten neu.</div>`;
       return;
@@ -1825,6 +1891,9 @@
       const list = steps();
       S.step = list[list.indexOf(id) + 1];
       S.banner = { kind: "ok", text: `${prov(id).name} ist verbunden.` };
+    } else if (q.get("verified")) {
+      S.banner = { kind: "ok", text: "E-Mail-Adresse bestätigt - danke! Beiträge werden ab jetzt vorbereitet." };
+      S.step = firstOpenStep();
     } else if (q.get("error")) {
       const fn = ERRORS[q.get("error")] || ERRORS.failed;
       S.banner = { kind: "bad", text: fn(pName) };
@@ -1832,7 +1901,7 @@
     } else {
       S.step = firstOpenStep();
     }
-    if (q.has("connected") || q.has("error")) history.replaceState(null, "", location.pathname);
+    if (q.has("connected") || q.has("error") || q.has("verified")) history.replaceState(null, "", location.pathname);
     render(false);
   }
 
@@ -1945,10 +2014,10 @@
       const isSignup = url === "/api/signup";
       const demoNextPost = new Date(Date.now() + 2 * 86400000).toISOString();
       MOCK.customer = {
-        trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false, customerPaused: false,
+        trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false, customerPaused: false, emailVerified: true,
         ...MOCK.customer,
         ...data,
-        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false, customerPaused: false } : {}),
+        ...(isSignup ? { trialDaysLeft: 7, trialExpired: false, nextPostAt: demoNextPost, dueNow: false, customerPaused: false, emailVerified: true } : {}),
       };
       return mockState();
     }
