@@ -265,13 +265,18 @@ async function main() {
   // --- 3d. POST /api/post-now ("Jetzt posten"-Warteschlange, v4) ---
   console.log("\nJetzt posten:");
   {
+    const postNowStart = Date.now();
     const res = await fetch(`${BASE}${MOUNT}/api/post-now`, {
       method: "POST",
       headers: { cookie: sessionCookie, "content-type": "application/json" },
       body: JSON.stringify({ topic: "Herbstaktion" }),
     });
+    const postNowElapsedMs = Date.now() - postNowStart;
     const body = await res.json();
     ok("post-now -> 200 mit pending request", res.status === 200 && body.request?.status === "pending", JSON.stringify(body));
+    // Sofort-Trigger (Panel-Aufgabe "Teil A"): triggerRoutineNow() ist fire-and-forget - darf
+    // die Antwort nicht spürbar verzögern, auch nicht wenn ROUTINE_TRIGGER_URL gesetzt waere.
+    ok("post-now antwortet trotz Sofort-Trigger-Aufruf schnell (<2s, fire-and-forget)", postNowElapsedMs < 2000, `${postNowElapsedMs}ms`);
 
     const secondRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
       method: "POST",
@@ -438,7 +443,39 @@ async function main() {
     });
     ok("Neuerstellung am Limit (3/3) -> 429, kein echter fal.ai-Aufruf", regenRes.status === 429, `status=${regenRes.status}`);
 
-    db.prepare("DELETE FROM planned_posts WHERE id IN (?, ?)").run(planId, planIdMax);
+    // Erfolgreicher Freigabe-Pfad ("Jetzt schon freigeben") - bisher nur der 400-Fall
+    // (approvalMode aus) war getestet. Prüft zugleich Panel-Aufgabe "Sofort-Trigger": der neue
+    // triggerRoutineNow()-Aufruf in diesem Handler ist fire-and-forget (ROUTINE_TRIGGER_URL ist
+    // im Staging nicht gesetzt -> no-op) und darf die Antwort nicht spürbar verzögern.
+    const approveOnRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", approvalMode: true }),
+    });
+    ok("approvalMode für den Freigabe-Test wieder aktiviert", approveOnRes.status === 200);
+
+    const planIdApprove = "plan_test3";
+    db.prepare(
+      `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
+       VALUES (?, ?, 'ig_feed', ?, 'planned', 'Test Headline 3', 'Text #Pflicht', NULL, NULL, NULL, 0, ?, ?)`,
+    ).run(planIdApprove, customerId, today, nowIso, nowIso);
+
+    const approveStart = Date.now();
+    const approveOkRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planIdApprove}/approve`, { method: "POST", headers: { cookie: sessionCookie } });
+    const approveElapsedMs = Date.now() - approveStart;
+    const approveOkBody = await approveOkRes.json();
+    ok("Freigeben mit approvalMode -> 200, status 'approved'", approveOkRes.status === 200 && approveOkBody.post?.status === "approved", JSON.stringify(approveOkBody));
+    ok("Freigeben antwortet trotz Sofort-Trigger-Aufruf schnell (<2s, fire-and-forget)", approveElapsedMs < 2000, `${approveElapsedMs}ms`);
+
+    // approvalMode zurücksetzen, wie es vor diesem Block war (spätere Abschnitte erwarten den
+    // Ausgangszustand nicht explizit, aber sauberer Zustand statt stillschweigender Nebeneffekte).
+    await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", approvalMode: false }),
+    });
+
+    db.prepare("DELETE FROM planned_posts WHERE id IN (?, ?, ?)").run(planId, planIdMax, planIdApprove);
   }
 
   // --- 3f. Mehrere Farbthemen (v4) ---

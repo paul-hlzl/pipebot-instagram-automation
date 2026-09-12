@@ -40,6 +40,7 @@ import {
   updatePlannedPostText,
 } from "./credentials.js";
 import { createAdminRouter } from "./admin.js";
+import { triggerRoutineNow } from "./routine-trigger.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, improveBriefing, suggestPillarsWithSearch, suggestTopics } from "../anthropic.js";
 import { analyzeWebsite } from "../website-analyze.js";
@@ -794,7 +795,9 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Dieser Beitrag kann nicht mehr freigegeben werden." });
       return;
     }
-    res.json({ post: markPlannedPostStatus(plan.id, "approved") });
+    const updated = markPlannedPostStatus(plan.id, "approved");
+    triggerRoutineNow("planned-post-approve");
+    res.json({ post: updated });
   });
 
   router.post("/api/disconnect/:provider", (req, res) => {
@@ -839,6 +842,7 @@ export function createPanelRouter(): Router {
     }
     const topic = str(req.body?.topic, 300);
     const request = createPostRequest(c.id, topic || null);
+    triggerRoutineNow("post-now");
     res.json({ ok: true, request });
   }));
 
@@ -908,6 +912,7 @@ export function createPanelRouter(): Router {
       res.status(404).json({ error: "Beitrag nicht gefunden oder schon bearbeitet." });
       return;
     }
+    triggerRoutineNow("approval-approve");
     res.json({ ok: true, approval });
   });
 

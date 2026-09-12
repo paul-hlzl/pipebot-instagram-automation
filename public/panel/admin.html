@@ -89,6 +89,12 @@
     tr { border: 1px solid var(--rule); margin-bottom: 12px; border-radius: 2px; }
     td { border: 0; padding: 6px 12px; }
     td::before { content: attr(data-label); display: block; font-size: 11px; text-transform: uppercase; color: var(--stone); margin-bottom: 2px; }
+    /* Tap-Ziele auf Mobil mindestens ca. 44px hoch - .btn.small ist sonst nur 30px. */
+    .btn.small { min-height: 44px; padding: 0 14px; }
+    .row-actions { gap: 8px; }
+    .modal { padding: 20px; }
+    .kv { grid-template-columns: 110px 1fr; }
+    .kv dd { word-break: break-word; }
   }
   @media (max-width: 480px) {
     .metrics { grid-template-columns: repeat(2, 1fr); }

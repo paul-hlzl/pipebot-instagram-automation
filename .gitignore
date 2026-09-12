@@ -8,3 +8,4 @@ tmp/
 last_post.json
 last_post-*.json
 data/
+backups/

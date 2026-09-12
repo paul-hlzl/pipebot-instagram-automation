@@ -227,12 +227,23 @@
 
   .history { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
   .history li { display: grid; grid-template-columns: 64px 1fr auto; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--rule); }
-  .history img { width: 64px; height: 64px; object-fit: cover; background: var(--wash); }
+  .history img, .history-ph { width: 64px; height: 64px; object-fit: cover; background: var(--wash); }
   .history .cap { font-size: 15px; }
   .history .cap strong { display: block; margin-bottom: 2px; }
   .history .cap span { color: var(--stone); font-size: 13px; }
   .history time { font-size: 13px; color: var(--stone); white-space: nowrap; }
   .empty { padding: 40px 0; color: var(--stone); font-size: 15px; }
+
+  /* ---------- Bild-Vorschauen antippen zum Vergroessern ---------- */
+  [data-lightbox] { cursor: zoom-in; }
+  .lightbox-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.86); display: grid; place-items: center; padding: 24px; }
+  .lightbox-overlay[hidden] { display: none; }
+  .lightbox-overlay img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 2px; }
+  .lightbox-close { position: fixed; top: 16px; right: 16px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
+  .lightbox-close:hover { background: rgba(255,255,255,.3); }
+
+  /* ---------- Horizontal scrollende 7-Tage-Reiter: Hinweis auf Mobil ---------- */
+  .preview-hint { display: none; font-size: 12.5px; color: var(--stone); margin: -10px 0 14px; }
 
   .trialbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 20px; background: var(--ink); color: var(--paper); font-size: 14px; margin-bottom: 8px; flex-wrap: wrap; }
   .trialbar.ended { background: var(--stop); }
@@ -265,6 +276,26 @@
     .actions { flex-direction: column; align-items: stretch; text-align: center; }
     .formpart-nav { flex-direction: column; }
     dl.sum div { grid-template-columns: 1fr; gap: 2px; }
+
+    /* Tap-Ziele auf Mobil mindestens ca. 44x44px, wie bei mobilen Oberflaechen ueblich. */
+    .link { display: inline-flex; align-items: center; min-height: 44px; }
+    .chip { min-height: 44px; }
+    .pillar-row input, .pillar-row select { height: 44px; }
+    .pillar-row .link { justify-content: center; }
+    .swatch { width: 36px; height: 36px; }
+    .swatches { gap: 12px; }
+    .seg.wd span { padding: 12px 4px; }
+    .preview-hint { display: block; }
+
+    /* Verlauf: Zeit unter statt neben dem Text - sonst zu eng auf schmalen Screens. */
+    .history li { grid-template-columns: 56px 1fr; row-gap: 4px; }
+    .history img, .history-ph { width: 56px; height: 56px; }
+    .history time { grid-column: 2; white-space: normal; }
+  }
+
+  @media (max-width: 380px) {
+    .cal-grid { gap: 2px; }
+    .cal-day { font-size: 11px; }
   }
 
   /* ---------- Intro-Splash ---------- */
@@ -340,6 +371,11 @@
 <div class="shell">
   <nav class="rail" aria-label="Fortschritt"><ol id="rail"></ol></nav>
   <main class="stage" id="stage" tabindex="-1"><p class="loading">Wird geladen …</p></main>
+</div>
+
+<div id="lightbox-overlay" class="lightbox-overlay" hidden role="dialog" aria-modal="true" aria-label="Bild vergrößert">
+  <button type="button" class="lightbox-close" id="lightbox-close" aria-label="Schließen">✕</button>
+  <img id="lightbox-img" src="" alt="">
 </div>
 
 <script>
@@ -653,6 +689,7 @@
           <p class="hint">Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.</p>
         </div>
         <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben - bevor etwas online geht, prüfen Sie es im Dashboard und geben es frei.</span></label>
+        <p class="hint" style="margin:-16px 0 22px">Ohne Ihre Freigabe wird nichts veröffentlicht. Wir bereiten Beiträge vor, Sie sehen sie unter „Vorschau“ und „Warten auf Ihre Freigabe“, und geben sie frei, sobald Sie zufrieden sind - danach wird in der Regel innerhalb weniger Minuten veröffentlicht.</p>
         <div class="grid2">
           <div class="field">
             <label for="f-hashtagPreference">Hashtags</label>
@@ -778,7 +815,7 @@
     if (!req) return "";
     const topicPart = req.topic ? `: "${esc(req.topic)}"` : "";
     return req.status === "pending"
-      ? `<div class="banner" role="status">Ausstehend${topicPart} - angefragt am ${esc(fmtDate(req.createdAt))}.</div>`
+      ? `<div class="banner" role="status">Ausstehend${topicPart} - angefragt am ${esc(fmtDate(req.createdAt))}. Wird in der Regel innerhalb weniger Minuten bearbeitet.</div>`
       : `<div class="banner ok" role="status">Erledigt${topicPart}.</div>`;
   }
 
@@ -830,6 +867,7 @@
         <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
       </div>
       ${c.approvalMode ? `<h2>Warten auf Ihre Freigabe</h2>
+      <p class="lede" id="dash-approvals-intro" style="font-size:16px;margin-bottom:16px"></p>
       <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
       <h2>Die nächsten 7 Tage</h2>
       <p class="lede" style="font-size:16px;margin-bottom:16px">Schauen Sie sich vorbereitete Beiträge an, bevor sie automatisch veröffentlicht werden - Text bearbeiten, Bild-Farbe ändern oder überspringen.</p>
@@ -897,7 +935,7 @@
       const { posts } = await api("GET", "/api/posts");
       if (postsBox) {
         postsBox.innerHTML = posts.length
-          ? posts.slice(0, 9).map((p) => p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.headline || "")}">` : `<div class="ph"></div>`).join("")
+          ? posts.slice(0, 9).map((p) => p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="${esc(p.headline || "")}" data-lightbox>` : `<div class="ph"></div>`).join("")
           : `<p class="empty">Noch keine Beiträge veröffentlicht.</p>`;
       }
       if (calBox) calBox.innerHTML = calendarHtml(posts, S.customer?.frequency);
@@ -907,9 +945,16 @@
     }
 
     const approvalsBox = $("#dash-approvals");
+    const approvalsIntro = $("#dash-approvals-intro");
     if (approvalsBox) {
       try {
         const { approvals } = await api("GET", "/api/approvals");
+        if (approvalsIntro) {
+          const one = approvals.length === 1;
+          approvalsIntro.textContent = approvals.length
+            ? `Schauen Sie sich ${one ? "diesen Entwurf" : `diese ${approvals.length} Entwürfe`} an und geben Sie ${one ? "ihn" : "sie"} frei, damit ${one ? "er" : "sie"} veröffentlicht werden ${one ? "kann" : "können"}. Ohne Freigabe bleiben sie liegen. Freigegebene Beiträge werden in der Regel innerhalb weniger Minuten veröffentlicht.`
+            : "";
+        }
         approvalsBox.innerHTML = approvals.length ? approvals.map(approvalCardHtml).join("") : `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
       } catch {
         approvalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
@@ -931,10 +976,13 @@
 
   function approvalCardHtml(a) {
     const badge = channelBadgeLabel(a);
+    const pillarPart = a.pillarTitle ? `, basierend auf Ihrer Content-Säule „${esc(a.pillarTitle)}“` : "";
+    const context = `Automatisch erstellt für ${esc(badge || "Ihren Kanal")} am ${esc(fmtDate(a.createdAt))}${pillarPart}. Prüfen Sie Text und Bild, dann geben Sie frei oder lehnen Sie ab.`;
     return `<div class="approval-card" data-approval-id="${esc(a.id)}">
-      ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="">` : `<div class="ph"></div>`}
+      ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`}
       <div class="approval-body">
         ${badge ? `<span class="channel-badge">${esc(badge)}</span>` : ""}
+        <p class="hint" style="margin:2px 0 10px">${context}</p>
         ${a.headline ? `<strong>${esc(a.headline)}</strong>` : ""}
         ${a.caption ? `<p>${esc(a.caption)}</p>` : ""}
         <div class="actions">
@@ -971,7 +1019,7 @@
       }
       box.innerHTML = `<ul class="history">${posts.map((post) => `
         <li>
-          ${post.imageUrl ? `<img src="${esc(post.imageUrl)}" alt="">` : `<div style="width:64px;height:64px;background:var(--wash)"></div>`}
+          ${post.imageUrl ? `<img src="${esc(post.imageUrl)}" alt="" data-lightbox>` : `<div class="history-ph"></div>`}
           <div class="cap">
             <strong>${esc(post.headline || PLATFORM_LABEL(post.provider))}</strong>
             <span>${esc(PLATFORM_LABEL(post.provider))}${post.caption ? " · " + esc(post.caption.slice(0, 80)) + (post.caption.length > 80 ? "…" : "") : ""}</span>
@@ -1007,8 +1055,9 @@
     return `
       ${bannerHtml()}
       <h1>Vorschau - die nächsten 7 Tage</h1>
-      <p class="lede">Diese Beiträge hat Pipeflow für Sie vorbereitet. Passen Sie Text oder Bild-Farbe an oder überspringen Sie einen Beitrag, bevor er automatisch veröffentlicht wird.${c.approvalMode ? " Da Sie Beiträge vor Veröffentlichung freigeben, können Sie das hier schon vorab tun." : ""}</p>
+      <p class="lede">Diese Beiträge hat Pipeflow für Sie vorbereitet. Passen Sie Text oder Bild-Farbe an oder überspringen Sie einen Beitrag, bevor er automatisch veröffentlicht wird.${c.approvalMode ? " Da Sie Beiträge vor Veröffentlichung freigeben, können Sie das hier schon vorab tun - nach Ihrer Freigabe wird in der Regel innerhalb weniger Minuten veröffentlicht." : ""}</p>
       <div id="preview-strip"><p class="empty">Wird geladen …</p></div>
+      <p class="preview-hint">← Tage seitlich wischen, um sie zu wechseln.</p>
       <div id="preview-detail"></div>
       <div class="actions">
         <button class="btn" data-go="done">Zurück zur Übersicht</button>
@@ -1041,7 +1090,7 @@
     const canApprove = S.customer.approvalMode && editable && p.status !== "approved" && p.status !== "rejected";
     return `<div class="preview-card" data-plan-id="${esc(p.id)}">
       <div class="preview-card-media">
-        ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="">` : `<div class="ph"></div>`}
+        ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`}
       </div>
       <div class="preview-card-body">
         <div>
@@ -1312,7 +1361,34 @@
   }
 
   /* ================= Events ================= */
+  function openLightbox(src, alt) {
+    if (!src) return;
+    const overlay = $("#lightbox-overlay");
+    const img = $("#lightbox-img");
+    if (!overlay || !img) return;
+    img.src = src;
+    img.alt = alt || "";
+    overlay.hidden = false;
+  }
+  function closeLightbox() {
+    const overlay = $("#lightbox-overlay");
+    if (overlay) overlay.hidden = true;
+    const img = $("#lightbox-img");
+    if (img) img.src = "";
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLightbox(); });
+
   document.addEventListener("click", async (e) => {
+    const lightboxTrigger = e.target.closest("[data-lightbox]");
+    if (lightboxTrigger && lightboxTrigger.tagName === "IMG") {
+      openLightbox(lightboxTrigger.currentSrc || lightboxTrigger.src, lightboxTrigger.alt);
+      return;
+    }
+    if (e.target.id === "lightbox-close" || e.target.id === "lightbox-overlay") {
+      closeLightbox();
+      return;
+    }
+
     const swatch = e.target.closest("[data-swatch]");
     if (swatch) {
       const hex = swatch.dataset.swatch;
