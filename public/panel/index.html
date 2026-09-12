@@ -213,6 +213,8 @@
   summary::after { content: "+"; font-weight: 400; font-size: 20px; line-height: 1; }
   details[open] summary::after { content: "–"; }
   details p { color: var(--stone); font-size: 15px; padding-bottom: 12px; }
+  .recover-access { border-top: 1px solid var(--rule); margin-top: 40px; }
+  .recover-access[open] { padding-bottom: 16px; }
 
   /* Zusammenfassung */
   dl.sum { margin: 0; border-top: 1px solid var(--rule); }
@@ -580,6 +582,23 @@
     return `<div class="banner ${S.banner.kind}" role="${S.banner.kind === "bad" ? "alert" : "status"}">${esc(S.banner.text)}</div>`;
   }
 
+  // Panel v6 Aufgabe 5: fuer jemanden ohne Session, unterhalb des Signup-Formulars - bewusst
+  // eingeklappt (details/summary, wie die "Häufige Fragen" andernorts im Panel), damit es das
+  // Formular fuer neue Kunden nicht dominiert.
+  function recoverAccessHtml() {
+    return `<details class="recover-access">
+      <summary>Sie haben schon ein Konto? Zugang verloren?</summary>
+      <div class="field" style="margin-top:12px">
+        <label for="f-recover-email">E-Mail-Adresse</label>
+        <input id="f-recover-email" type="email" placeholder="ihre@email.at" autocomplete="email">
+      </div>
+      <div class="actions" style="margin-top:0">
+        <button type="button" class="link" id="recover-submit">Neuen Zugangslink anfordern</button>
+      </div>
+      <p id="recover-status" style="margin-top:8px;font-size:14px" aria-live="polite"></p>
+    </details>`;
+  }
+
   function companyHtml() {
     const c = S.customer || {
       tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
@@ -740,7 +759,8 @@
       <form id="company" novalidate>
         ${twoPart ? `<div id="formpart-a" ${part !== 1 ? "hidden" : ""}>${partAHtml}</div><div id="formpart-b" ${part !== 2 ? "hidden" : ""}>${partBHtml}</div>` : partAHtml + partBHtml}
         <div id="formpart-actions">${actionsHtml}</div>
-      </form>`;
+      </form>
+      ${!edit ? recoverAccessHtml() : ""}`;
   }
 
   function formPartLabel(part) {
@@ -1809,6 +1829,25 @@
       }
       return;
     }
+    if (e.target.closest("#recover-submit")) {
+      const btn = e.target.closest("#recover-submit");
+      const email = $("#f-recover-email")?.value.trim() || "";
+      const status = $("#recover-status");
+      if (!email) {
+        if (status) { status.textContent = "Bitte geben Sie Ihre E-Mail-Adresse ein."; status.style.color = "var(--stop)"; }
+        return;
+      }
+      btn.classList.add("busy");
+      try {
+        await api("POST", "/api/recover-access", { email });
+        if (status) { status.textContent = "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt."; status.style.color = ""; }
+      } catch (err) {
+        if (status) { status.textContent = err.message || "Anfrage fehlgeschlagen."; status.style.color = "var(--stop)"; }
+      } finally {
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#resend-verify")) {
       const btn = e.target.closest("#resend-verify");
       const status = $("#resend-verify-status");
@@ -2166,6 +2205,7 @@
       return { ok: true };
     }
     if (url === "/api/access-link") return { link: "https://mcp.pipebot.at/panel/login?key=vorschau-beispiel" };
+    if (url === "/api/recover-access") return { ok: true, message: "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt. (Vorschau-Beispiel)" };
     if (url === "/api/posts") return { posts: MOCK.posts };
     if (url === "/api/logout") { MOCK.customer = null; MOCK.connections = []; return { ok: true }; }
     throw new Error("Unbekannt");

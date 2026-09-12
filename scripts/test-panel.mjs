@@ -620,6 +620,44 @@ async function main() {
     ok("Fortsetzen -> customerPaused false", resumeBody.customer?.customerPaused === false);
   }
 
+  // --- Zugangslink-Wiederherstellung (v6, Aufgabe 5) ---
+  console.log("\nZugangslink-Wiederherstellung:");
+  {
+    const badFormatRes = await fetch(`${BASE}${MOUNT}/api/recover-access`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "keine-email" }),
+    });
+    ok("recover-access mit ungültigem Format -> 400", badFormatRes.status === 400, `status=${badFormatRes.status}`);
+
+    const unknownRes = await fetch(`${BASE}${MOUNT}/api/recover-access`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: `unbekannt-${Date.now()}@example.invalid` }),
+    });
+    const unknownBody = await unknownRes.json();
+    ok("recover-access mit unbekannter Adresse -> 200", unknownRes.status === 200, `status=${unknownRes.status}`);
+
+    // Vorher einen "alten" Link erzeugen, um danach zu pruefen, dass recover-access ihn wirklich ersetzt.
+    const oldLinkRes = await fetch(`${BASE}${MOUNT}/api/access-link`, { method: "POST", headers: { cookie: sessionCookie } });
+    const oldLinkBody = await oldLinkRes.json();
+    const oldKey = new URL(oldLinkBody.link).searchParams.get("key");
+
+    const knownRes = await fetch(`${BASE}${MOUNT}/api/recover-access`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: testEmail }),
+    });
+    const knownBody = await knownRes.json();
+    ok("recover-access mit bekannter Adresse -> 200", knownRes.status === 200, `status=${knownRes.status}`);
+    ok("Antwort verrät nicht, ob das Konto existiert (identische Meldung)", knownBody.message === unknownBody.message, JSON.stringify([knownBody.message, unknownBody.message]));
+
+    const oldKeyRes = await fetch(`${BASE}${MOUNT}/login?key=${oldKey}`, { redirect: "manual" });
+    ok("alter Zugangslink nach recover-access ungültig (ersetzt)", (oldKeyRes.headers.get("location") ?? "").includes("error=login"), oldKeyRes.headers.get("location"));
+
+    const rateLimitRes = [];
+    for (let i = 0; i < 3; i++) {
+      rateLimitRes.push(await fetch(`${BASE}${MOUNT}/api/recover-access`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: testEmail }),
+      }));
+    }
+    ok("recover-access Rate-Limit (max 3/h/E-Mail) greift danach -> 429", rateLimitRes[rateLimitRes.length - 1].status === 429, `status=${rateLimitRes.map((r) => r.status).join(",")}`);
+  }
+
   // --- 4b. DELETE /api/me (self-service account deletion) ---
   console.log("\nKonto löschen:");
   {
