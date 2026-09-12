@@ -24,6 +24,8 @@ import { isDue, isDueForChannel, nextPostAt, type ScheduleInput } from "./schedu
 import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
 import type { LinkedInCredentials } from "../linkedin.js";
 import type { ImageBranding } from "../fal.js";
+import { sendMailBestEffort } from "./mailer.js";
+import { firstPostLiveEmail, pendingApprovalsSummaryEmail } from "./emails.js";
 
 const DAY = 86_400_000;
 
@@ -394,6 +396,9 @@ export function logPost(
   provider: string,
   post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string; pillarTitle?: string },
 ): void {
+  // Panel v6 Aufgabe 4d: vor dem Insert geprueft, damit "war das der allererste Post" korrekt
+  // ist - danach waere die neue Zeile selbst schon mitgezaehlt.
+  const isFirstPost = (db.prepare("SELECT COUNT(*) as n FROM posts WHERE customer_id = ?").get(customerId) as { n: number }).n === 0;
   db.prepare(
     `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -408,6 +413,21 @@ export function logPost(
     nowIso(),
     post.pillarTitle ?? null,
   );
+  if (isFirstPost) maybeSendFirstPostEmail(customerId);
+}
+
+/** Panel v6 Aufgabe 4d: "Ihr erster Beitrag ist live!" - garantiert nur einmal, dank des
+ *  atomaren UPDATE...WHERE first_post_email_sent_at IS NULL als "Claim". */
+function maybeSendFirstPostEmail(customerId: string): void {
+  const row = db.prepare("SELECT email, company FROM customers WHERE id = ? AND first_post_email_sent_at IS NULL").get(customerId) as
+    | { email: string; company: string }
+    | undefined;
+  if (!row) return;
+  const result = db
+    .prepare("UPDATE customers SET first_post_email_sent_at = ? WHERE id = ? AND first_post_email_sent_at IS NULL")
+    .run(nowIso(), customerId);
+  if (result.changes === 0) return;
+  sendMailBestEffort(firstPostLiveEmail({ to: row.email, company: row.company }));
 }
 
 /** Most recent posts for one customer, newest first - used by the panel's own "Verlauf" tab. */
@@ -678,9 +698,32 @@ export function savePendingApproval(input: {
     `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
   ).run(id, input.customerId, input.provider, input.channel, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, now, now);
+  maybeSendApprovalsSummaryEmail(input.customerId);
   return toPendingApproval(
     db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow,
   );
+}
+
+/**
+ * Panel v6 Aufgabe 4b: "X Beiträge warten auf Ihre Freigabe" - gesammelt statt pro Eintrag,
+ * höchstens 1x/24h pro Kunde (approval_email_sent_at ist der Guard). Die ERSTE neue
+ * pending_approvals-Zeile innerhalb eines 24h-Fensters löst die Mail aus (mit der aktuellen
+ * Gesamtzahl wartender Beiträge, nicht nur der einen neuen), jede weitere im selben Fenster wird
+ * stillschweigend mitgezählt statt eine eigene Mail zu verursachen.
+ */
+function maybeSendApprovalsSummaryEmail(customerId: string): void {
+  const row = db.prepare("SELECT email, company, approval_email_sent_at FROM customers WHERE id = ?").get(customerId) as
+    | { email: string; company: string; approval_email_sent_at: string | null }
+    | undefined;
+  if (!row) return;
+  const last = row.approval_email_sent_at ? new Date(row.approval_email_sent_at).getTime() : 0;
+  if (Date.now() - last < 24 * 3_600_000) return;
+  const result = db
+    .prepare("UPDATE customers SET approval_email_sent_at = ? WHERE id = ? AND (approval_email_sent_at IS NULL OR approval_email_sent_at = ?)")
+    .run(nowIso(), customerId, row.approval_email_sent_at);
+  if (result.changes === 0) return; // gerade von einem parallelen Aufruf beansprucht
+  const count = listPendingApprovalsForCustomer(customerId).length;
+  sendMailBestEffort(pendingApprovalsSummaryEmail({ to: row.email, company: row.company, count }));
 }
 
 /** A customer's own pending_approvals in a given status ("pending" for the review UI), newest first. */

@@ -21,7 +21,7 @@ tatsächlichen Produktions-Stand widerspiegelt.
       .env, Lightbox-Overlay, Mobile-Tap-Ziel-CSS, Erklärtexte) - per grep geprüft, nichts
       nachgebaut, wie gefordert.
 - [x] Aufgabe 3 - Dashboard-Umbau (siehe unten - UI-only, NICHT in einem echten Browser getestet)
-- [ ] Aufgabe 4 - Kunden-E-Mails
+- [x] Aufgabe 4 - Kunden-E-Mails (siehe unten)
 - [ ] Aufgabe 5 - Zugangslink-Wiederherstellung
 - [ ] Aufgabe 6 - Chatbot-Hilfe
 - [ ] Aufgabe 7 - Abschluss-Deploy
@@ -184,6 +184,45 @@ mindestens einem verbundenen Kanal durchklicken, insbesondere: landet man nach L
 dem Dashboard, funktionieren alle vier Kacheln, sieht die Kanal-Liste auf einem echten Handy gut
 aus.
 
+## Aufgabe 4 - Kunden-E-Mails
+
+Baut auf dem in Aufgabe 2b angelegten Baustein auf (`src/panel/mailer.ts` = Versandweg über das
+bestehende msmtp/Hostinger-Konto, `src/panel/emails.ts` = Text-Vorlagen) - kein neuer Dienst, kein
+neuer Account, wie in der Aufgabenstellung verlangt erst geprüft, was schon da ist.
+
+- **4a Bestätigungsmail:** bereits in 2b umgesetzt (nichts Neues hier).
+- **4b "X Beiträge warten auf Ihre Freigabe":** Hook direkt in `savePendingApproval()`
+  (`credentials.ts`) - dem einzigen Ort, an dem eine `pending_approvals`-Zeile entsteht, egal ob
+  über die K1-K9-Routine (MCP-Tool `save_pending_approval`) oder einen künftigen anderen Aufrufer.
+  Max. 1 Mail/24h pro Kunde (`approval_email_sent_at`-Zeitstempel als Guard, atomarer
+  `UPDATE ... WHERE`-"Claim" gegen doppelten Versand): die erste neue Zeile innerhalb eines
+  24h-Fensters löst die Mail mit der AKTUELLEN Gesamtzahl wartender Beiträge aus, jede weitere im
+  selben Fenster wird nur mitgezählt, nicht nochmal gemailt.
+- **4c "Ihr Probezeitraum endet in 2 Tagen":** neuer, eigenständiger täglicher Check
+  (`src/panel/trial-emails.ts`, 04:00 UTC - eine Stunde nach der Vorausplanung, bewusst getrennt
+  geplant, damit ein Fehler in der einen Aufgabe die andere nie mitreißt). Feuert einmalig, sobald
+  `trialDaysLeft() === 2`, markiert per `trial_ending_email_sent_at`.
+- **4d "Ihr erster Beitrag ist live!":** Hook in `logPost()` (`credentials.ts`) - dem einzigen Ort,
+  an dem ein ECHTER Post verbucht wird (von allen publish_*-Tools genutzt). Zählt VOR dem Insert,
+  ob es der erste ist, danach atomarer `UPDATE ... WHERE first_post_email_sent_at IS NULL`-Claim.
+- **Admin-Test-Funktion:** neuer Button "Test-E-Mail senden" im Admin-Dashboard
+  (`/panel/admin/api/test-email`, admin-authentifiziert) - beliebige Zieladresse, Auswahl
+  zwischen allen 4 Vorlagen, immer mit `[TEST]`-Präfix im Betreff. Nutzt `sendMail` (nicht
+  `sendMailBestEffort`), damit ein echter Fehlschlag beim Testen sichtbar wird statt nur geloggt.
+
+### Verifikation
+
+- `npm run test:panel`: 104/104 grün (6 neue Tests für `/admin/api/test-email`: Auth-Gate,
+  Validierung, alle 4 Vorlagen). Alle Staging-Läufe dieser Sitzung mit `PANEL_MAIL_DRY_RUN=1` -
+  **kein einziger echter Mail-Versand in dieser Sitzung**, wie von Regel 3 verlangt.
+- **4b/4d sind nicht über HTTP testbar** (nur über die MCP-Tools der Routine erreichbar, nicht
+  über einen Panel-Endpunkt) - deshalb zusätzlich einmalig manuell verifiziert: ein Wegwerf-Skript
+  gegen eine komplett isolierte Scratch-DB (nicht Staging, nicht Produktion,
+  `/tmp/panel-aufgabe4-verify.db`, danach gelöscht) hat `savePendingApproval()` zweimal
+  hintereinander für denselben Kunden aufgerufen (genau 1 Mail-Versuch geloggt, `pending count`
+  trotzdem korrekt 2) und `logPost()` zweimal (genau 1 "erster Beitrag"-Mail-Versuch geloggt) -
+  beide Drossel-Mechanismen funktionieren wie vorgesehen.
+
 ## Kosteneinschätzung (Regel 11)
 
 - Turnstile-Verifizierung: kostenlos (siehe oben), ein zusätzlicher schneller HTTP-Aufruf pro
@@ -193,6 +232,10 @@ aus.
 - Die eigentliche Kostenersparnis überwiegt bei Weitem: jeder Signup, der nie bestätigt wird,
   spart ab sofort dauerhaft 1 Anthropic- + 1 fal.ai-Aufruf pro fälligem Kanal/Tag (siehe
   PANEL_V5_REPORT.md's Kostenrechnung) - genau die Lücke, die diese Aufgabe schließen sollte.
+- Aufgabe 4 (Kunden-E-Mails): kein Anthropic-/fal.ai-Aufruf, kein Rate-Limit nötig (kein
+  KI-/kostenpflichtiger Dienst beteiligt) - reiner SMTP-Versand über das bestehende Postfach, mit
+  eigenen Drossel-Mechanismen (max. 1x/24h bzw. genau 1x einmalig) statt eines klassischen
+  Rate-Limits, da es hier nicht um Missbrauch durch Dritte geht, sondern um "nicht zuspammen".
 
 ## Bekannte Grenzen (nicht beschönigt)
 

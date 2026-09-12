@@ -14,6 +14,8 @@ import crypto from "node:crypto";
 import { db, nowIso, type CustomerRow, type ConnectionRow, type PostRow } from "./db.js";
 import { randomToken, sha256 } from "./crypto.js";
 import { connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.js";
+import { sendMail } from "./mailer.js";
+import { firstPostLiveEmail, pendingApprovalsSummaryEmail, trialEndingEmail, verificationEmail } from "./emails.js";
 
 const COOKIE = "pp_admin";
 const SESSION_HOURS = 12;
@@ -279,6 +281,37 @@ export function createAdminRouter(): Router {
         return;
       }
       res.json({ ok: true, status });
+    }),
+  );
+
+  // Panel v6 Aufgabe 4: laesst Paul den technischen Mail-Versand selbst pruefen, ohne einen
+  // echten Kunden zu behelligen - schickt IMMER mit "[TEST]" im Betreff, nutzt sendMail (nicht
+  // sendMailBestEffort), damit ein echter Fehlschlag hier sichtbar wird statt nur geloggt.
+  const TEST_EMAIL_TEMPLATES = ["approvals", "trial-ending", "first-post", "verification"] as const;
+  router.post(
+    "/api/test-email",
+    safe((req, res) => {
+      const to = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+      const template = TEST_EMAIL_TEMPLATES.includes(req.body?.template) ? req.body.template : "approvals";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) {
+        res.status(400).json({ error: "Bitte eine gültige E-Mail-Adresse angeben." });
+        return;
+      }
+      const testCompany = "Test GmbH";
+      const base = (process.env.PANEL_BASE_URL ?? "").replace(/\/$/, "");
+      const mount = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
+      const mail =
+        template === "trial-ending" ? trialEndingEmail({ to, company: testCompany }) :
+        template === "first-post" ? firstPostLiveEmail({ to, company: testCompany }) :
+        template === "verification" ? verificationEmail({ to, company: testCompany, verifyUrl: `${base}${mount}/verify-email?token=test-nicht-echt` }) :
+        pendingApprovalsSummaryEmail({ to, company: testCompany, count: 2 });
+      mail.subject = `[TEST] ${mail.subject}`;
+      try {
+        sendMail(mail);
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(502).json({ error: err instanceof Error ? err.message : "Versand fehlgeschlagen." });
+      }
     }),
   );
 

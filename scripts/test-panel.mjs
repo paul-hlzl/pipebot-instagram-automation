@@ -740,6 +740,26 @@ async function main() {
         ok("/admin/api/overview mit Session -> 200", overviewRes.status === 200, `status=${overviewRes.status}`);
         ok("overview liefert metrics + customers", typeof overviewBody.metrics?.totalCustomers === "number" && Array.isArray(overviewBody.customers));
 
+        // --- Test-E-Mail (v6, Aufgabe 4) - PANEL_MAIL_DRY_RUN=1 im Staging-Prozess sorgt dafür,
+        // dass hier NICHTS wirklich verschickt wird (Regel 3), nur die HTTP-/Validierungs-Logik.
+        const noAuthTestMail = await fetch(`${BASE}${MOUNT}/admin/api/test-email`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: "x@example.invalid" }),
+        });
+        ok("test-email ohne Admin-Login -> 401", noAuthTestMail.status === 401, `status=${noAuthTestMail.status}`);
+
+        const badAddrRes = await fetch(`${BASE}${MOUNT}/admin/api/test-email`, {
+          method: "POST", headers: { "content-type": "application/json", cookie: adminCookie }, body: JSON.stringify({ to: "keine-email" }),
+        });
+        ok("test-email mit ungültiger Adresse -> 400", badAddrRes.status === 400, `status=${badAddrRes.status}`);
+
+        for (const template of ["approvals", "trial-ending", "first-post", "verification"]) {
+          const res = await fetch(`${BASE}${MOUNT}/admin/api/test-email`, {
+            method: "POST", headers: { "content-type": "application/json", cookie: adminCookie },
+            body: JSON.stringify({ to: "paul-test@example.invalid", template }),
+          });
+          ok(`test-email Vorlage "${template}" -> 200`, res.status === 200, `status=${res.status}`);
+        }
+
         await fetch(`${BASE}${MOUNT}/admin/api/logout`, { method: "POST", headers: { cookie: adminCookie } });
         const afterLogout = await fetch(`${BASE}${MOUNT}/admin/api/overview`, { headers: { cookie: adminCookie } });
         ok("/admin/api/overview nach Logout -> 401", afterLogout.status === 401, `status=${afterLogout.status}`);
