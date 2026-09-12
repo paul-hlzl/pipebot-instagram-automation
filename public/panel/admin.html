@@ -205,9 +205,34 @@
     </tr>`;
   }
 
+  function testEmailSectionHtml() {
+    return `<div style="border:1px solid var(--rule);border-radius:2px;padding:16px 20px;margin-bottom:32px">
+      <h2 style="margin-top:0">Test-E-Mail senden</h2>
+      <p style="color:var(--stone);font-size:14px;margin:0 0 12px">Schickt eine echte Vorlage mit "[TEST]" im Betreff an eine beliebige Adresse - so lässt sich der Mail-Versand prüfen, ohne einen echten Kunden zu behelligen.</p>
+      <form id="test-email-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0;flex:1;min-width:220px">
+          <label for="test-email-to">Ziel-Adresse</label>
+          <input id="test-email-to" type="email" required placeholder="paul@beispiel.at">
+        </div>
+        <div class="field" style="margin:0">
+          <label for="test-email-template">Vorlage</label>
+          <select id="test-email-template">
+            <option value="approvals">Freigabe-Erinnerung</option>
+            <option value="trial-ending">Trial endet bald</option>
+            <option value="first-post">Erster Beitrag live</option>
+            <option value="verification">E-Mail-Bestätigung</option>
+          </select>
+        </div>
+        <button class="btn" type="submit">Senden</button>
+      </form>
+      <p id="test-email-status" style="margin:10px 0 0;font-size:14px" aria-live="polite"></p>
+    </div>`;
+  }
+
   function renderDashboard() {
     $("#logout").hidden = false;
     $("#app").innerHTML = `
+      ${testEmailSectionHtml()}
       <div class="metrics">${metricsHtml(DATA.metrics)}</div>
       <h2>Kunden (${DATA.customers.length})</h2>
       <div style="overflow-x:auto">
@@ -249,6 +274,27 @@
     ov.addEventListener("click", (e) => { if (e.target === ov || e.target.closest(".close")) ov.remove(); });
     document.body.append(ov);
   }
+
+  document.addEventListener("submit", async (e) => {
+    if (e.target.id !== "test-email-form") return;
+    e.preventDefault();
+    const to = $("#test-email-to").value.trim();
+    const template = $("#test-email-template").value;
+    const status = $("#test-email-status");
+    const btn = e.target.querySelector("button[type=submit]");
+    btn.classList.add("busy");
+    status.textContent = "";
+    try {
+      await api("POST", "/api/test-email", { to, template });
+      status.textContent = `Verschickt an ${to}.`;
+      status.style.color = "var(--go)";
+    } catch (err) {
+      status.textContent = err.message || "Versand fehlgeschlagen.";
+      status.style.color = "var(--stop)";
+    } finally {
+      btn.classList.remove("busy");
+    }
+  });
 
   document.addEventListener("click", async (e) => {
     if (e.target.id === "logout") {
