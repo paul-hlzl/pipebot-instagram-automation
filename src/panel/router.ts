@@ -398,6 +398,9 @@ export function createPanelRouter(): Router {
       aiAvailable: anthropicAvailable(),
       trialDays: trialDays(),
       turnstileSiteKey: turnstileSiteKey(),
+      // Dauerhafte Staging-Testadresse (/panel/sandbox) - steuert nur den Testversion-Banner und
+      // die Demo-Hinweistexte im Frontend, nie in Produktion gesetzt.
+      sandbox: process.env.PANEL_SANDBOX === "true",
     });
   });
 

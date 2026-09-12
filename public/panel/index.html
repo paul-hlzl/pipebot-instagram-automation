@@ -37,6 +37,10 @@
   .help .short { display: none; }
 
   .demo { background: var(--wash); border-bottom: 1px solid var(--rule); padding: 10px 32px; font-size: 14px; color: var(--stone); }
+  /* Dauerhafte Staging-Testadresse (/panel/sandbox) - bewusst grell/unuebersehbar, damit sie nie
+     mit der echten Kundenseite verwechselt werden kann. */
+  .sandbox-banner { background: #FFF3CD; border-bottom: 2px solid #997404; padding: 12px 32px; font-size: 14px; font-weight: 700; color: #664D03; text-align: center; }
+  .sandbox-banner[hidden] { display: none; }
 
   /* ---------- Layout ---------- */
   .shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 72px; max-width: 1040px; margin: 0 auto; padding: 64px 32px 120px; }
@@ -446,6 +450,7 @@
   </p>
 </header>
 <div id="demo" class="demo" hidden>Vorschau: Hier wird nichts gespeichert und keine echte Verbindung aufgebaut.</div>
+<div id="sandbox-banner" class="sandbox-banner" hidden role="status">⚠️ TESTVERSION — hier werden neue Funktionen ausprobiert. Keine echten Kunden, keine echten Daten, keine echten Instagram-/LinkedIn-Verbindungen.</div>
 <div id="trialbar" class="trialbar" style="display:none" role="status"></div>
 
 <div class="shell">
@@ -492,8 +497,12 @@
 <script>
 (() => {
   /* ================= Einstellungen ================= */
+  // mount wird aus dem tatsächlichen Pfad abgeleitet (nicht fest "/panel"), damit dieselbe
+  // Datei unveraendert sowohl unter /panel (Produktion) als auch unter /panel/sandbox
+  // (dauerhafte Staging-Testadresse, siehe nginx-Location) funktioniert - eigene API-Aufrufe
+  // gehen dann jeweils an den richtigen Server statt versehentlich immer an die Produktion.
   const CONFIG = {
-    mount: "/panel",
+    mount: location.pathname.startsWith("/panel/sandbox") ? "/panel/sandbox" : "/panel",
     privacyUrl: "https://pipebot.at/datenschutz",     // TODO: echte Datenschutzerklärung verlinken
     nextSteps: "Wir sehen uns Ihre Angaben an und melden uns per E-Mail, bevor der erste Beitrag online geht.",
   };
@@ -993,7 +1002,7 @@
           ${connectBtn(c ? `${esc(p.name)} neu verbinden` : `Mit ${esc(p.name)} verbinden`)}
           <button class="link" data-skip="${p.id}" data-go="${nextTarget}">Später verbinden</button>
         </div>
-        <p class="fine">${p.available ? "Wir bekommen nur das Recht, Beiträge zu veröffentlichen. Ihr Passwort sehen wir nie." : "Diese Verbindung ist gerade nicht verfügbar. Schreiben Sie uns, wir schalten sie frei."}</p>
+        <p class="fine">${p.available ? "Wir bekommen nur das Recht, Beiträge zu veröffentlichen. Ihr Passwort sehen wir nie." : S.sandbox ? "Demo-Modus: In der Testversion absichtlich deaktiviert - es wird kein echtes Konto verbunden." : "Diese Verbindung ist gerade nicht verfügbar. Schreiben Sie uns, wir schalten sie frei."}</p>
       `}
       <h2>Häufige Fragen</h2>
       <details><summary>Kann ich die Verbindung wieder trennen?</summary><p>Ja, jederzeit mit einem Klick hier im Panel. Danach veröffentlichen wir nichts mehr auf ${esc(p.name)}.</p></details>
@@ -2333,6 +2342,8 @@
       S.aiAvailable = Boolean(p.aiAvailable);
       S.trialDays = Number(p.trialDays) || 7;
       S.turnstileSiteKey = p.turnstileSiteKey || null;
+      S.sandbox = Boolean(p.sandbox);
+      if (S.sandbox) $("#sandbox-banner").hidden = false;
       updateHelpChatVisibility();
     } catch {
       $("#stage").innerHTML = `<div class="banner bad" role="alert">Das Panel ist gerade nicht erreichbar. Bitte laden Sie die Seite in ein paar Minuten neu.</div>`;
