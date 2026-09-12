@@ -250,6 +250,13 @@ an Ihre eigene Adresse nutzen**, um den echten Versand einmal selbst zu bestäti
   dieses Panel als vertretbar eingeschätzt (kein hochsensibles Ziel, keine großen Nutzerzahlen),
   aber bewusst nicht verschwiegen.
 
+### Deploy-Status
+
+**Deployed.** `panel-v6` in `main` gemerged (Commit `9f08aab`). Neustart bewusst um ca. 3 Minuten
+verzögert (Merge/Build lagen direkt vor dem 08:43-UTC-Routinenlauf), dann um ca. 08:43:43 UTC neu
+gestartet - Backup vorher, `/health`/`/mcp`/`/panel/api/health` danach grün, Log sauber (nur die
+bekannte, unveränderte LinkedIn-Warnung).
+
 ### Verifikation
 
 `npm run test:panel`: 110/110 grün (6 neue Tests: ungültiges Format, unbekannte vs. bekannte
