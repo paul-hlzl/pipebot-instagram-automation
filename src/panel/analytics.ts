@@ -14,6 +14,8 @@ import { fetchAccountInsights, fetchMediaInsights } from "../instagram-insights.
 import { viennaDateStr } from "./schedule.js";
 import { randomToken } from "./crypto.js";
 import { generateAnalyticsSummary } from "../anthropic.js";
+import { sendMailBestEffort } from "./mailer.js";
+import { weeklyAnalyticsReportEmail } from "./emails.js";
 
 function toAccountSnapshot(r: AnalyticsAccountSnapshotRow) {
   return {
@@ -352,8 +354,11 @@ interface WeeklySummaryRunResult {
  * Once a week: pre-generate the AI summary for every active customer who has analytics data, so
  * it is ready both for the on-demand "Zusammenfassung anzeigen" button (serves the cache instead
  * of making the customer wait for a fresh Anthropic call) and for the weekly e-mail report (Panel
- * v9 Aufgabe 5, weekly-report.mjs) without that script needing to call Anthropic itself. Same
- * K9-style isolation as runDailyAnalyticsSnapshot - one customer's failure never blocks the rest.
+ * v9 Aufgabe 5) without that report needing to call Anthropic itself. For customers who opted into
+ * the weekly report (notify_weekly_report, separate switch from notify_on_publish - see
+ * emails.ts/session report), also sends the report e-mail right after generating their summary.
+ * Same K9-style isolation as runDailyAnalyticsSnapshot - one customer's failure never blocks the
+ * rest, and a failed e-mail send never blocks the summary from being cached for the panel button.
  */
 export async function runWeeklyAnalyticsSummaries(): Promise<WeeklySummaryRunResult> {
   const startedAt = nowIso();
@@ -367,9 +372,25 @@ export async function runWeeklyAnalyticsSummaries(): Promise<WeeklySummaryRunRes
     if (!hasConnection) continue;
     customersChecked++;
     try {
-      if (!getAnalyticsSummary(customer.id).hasData) continue;
-      await generateAndCacheSummary(customer);
+      const data = getAnalyticsSummary(customer.id);
+      if (!data.hasData) continue;
+      const { summary } = await generateAndCacheSummary(customer);
       summariesGenerated++;
+      if (customer.notify_weekly_report) {
+        sendMailBestEffort(
+          weeklyAnalyticsReportEmail({
+            to: customer.email,
+            company: customer.company,
+            followerCount: data.current.followerCount,
+            followerGrowth7d: data.current.followerGrowth,
+            reach7d: data.current.reach,
+            reachPrev7d: data.previous.reach,
+            views7d: data.current.views,
+            engagementRate7d: data.current.engagementRate,
+            aiSummary: summary,
+          }),
+        );
+      }
     } catch (err) {
       errors++;
       console.error(`[analytics] Wöchentliche Zusammenfassung fehlgeschlagen für Kunde ${customer.id}:`, err instanceof Error ? err.message : err);

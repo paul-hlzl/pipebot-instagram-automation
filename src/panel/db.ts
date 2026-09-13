@@ -324,6 +324,10 @@ migrateColumns("customers", [
   // einen sofortigen Hinweis, sobald bei aktivem approval_mode ein neuer Beitrag zur Freigabe
   // bereitsteht - beides ueber denselben Schalter, siehe credentials.ts.
   ["notify_on_publish", "INTEGER NOT NULL DEFAULT 0"],
+  // Panel v9 Aufgabe 5: eigener Opt-in-Schalter neben notify_on_publish (nicht derselbe - ein
+  // Kunde kann Veroeffentlichungs-Hinweise und/oder den woechentlichen Analytics-Bericht getrennt
+  // an-/abschalten). Standard aus, wie alle Benachrichtigungs-Opt-ins hier.
+  ["notify_weekly_report", "INTEGER NOT NULL DEFAULT 0"],
 ]);
 
 // Panel v6 task 2b: existing customers signed up before e-mail confirmation existed - treat them
@@ -382,6 +386,7 @@ export interface CustomerRow {
   approval_email_sent_at: string | null;
   skipped_providers: string | null;
   notify_on_publish: number;
+  notify_weekly_report: number;
   login_key_hash: string;
   status: string;
   consent_at: string;

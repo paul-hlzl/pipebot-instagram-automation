@@ -899,6 +899,8 @@
         <p class="hint" style="margin:-16px 0 22px">Ohne Ihre Freigabe wird nichts veröffentlicht. Wir bereiten Beiträge vor, Sie sehen sie unter „Vorschau“ und „Warten auf Ihre Freigabe“, und geben sie frei, sobald Sie zufrieden sind - danach wird in der Regel innerhalb weniger Minuten veröffentlicht.</p>
         <label class="check"><input type="checkbox" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""}><span>Ich möchte eine E-Mail bekommen, wenn ein Beitrag veröffentlicht wird${c.approvalMode ? " (bzw. sobald ein neuer Beitrag auf meine Freigabe wartet)" : ""}.</span></label>
         <p class="hint" style="margin:-16px 0 22px">Optional, standardmäßig aus - Sie bekommen dann bei jeder tatsächlichen Veröffentlichung sofort eine kurze E-Mail.</p>
+        <label class="check"><input type="checkbox" name="notifyWeeklyReport" ${c.notifyWeeklyReport ? "checked" : ""}><span>Ich möchte einmal pro Woche einen Analytics-Bericht per E-Mail bekommen (Kennzahlen + kurze Einordnung).</span></label>
+        <p class="hint" style="margin:-16px 0 22px">Optional, standardmäßig aus - unabhängig von der Benachrichtigung oben.</p>
         <div class="grid2">
           <div class="field">
             <label for="f-hashtagPreference">Hashtags</label>
@@ -2578,6 +2580,7 @@
     body.emojisEnabled = !!form.emojisEnabled?.checked;
     body.approvalMode = !!form.approvalMode?.checked;
     body.notifyOnPublish = !!form.notifyOnPublish?.checked;
+    body.notifyWeeklyReport = !!form.notifyWeeklyReport?.checked;
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));

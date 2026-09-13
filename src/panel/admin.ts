@@ -15,7 +15,7 @@ import { db, nowIso, type CustomerRow, type ConnectionRow, type PostRow } from "
 import { randomToken, sha256 } from "./crypto.js";
 import { connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.js";
 import { sendMail } from "./mailer.js";
-import { firstPostLiveEmail, pendingApprovalsSummaryEmail, trialEndingEmail, verificationEmail } from "./emails.js";
+import { firstPostLiveEmail, pendingApprovalsSummaryEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
 
 const COOKIE = "pp_admin";
 const SESSION_HOURS = 12;
@@ -99,6 +99,7 @@ interface CustomerAdminView {
   postCount: number;
   lastPostAt: string | null;
   notifyOnPublish: boolean;
+  notifyWeeklyReport: boolean;
 }
 
 function customerAdminView(c: CustomerRow): CustomerAdminView {
@@ -123,6 +124,7 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     postCount: postStats.n,
     lastPostAt: postStats.last,
     notifyOnPublish: Boolean(c.notify_on_publish),
+    notifyWeeklyReport: Boolean(c.notify_weekly_report),
   };
 }
 
@@ -289,7 +291,7 @@ export function createAdminRouter(): Router {
   // Panel v6 Aufgabe 4: laesst Paul den technischen Mail-Versand selbst pruefen, ohne einen
   // echten Kunden zu behelligen - schickt IMMER mit "[TEST]" im Betreff, nutzt sendMail (nicht
   // sendMailBestEffort), damit ein echter Fehlschlag hier sichtbar wird statt nur geloggt.
-  const TEST_EMAIL_TEMPLATES = ["approvals", "trial-ending", "first-post", "verification"] as const;
+  const TEST_EMAIL_TEMPLATES = ["approvals", "trial-ending", "first-post", "verification", "weekly-report"] as const;
   router.post(
     "/api/test-email",
     safe((req, res) => {
@@ -306,6 +308,11 @@ export function createAdminRouter(): Router {
         template === "trial-ending" ? trialEndingEmail({ to, company: testCompany }) :
         template === "first-post" ? firstPostLiveEmail({ to, company: testCompany }) :
         template === "verification" ? verificationEmail({ to, company: testCompany, verifyUrl: `${base}${mount}/verify-email?token=test-nicht-echt` }) :
+        template === "weekly-report" ? weeklyAnalyticsReportEmail({
+          to, company: testCompany, followerCount: 542, followerGrowth7d: 12, reach7d: 2860, reachPrev7d: 2450,
+          views7d: 3018, engagementRate7d: 14.6,
+          aiSummary: "(Test-Text) In der letzten Woche lief es gut: mehr Reichweite als in der Vorwoche und stetiges Follower-Wachstum. Ein Beitrag mit einer konkreten Kundenfrage performte besonders gut - Tipp: das kommende Woche wiederholen.",
+        }) :
         pendingApprovalsSummaryEmail({ to, company: testCompany, count: 2 });
       mail.subject = `[TEST] ${mail.subject}`;
       try {

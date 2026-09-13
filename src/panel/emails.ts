@@ -111,6 +111,44 @@ export function postPublishedEmail(input: { to: string; company: string; channel
   };
 }
 
+/**
+ * Panel v9 Aufgabe 5: wöchentlicher Analytics-Bericht (opt-in, notify_weekly_report - eigener
+ * Schalter neben notify_on_publish, siehe styleguide/Session-Bericht). Zahlen + KI-Zusammenfassung
+ * kommen fertig vom Aufrufer (runWeeklyAnalyticsSummaries in analytics.ts) - diese Funktion baut
+ * nur den Text, wie alle anderen Vorlagen hier.
+ */
+export function weeklyAnalyticsReportEmail(input: {
+  to: string;
+  company: string;
+  followerCount: number | null;
+  followerGrowth7d: number | null;
+  reach7d: number;
+  reachPrev7d: number;
+  views7d: number;
+  engagementRate7d: number | null;
+  aiSummary: string;
+}): MailInput {
+  const growth =
+    input.followerGrowth7d != null ? `${input.followerGrowth7d >= 0 ? "+" : ""}${input.followerGrowth7d}` : "unbekannt";
+  const reachDiff = input.reach7d - input.reachPrev7d;
+  const reachTrend = reachDiff > 0 ? `↑ ${reachDiff}` : reachDiff < 0 ? `↓ ${Math.abs(reachDiff)}` : "± 0";
+  return {
+    to: input.to,
+    subject: "📊 Ihr wöchentlicher Instagram-Bericht - Pipeflow",
+    text:
+      `Hallo,\n\n` +
+      `hier ist Ihr wöchentlicher Instagram-Bericht für "${input.company}":\n\n` +
+      `Follower: ${input.followerCount ?? "unbekannt"} (letzte 7 Tage: ${growth})\n` +
+      `Reichweite: ${input.reach7d} (Vorwoche: ${input.reachPrev7d}, ${reachTrend})\n` +
+      `Views: ${input.views7d}\n` +
+      `Engagement-Rate: ${input.engagementRate7d != null ? `${input.engagementRate7d}%` : "unbekannt"}\n\n` +
+      `Was bedeutet das für Sie?\n${input.aiSummary}\n\n` +
+      `Alle Details, den Follower-/Reichweite-Verlauf und Ihre Top-Beiträge sehen Sie im Panel:\n${panelUrl()}\n\n` +
+      `Sie erhalten diesen Bericht, weil Sie das in Ihren Einstellungen aktiviert haben - jederzeit abschaltbar.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
 /** Panel v8 Aufgabe 2: opt-in (notify_on_publish, derselbe Schalter wie postPublishedEmail),
  *  sobald bei aktivem approval_mode ein NEUER Beitrag zur Freigabe bereitsteht - unabhängig von
  *  der bestehenden gesammelten Erinnerung (max. 1x/Tag, pendingApprovalsSummaryEmail oben), die
