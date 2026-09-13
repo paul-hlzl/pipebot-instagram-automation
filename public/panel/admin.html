@@ -142,7 +142,12 @@
 
 <script>
 (() => {
-  const MOUNT = "/panel/admin";
+  // War hier fix auf "/panel/admin" gesetzt - dadurch sprachen ALLE Aufrufe dieser Seite (inkl.
+  // Login) IMMER die Produktions-Admin-API an, auch wenn die Seite selbst unter
+  // /panel/sandbox/admin/ aufgerufen wurde (gefunden beim Testen von Panel v9 Aufgabe 6, siehe
+  // Session-Bericht - Sicherheitsrelevant: ein Sandbox-Test haette unbemerkt echte Produktions-
+  // Kundendaten veraendern koennen). Gleiches Muster wie CONFIG.mount im Kunden-Panel (index.html).
+  const MOUNT = location.pathname.startsWith("/panel/sandbox") ? "/panel/sandbox/admin" : "/panel/admin";
   const $ = (s, r) => (r || document).querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
@@ -280,9 +285,25 @@
     return items.map(([l, n, warn]) => `<div class="metric${warn ? " warn" : ""}"><div class="n">${n}</div><div class="l">${esc(l)}</div></div>`).join("");
   }
 
+  // Panel v9 Aufgabe 6 (niedrige Prioritaet): grobe Kostenschaetzung der neuen KI-Aufrufe, nicht
+  // exakte Abrechnung - kein eigenes grosses Feature, nur eine kurze Tabelle.
+  const FEATURE_LABEL = { "analytics-summary": "Analytics-Zusammenfassung" };
+  function usageCostsHtml(rows) {
+    if (!rows || !rows.length) return "";
+    const total = rows.reduce((sum, r) => sum + r.totalUsd, 0);
+    return `<div style="border:1px solid var(--rule);border-radius:2px;padding:16px 20px;margin-bottom:32px">
+      <h2 style="margin-top:0">KI-Kosten (letzte 30 Tage, geschätzt)</h2>
+      <table>
+        <thead><tr><th>Funktion</th><th>Aufrufe</th><th>Geschätzte Kosten</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr><td>${esc(FEATURE_LABEL[r.feature] ?? r.feature)}</td><td>${r.count}</td><td>$${r.totalUsd.toFixed(4)}</td></tr>`).join("")}</tbody>
+      </table>
+      <p style="color:var(--stone);font-size:13px;margin:10px 0 0">Gesamt: $${total.toFixed(4)} · grobe Schätzung anhand der Anthropic-Tarife, keine exakte Abrechnung.</p>
+    </div>`;
+  }
+
   function rowHtml(c) {
     return `<tr data-id="${esc(c.customerId)}">
-      <td data-label="Firma"><div class="company-cell"><strong>${esc(c.company)}</strong><span>${esc(c.contactName)} · ${esc(c.email)}</span>${c.notifyOnPublish ? `<br><span>Mail-Benachrichtigung bei Veröffentlichung: an</span>` : ""}</div></td>
+      <td data-label="Firma"><div class="company-cell"><strong>${esc(c.company)}</strong><span>${esc(c.contactName)} · ${esc(c.email)}</span>${c.notifyOnPublish ? `<br><span>Mail-Benachrichtigung bei Veröffentlichung: an</span>` : ""}${c.analyticsFollowers != null ? `<br><span>Analytics: ${c.analyticsFollowers} Follower</span>` : ""}</div></td>
       <td data-label="Erstellt">${fmtDate(c.createdAt)}</td>
       <td data-label="Status"><span class="badge ${c.status === "active" ? "ok" : "paused"}">${c.status === "active" ? "aktiv" : "pausiert"}</span></td>
       <td data-label="Trial">${trialLabel(c)}</td>
@@ -313,6 +334,7 @@
             <option value="trial-ending">Trial endet bald</option>
             <option value="first-post">Erster Beitrag live</option>
             <option value="verification">E-Mail-Bestätigung</option>
+            <option value="weekly-report">Wöchentlicher Analytics-Bericht</option>
           </select>
         </div>
         <button class="btn" type="submit">Senden</button>
@@ -326,6 +348,7 @@
     $("#app").innerHTML = `
       ${testEmailSectionHtml()}
       <div class="metrics">${metricsHtml(DATA.metrics)}</div>
+      ${usageCostsHtml(DATA.usageCosts)}
       <h2>Kunden (${DATA.customers.length})</h2>
       <div style="overflow-x:auto">
       <table>

@@ -16,6 +16,7 @@ import { randomToken, sha256 } from "./crypto.js";
 import { connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.js";
 import { sendMail } from "./mailer.js";
 import { firstPostLiveEmail, pendingApprovalsSummaryEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
+import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
 
 const COOKIE = "pp_admin";
 const SESSION_HOURS = 12;
@@ -100,6 +101,7 @@ interface CustomerAdminView {
   lastPostAt: string | null;
   notifyOnPublish: boolean;
   notifyWeeklyReport: boolean;
+  analyticsFollowers: number | null;
 }
 
 function customerAdminView(c: CustomerRow): CustomerAdminView {
@@ -125,6 +127,10 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     lastPostAt: postStats.last,
     notifyOnPublish: Boolean(c.notify_on_publish),
     notifyWeeklyReport: Boolean(c.notify_weekly_report),
+    // Panel v9 Aufgabe 6: kurzer Analytics-Hinweis in der Kundenübersicht (nur Follower-Anzahl,
+    // keine grosse eigene Ansicht) - liest die bereits vom taeglichen Cron gespeicherten Snapshots,
+    // kein Live-API-Aufruf hier.
+    analyticsFollowers: getAnalyticsSummary(c.id).current.followerCount,
   };
 }
 
@@ -189,7 +195,9 @@ export function createAdminRouter(): Router {
           0,
         ),
       };
-      res.json({ metrics, customers });
+      // Panel v9 Aufgabe 6 (niedrige Prioritaet, "nur falls Zeit bleibt"): grobe Kostenschaetzung
+      // der neuen KI-Aufrufe fuer Paul, kein eigenes grosses Feature - siehe usage_costs (Aufgabe 3).
+      res.json({ metrics, customers, usageCosts: usageCostSummary(30) });
     }),
   );
 
