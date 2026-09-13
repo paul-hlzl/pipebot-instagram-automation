@@ -133,6 +133,61 @@
   .dash-channel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 12px 16px; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper); color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
   .dash-channel-row:hover { border-color: var(--ink); background: var(--wash); }
   @media (max-width: 720px) { .dash-tiles { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ---------- Dashboard-Redesign-Entwürfe (Panel v8 Aufgabe 3) - NUR in der Sandbox über
+     ?dashDesign=a|b|c erreichbar, siehe dashDesignFromQuery(). Jede Variante nutzt dieselben
+     Daten-Funktionen (loadDashboardExtras, postNow*, approvalCardHtml, calendarHtml) wie das
+     bestehende Dashboard - nur Hülle/Anordnung unterscheidet sich. Eigene Klassen-Präfixe
+     (dv-a-/dv-b-/dv-c-), damit nichts mit dem bestehenden Dashboard kollidiert. */
+  .dv-switcher { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 16px; margin-bottom: 32px; background: #FFF3CD; border: 1px solid #997404; border-radius: 2px; font-size: 13px; }
+  .dv-switcher strong { margin-right: 4px; }
+  .dv-switcher a { color: var(--ink); }
+  .dv-switcher a.current { font-weight: 700; text-decoration: none; }
+
+  /* --- Entwurf A: "Editorial" - grosse Status-Aussage oben, zweispaltig darunter (Haupt-
+     Handlungen links, Kanäle/Kalender rechts als ruhige Seitenleiste), Akzentfarbe des Kunden
+     als Unterstrich unterm Titel und im Kalender statt generischem Grün. */
+  .dv-a-accent-rule { width: 64px; height: 4px; margin: -8px 0 28px; background: var(--dv-accent, var(--ink)); }
+  .dv-a-status { font-size: 26px; font-weight: 500; line-height: 1.35; letter-spacing: -0.01em; margin: 0 0 40px; max-width: 30em; }
+  .dv-a-status strong { font-weight: 700; }
+  .dv-a-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 56px; align-items: start; }
+  .dv-a-main h2:first-child { margin-top: 0; }
+  .dv-a-side { background: var(--wash); border-radius: 4px; padding: 24px; }
+  .dv-a-side h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--stone); margin: 28px 0 12px; }
+  .dv-a-side h3:first-child { margin-top: 0; }
+  .dv-a-footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  .dv-a-footer .actions { margin-top: 8px; }
+  @media (max-width: 860px) { .dv-a-grid { grid-template-columns: 1fr; gap: 40px; } .dv-a-status { font-size: 22px; } }
+
+  /* --- Entwurf B: "Kachel-Dashboard" - modulare Karten statt gestapelter Abschnitte, jede mit
+     eigenem farbigen Akzentstreifen oben (Kundenfarbe bzw. Warnfarbe bei offener Freigabe). */
+  .dv-b-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-top: 8px; }
+  .dv-b-card { position: relative; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 24px 22px 22px; overflow: hidden; }
+  .dv-b-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--dv-accent, var(--ink)); }
+  .dv-b-card.warn::before { background: var(--stop); }
+  .dv-b-card.wide { grid-column: 1 / -1; }
+  .dv-b-eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--stone); margin: 0 0 10px; }
+  .dv-b-headline { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px; }
+  .dv-b-card p.hint { margin-top: 6px; }
+  .dv-b-card h2 { font-size: 16px; margin: 0 0 14px; }
+  @media (max-width: 640px) { .dv-b-grid { grid-template-columns: 1fr; } }
+
+  /* --- Entwurf C: "Fokus" - eine grosse Kern-Aussage + eine Haupt-Handlung oben, alles
+     Nebensaechliche (Kanaele verwalten/Stil/Konto) in ein einziges eingeklapptes
+     "Einstellungen"-Element unten verschoben, damit die Startseite nicht mit allem gleichzeitig
+     konkurriert. */
+  .dv-c-focus { padding: 40px 0 44px; border-bottom: 1px solid var(--rule); margin-bottom: 40px; }
+  .dv-c-focus .dv-c-eyebrow { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--dv-accent, var(--stone)); margin: 0 0 10px; font-weight: 600; }
+  .dv-c-focus h1 { margin-bottom: 20px; }
+  .dv-c-focus .actions { margin-top: 28px; }
+  .dv-c-settings { margin-top: 56px; border-top: 1px solid var(--rule); padding-top: 8px; }
+  .dv-c-settings summary { cursor: pointer; padding: 16px 0; font-weight: 600; font-size: 15px; list-style: none; display: flex; align-items: center; justify-content: space-between; }
+  .dv-c-settings summary::-webkit-details-marker { display: none; }
+  .dv-c-settings summary::after { content: "+"; font-size: 20px; font-weight: 400; color: var(--stone); }
+  .dv-c-settings[open] summary::after { content: "–"; }
+  .dv-c-settings-body { padding: 8px 0 32px; }
+  .dv-c-posts-strip { display: flex; gap: 10px; overflow-x: auto; margin: 16px 0 8px; padding-bottom: 4px; }
+  .dv-c-posts-strip img, .dv-c-posts-strip .ph { width: 120px; height: 120px; flex: none; object-fit: cover; border-radius: 4px; background: var(--wash); }
   @media (max-width: 420px) { .dash-tiles { grid-template-columns: 1fr; } }
 
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
@@ -1252,9 +1307,34 @@
     }).join("")}</div>`;
   }
 
+  // Panel v8 Aufgabe 3: drei Redesign-Entwürfe für den Rücklkehr-Dashboard, NUR über
+  // ?dashDesign=a|b|c erreichbar UND nur wenn S.sandbox true ist (siehe dashDesignFromQuery) -
+  // in Produktion bleibt IMMER das bestehende Dashboard unverändert, bis Paul sich entschieden
+  // hat. Alle drei nutzen dieselben Daten-Funktionen (loadDashboardExtras, postNow*,
+  // channelsSummaryHtml, approvalCardHtml/calendarHtml über dieselben #dash-*-IDs) wie das
+  // bestehende Dashboard - nur Hülle/Anordnung unterscheidet sich.
+  function dashDesignFromQuery() {
+    if (!S.sandbox) return null;
+    const v = new URLSearchParams(location.search).get("dashDesign");
+    return ["a", "b", "c"].includes(v) ? v : null;
+  }
+
+  function dvSwitcherHtml(active) {
+    const opt = (id, lbl) => `<a href="?${id ? `dashDesign=${id}` : ""}" class="${active === id ? "current" : ""}">${lbl}</a>`;
+    return `<div class="dv-switcher"><strong>Dashboard-Entwurf (nur Sandbox):</strong>
+      ${opt(null, "Aktuelles Dashboard")} · ${opt("a", "A – Editorial")} · ${opt("b", "B – Kacheln")} · ${opt("c", "C – Fokus")}
+    </div>`;
+  }
+
   function dashboardHtml() {
     const c = S.customer;
+    const design = dashDesignFromQuery();
+    const switcher = S.sandbox ? dvSwitcherHtml(design) : "";
+    if (design === "a") return switcher + dashboardHtmlA(c);
+    if (design === "b") return switcher + dashboardHtmlB(c);
+    if (design === "c") return switcher + dashboardHtmlC(c);
     return `
+      ${switcher}
       ${bannerHtml()}
       ${statusHtml(c)}
       ${emailVerifyBannerHtml(c)}
@@ -1269,6 +1349,191 @@
       <h2>Ihre Kanäle</h2>
       ${channelsSummaryHtml()}
       ${dashboardSectionsHtml(c)}`;
+  }
+
+  /** Entwurf A "Editorial": grosse Status-Aussage oben (mit Akzentfarbe des Kunden als
+   *  Unterstrich statt generischem Grün), zweispaltig darunter - Haupt-Handlungen (Freigabe/
+   *  Jetzt posten/Beiträge) links, ruhige Seitenleiste (Kanäle/Kalender) rechts. */
+  function dashboardHtmlA(c) {
+    const accent = c.accentColor || "";
+    const statusLine = c.trialExpired || c.customerPaused
+      ? "Aktuell wird nichts automatisch veröffentlicht."
+      : c.nextPostAt
+        ? `Ihr nächster Beitrag geht <strong>${esc(fmtNextPost(c.nextPostAt))}</strong> online.`
+        : "Aktuell ist kein nächster Beitrag geplant.";
+    return `
+      ${bannerHtml()}
+      ${statusHtml(c)}
+      ${emailVerifyBannerHtml(c)}
+      <h1>Willkommen zurück.</h1>
+      ${accent ? `<div class="dv-a-accent-rule" style="--dv-accent:${esc(accent)}"></div>` : ""}
+      <p class="dv-a-status">${statusLine}</p>
+      ${needsActionHtml()}
+      <div class="dv-a-grid">
+        <div class="dv-a-main">
+          ${c.approvalMode ? `<h2>Warten auf Ihre Freigabe</h2>
+          <p class="lede" id="dash-approvals-intro" style="font-size:16px;margin-bottom:16px"></p>
+          <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
+          <h2>Jetzt posten</h2>
+          <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wählen Sie die Kanäle - wir übernehmen das beim nächsten Lauf.</p>
+          ${postNowStatusHtml(c)}
+          <div class="field">
+            <label for="f-postNowTopic">Thema <span class="opt">(optional)</span></label>
+            <textarea id="f-postNowTopic" rows="3" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>
+          </div>
+          ${S.aiAvailable && !postNowAllBusy(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
+          <div id="topic-suggestions" class="chips" hidden></div>` : ""}
+          ${postNowChannelsHtml(c)}
+          <div class="actions">
+            <button class="btn" id="post-now-btn" ${postNowAllBusy(c) ? "disabled" : ""}>Jetzt posten</button>
+          </div>
+          <h2>Letzte Beiträge</h2>
+          <div id="dash-posts" class="post-grid"><p class="empty">Wird geladen …</p></div>
+          <div class="actions"><button class="link" data-go="history">Alle Beiträge ansehen</button></div>
+        </div>
+        <div class="dv-a-side">
+          <h3>Ihre Kanäle</h3>
+          ${channelsSummaryHtml()}
+          <h3>Die nächsten 7 Tage</h3>
+          <div class="actions" style="margin-top:0"><button class="btn" data-go="preview">Vorschau ansehen</button></div>
+          <h3>Kalender</h3>
+          <div id="dash-cal"><p class="empty">Wird geladen …</p></div>
+        </div>
+      </div>
+      <div class="dv-a-footer">
+        <button type="button" class="dash-tile" data-go="company" style="margin-bottom:16px">
+          <span class="dash-tile-lbl">Stil bearbeiten</span><span class="dash-tile-sub">Angaben ändern</span>
+        </button>
+        <p style="color:var(--stone);font-size:14px">Auf diesem Gerät bleiben Sie angemeldet. Für andere Geräte erzeugen Sie einen persönlichen Link. Behandeln Sie ihn wie ein Passwort.</p>
+        <div id="linkbox"><button class="link" id="mklink">Persönlichen Link erzeugen</button></div>
+        <div class="actions">
+          <button class="link" id="logout">Abmelden</button>
+          <button class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button>
+        </div>
+      </div>`;
+  }
+
+  /** Entwurf B "Kachel-Dashboard": modulare Karten statt gestapelter Abschnitte, jede mit
+   *  eigenem Akzentstreifen (Kundenfarbe) oben - moderneres SaaS-Dashboard-Gefühl. */
+  function dashboardHtmlB(c) {
+    const accent = c.accentColor || "";
+    const accentStyle = accent ? ` style="--dv-accent:${esc(accent)}"` : "";
+    return `
+      ${bannerHtml()}
+      ${statusHtml(c)}
+      ${emailVerifyBannerHtml(c)}
+      <h1>Willkommen zurück.</h1>
+      <p class="lede">Hier ist Ihr Überblick.</p>
+      ${needsActionHtml()}
+      <div class="dv-b-grid">
+        <div class="dv-b-card"${accentStyle}>
+          <p class="dv-b-eyebrow">Status</p>
+          <p class="dv-b-headline">${c.trialExpired || c.customerPaused ? "Pausiert" : c.nextPostAt ? esc(fmtNextPost(c.nextPostAt)) : "Kein Termin"}</p>
+          <p class="hint">${c.trialExpired || c.customerPaused ? "Aktuell wird nichts automatisch veröffentlicht." : "Nächster geplanter Beitrag"}</p>
+        </div>
+        <div class="dv-b-card"${accentStyle}>
+          <p class="dv-b-eyebrow">Kanäle</p>
+          ${channelsSummaryHtml()}
+        </div>
+        ${c.approvalMode ? `<div class="dv-b-card wide"${accentStyle}>
+          <h2>Warten auf Ihre Freigabe</h2>
+          <p class="lede" id="dash-approvals-intro" style="font-size:15px;margin-bottom:12px"></p>
+          <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>
+        </div>` : ""}
+        <div class="dv-b-card wide"${accentStyle}>
+          <h2>Jetzt posten</h2>
+          <p class="hint" style="margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wählen Sie die Kanäle - wir übernehmen das beim nächsten Lauf.</p>
+          ${postNowStatusHtml(c)}
+          <div class="field">
+            <label for="f-postNowTopic">Thema <span class="opt">(optional)</span></label>
+            <textarea id="f-postNowTopic" rows="3" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>
+          </div>
+          ${S.aiAvailable && !postNowAllBusy(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
+          <div id="topic-suggestions" class="chips" hidden></div>` : ""}
+          ${postNowChannelsHtml(c)}
+          <div class="actions"><button class="btn" id="post-now-btn" ${postNowAllBusy(c) ? "disabled" : ""}>Jetzt posten</button></div>
+        </div>
+        <div class="dv-b-card"${accentStyle}>
+          <h2>Letzte Beiträge</h2>
+          <div id="dash-posts" class="post-grid"><p class="empty">Wird geladen …</p></div>
+          <div class="actions"><button class="link" data-go="history">Alle ansehen</button></div>
+        </div>
+        <div class="dv-b-card"${accentStyle}>
+          <h2>Kalender</h2>
+          <div id="dash-cal"><p class="empty">Wird geladen …</p></div>
+        </div>
+        <div class="dv-b-card"${accentStyle}>
+          <h2>Vorschau</h2>
+          <p class="hint">Die nächsten 7 Tage vorbereiteter Beiträge ansehen, bearbeiten oder überspringen.</p>
+          <div class="actions"><button class="btn" data-go="preview">Vorschau ansehen</button></div>
+        </div>
+        <div class="dv-b-card"${accentStyle}>
+          <h2>Konto</h2>
+          <div class="actions" style="flex-direction:column;align-items:flex-start;gap:10px">
+            <button class="link" data-go="company">Stil bearbeiten</button>
+            <button class="link" id="mklink">Persönlichen Link erzeugen</button>
+            <button class="link" id="logout">Abmelden</button>
+            <button class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button>
+          </div>
+          <div id="linkbox"></div>
+        </div>
+      </div>`;
+  }
+
+  /** Entwurf C "Fokus": eine grosse Kern-Aussage + eine Haupt-Handlung oben, alles
+   *  Nebensächliche (Kanäle verwalten/Stil/Konto) in ein eingeklapptes "Einstellungen"-Element
+   *  unten verschoben, damit die Startseite nicht mit allem gleichzeitig konkurriert. */
+  function dashboardHtmlC(c) {
+    const accent = c.accentColor || "";
+    const accentStyle = accent ? ` style="--dv-accent:${esc(accent)}"` : "";
+    const hasApprovals = c.approvalMode;
+    const focusEyebrow = c.trialExpired ? "Trial abgelaufen" : c.customerPaused ? "Pausiert" : hasApprovals ? "Freigabe-Modus aktiv" : "Automatisch aktiv";
+    const focusHeadline = c.trialExpired || c.customerPaused
+      ? "Aktuell pausiert."
+      : c.nextPostAt ? `Nächster Beitrag ${esc(fmtNextPost(c.nextPostAt))}.` : "Kein Beitrag geplant.";
+    return `
+      ${bannerHtml()}
+      ${emailVerifyBannerHtml(c)}
+      ${needsActionHtml()}
+      <div class="dv-c-focus"${accentStyle}>
+        <p class="dv-c-eyebrow">${esc(focusEyebrow)}</p>
+        <h1>${focusHeadline}</h1>
+        ${hasApprovals ? `<p class="lede" id="dash-approvals-intro" style="margin-bottom:0"></p>` : `<p class="lede" style="margin-bottom:0">Sie müssen nichts weiter tun - wir kümmern uns automatisch um Ihre Beiträge.</p>`}
+        <div class="actions">
+          ${hasApprovals ? `<button class="btn" data-go="preview">Freigaben ansehen</button>` : `<button class="btn" data-go="preview">Vorschau ansehen</button>`}
+          <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
+        </div>
+      </div>
+      ${hasApprovals ? `<div id="dash-approvals"><p class="empty">Wird geladen …</p></div>` : ""}
+      <h2>Jetzt posten</h2>
+      <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wählen Sie die Kanäle - wir übernehmen das beim nächsten Lauf.</p>
+      ${postNowStatusHtml(c)}
+      <div class="field">
+        <label for="f-postNowTopic">Thema <span class="opt">(optional)</span></label>
+        <textarea id="f-postNowTopic" rows="3" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>
+      </div>
+      ${S.aiAvailable && !postNowAllBusy(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
+      <div id="topic-suggestions" class="chips" hidden></div>` : ""}
+      ${postNowChannelsHtml(c)}
+      <div class="actions"><button class="btn" id="post-now-btn" ${postNowAllBusy(c) ? "disabled" : ""}>Jetzt posten</button></div>
+      <h2>Letzte Beiträge</h2>
+      <div id="dash-posts" class="dv-c-posts-strip"><p class="empty">Wird geladen …</p></div>
+      <details class="dv-c-settings">
+        <summary>Einstellungen &amp; Konto</summary>
+        <div class="dv-c-settings-body">
+          <h3 style="margin-top:0">Kanäle</h3>
+          ${channelsSummaryHtml()}
+          <h3>Kalender</h3>
+          <div id="dash-cal"><p class="empty">Wird geladen …</p></div>
+          <div class="actions"><button class="btn" data-go="company">Stil bearbeiten</button></div>
+          <p style="color:var(--stone);margin-top:24px">Auf diesem Gerät bleiben Sie angemeldet. Für andere Geräte erzeugen Sie einen persönlichen Link.</p>
+          <div id="linkbox"><button class="link" id="mklink">Persönlichen Link erzeugen</button></div>
+          <div class="actions">
+            <button class="link" id="logout">Abmelden</button>
+            <button class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button>
+          </div>
+        </div>
+      </details>`;
   }
 
   function calendarHtml(posts, frequency) {
