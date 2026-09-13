@@ -43,6 +43,7 @@ import {
   updatePlannedPostText,
 } from "./credentials.js";
 import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache } from "./analytics.js";
+import { approveCommentReply, CommentRateLimitError, listPendingCommentApprovals, rejectCommentReply } from "./comments.js";
 import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
@@ -70,6 +71,7 @@ const TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
 const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
 const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
 const HASHTAG_PREFS = ["keine", "wenige", "viele"];
+const COMMENT_AUTOMATION_MODES = ["auto", "approval"];
 const LANGUAGES = ["de", "en"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 // Panel v6 Aufgabe 2b: einheitliche Meldung ueberall dort, wo ein angemeldeter, aber noch nicht
@@ -160,6 +162,8 @@ interface BriefingInput {
   approvalMode: boolean;
   notifyOnPublish: boolean;
   notifyWeeklyReport: boolean;
+  commentAutomationEnabled: boolean;
+  commentAutomationMode: string;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -218,8 +222,11 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     approvalMode: bool(body.approvalMode, false),
     notifyOnPublish: bool(body.notifyOnPublish, false),
     notifyWeeklyReport: bool(body.notifyWeeklyReport, false),
+    commentAutomationEnabled: bool(body.commentAutomationEnabled, false),
+    commentAutomationMode: str(body.commentAutomationMode, 20) || "approval",
   };
   const errors: Record<string, string> = {};
+  if (!COMMENT_AUTOMATION_MODES.includes(data.commentAutomationMode)) data.commentAutomationMode = "approval";
   if (data.pauseFrom && !ISO_DATE.test(data.pauseFrom)) data.pauseFrom = "";
   if (data.pauseUntil && !ISO_DATE.test(data.pauseUntil)) data.pauseUntil = "";
   // A pause end before its start makes no sense - drop both rather than silently misbehaving.
@@ -262,6 +269,8 @@ function publicState(c: CustomerRow) {
       approvalMode: Boolean(c.approval_mode),
       notifyOnPublish: Boolean(c.notify_on_publish),
       notifyWeeklyReport: Boolean(c.notify_weekly_report),
+      commentAutomationEnabled: Boolean(c.comment_automation_enabled),
+      commentAutomationMode: c.comment_automation_mode || "approval",
       emailVerified: Boolean(c.email_verified),
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
@@ -739,13 +748,15 @@ export function createPanelRouter(): Router {
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
          ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
-         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?, updated_at=?
+         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
+         comment_automation_enabled=?, comment_automation_mode=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
       data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
+      data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
       nowIso(), c.id);
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
@@ -1260,6 +1271,56 @@ export function createPanelRouter(): Router {
     const approval = setPendingApprovalStatus(c.id, String(req.params.id), "rejected");
     if (!approval) {
       res.status(404).json({ error: "Beitrag nicht gefunden oder schon bearbeitet." });
+      return;
+    }
+    res.json({ ok: true, approval });
+  });
+
+  // Panel v10: Kommentar-Automatisierung im Freigabe-Modus (comment_automation_mode = "approval")
+  // - eigene Endpunkte statt der Beitrags-Freigabe oben, weil "Freigeben" hier sofort selbst die
+  // Instagram-Antwort sendet (approveCommentReply), statt nur einen Status zu setzen, den die
+  // externe Routine spaeter abholt (dieses Feature hat keine externe Routine, siehe comments.ts).
+  router.get("/api/comment-approvals", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    res.json({ approvals: listPendingCommentApprovals(c.id) });
+  });
+
+  router.post("/api/comment-approvals/:id/approve", safe(async (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const editedReply = typeof req.body?.reply === "string" ? req.body.reply : undefined;
+    try {
+      const approval = await approveCommentReply(c.id, String(req.params.id), editedReply);
+      if (!approval) {
+        res.status(404).json({ error: "Kommentar nicht gefunden oder schon bearbeitet." });
+        return;
+      }
+      res.json({ ok: true, approval });
+    } catch (err) {
+      if (err instanceof CommentRateLimitError) {
+        res.status(429).json({ error: err.message });
+        return;
+      }
+      res.status(502).json({ error: err instanceof Error ? err.message : "Antwort konnte nicht gesendet werden." });
+    }
+  }));
+
+  router.post("/api/comment-approvals/:id/reject", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const approval = rejectCommentReply(c.id, String(req.params.id));
+    if (!approval) {
+      res.status(404).json({ error: "Kommentar nicht gefunden oder schon bearbeitet." });
       return;
     }
     res.json({ ok: true, approval });

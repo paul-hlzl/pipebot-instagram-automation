@@ -17,6 +17,7 @@ import { connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.j
 import { sendMail } from "./mailer.js";
 import { firstPostLiveEmail, pendingApprovalsSummaryEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
 import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
+import { commentStatsForCustomer } from "./comments.js";
 
 const COOKIE = "pp_admin";
 const SESSION_HOURS = 12;
@@ -102,6 +103,8 @@ interface CustomerAdminView {
   notifyOnPublish: boolean;
   notifyWeeklyReport: boolean;
   analyticsFollowers: number | null;
+  commentAutomationEnabled: boolean;
+  commentStats30d: { answered: number; skipped: number; pendingApproval: number; rejected: number };
 }
 
 function customerAdminView(c: CustomerRow): CustomerAdminView {
@@ -131,6 +134,10 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     // keine grosse eigene Ansicht) - liest die bereits vom taeglichen Cron gespeicherten Snapshots,
     // kein Live-API-Aufruf hier.
     analyticsFollowers: getAnalyticsSummary(c.id).current.followerCount,
+    // Panel v10 Punkt 4: Sichtbarkeit, kein eigenes grosses Feature - nur die Zahlen der letzten
+    // 30 Tage, keine Kommentar-Inhalte hier (die sieht nur der Kunde selbst im Panel).
+    commentAutomationEnabled: Boolean(c.comment_automation_enabled),
+    commentStats30d: commentStatsForCustomer(c.id, 30),
   };
 }
 

@@ -907,6 +907,14 @@
         <p class="hint" style="margin:-16px 0 22px">Optional, standardmäßig aus - Sie bekommen dann bei jeder tatsächlichen Veröffentlichung sofort eine kurze E-Mail.</p>
         <label class="check"><input type="checkbox" name="notifyWeeklyReport" ${c.notifyWeeklyReport ? "checked" : ""}><span>Ich möchte einmal pro Woche einen Analytics-Bericht per E-Mail bekommen (Kennzahlen + kurze Einordnung).</span></label>
         <p class="hint" style="margin:-16px 0 22px">Optional, standardmäßig aus - unabhängig von der Benachrichtigung oben.</p>
+        <label class="check"><input type="checkbox" name="commentAutomationEnabled" ${c.commentAutomationEnabled ? "checked" : ""}><span>Instagram-Kommentare automatisch mit KI beantworten.</span></label>
+        <p class="hint" style="margin:-16px 0 22px">Nur echte Fragen bekommen eine Antwort - Lob, neutrale Kommentare, Spam und Hass-Kommentare werden immer übersprungen, nie beantwortet. Standardmäßig aus.</p>
+        <div class="field">
+          <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
+          <label class="check"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher und geben sie frei.</span></label>
+          <label class="check"><input type="radio" name="commentAutomationMode" value="auto" ${c.commentAutomationMode === "auto" ? "checked" : ""}><span>Automatisch abschicken - Antworten werden direkt nach der Generierung veröffentlicht.</span></label>
+          <p class="hint">Gilt nur, wenn die Kommentar-Automatisierung oben eingeschaltet ist.</p>
+        </div>
         <div class="grid2">
           <div class="field">
             <label for="f-hashtagPreference">Hashtags</label>
@@ -1314,7 +1322,12 @@
             <p class="lede" id="dash-approvals-intro" style="font-size:15px;margin-bottom:12px"></p>
             <div id="dash-approvals"><p class="empty">Wird geladen …</p></div>
           </div>` : ""}
-          <div class="dash2-block"${c.approvalMode ? "" : ' style="margin-top:0"'}>
+          ${c.commentAutomationEnabled && c.commentAutomationMode !== "auto" ? `<div class="dash2-block"${c.approvalMode ? "" : ' style="margin-top:0"'}>
+            <h2>Kommentar-Antworten zur Freigabe</h2>
+            <p class="lede" style="font-size:15px;margin-bottom:12px">Diese Antworten hat die KI auf echte Fragen unter Ihren Instagram-Beiträgen vorbereitet. Prüfen, bei Bedarf anpassen, dann freigeben oder ablehnen.</p>
+            <div id="dash-comment-approvals"><p class="empty">Wird geladen …</p></div>
+          </div>` : ""}
+          <div class="dash2-block"${c.approvalMode || (c.commentAutomationEnabled && c.commentAutomationMode !== "auto") ? "" : ' style="margin-top:0"'}>
             <h2>Jetzt posten</h2>
             <p class="lede" style="font-size:15px;margin-bottom:14px">Sofort zu einem bestimmten Thema posten - wir übernehmen das beim nächsten Lauf.</p>
             ${postNowStatusHtml(c)}
@@ -1413,6 +1426,16 @@
         approvalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
       }
     }
+
+    const commentApprovalsBox = $("#dash-comment-approvals");
+    if (commentApprovalsBox) {
+      try {
+        const { approvals } = await api("GET", "/api/comment-approvals");
+        commentApprovalsBox.innerHTML = approvals.length ? approvals.map(commentApprovalCardHtml).join("") : `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch {
+        commentApprovalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
+      }
+    }
   }
 
   const CHANNEL_BADGE_LABEL = {
@@ -1441,6 +1464,24 @@
         <div class="actions">
           <button class="btn" data-approve="${esc(a.id)}">Freigeben</button>
           <button class="link" data-reject="${esc(a.id)}">Ablehnen</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /** Freigabe-Karte fuer eine KI-Antwort auf einen Instagram-Kommentar (Panel v10) - gleiches
+   *  Muster wie approvalCardHtml, aber die Antwort ist direkt bearbeitbar (Textarea statt reinem
+   *  Text), weil "Bearbeiten" hier eine sinnvolle dritte Aktion neben Freigeben/Ablehnen ist. */
+  function commentApprovalCardHtml(a) {
+    return `<div class="approval-card" data-comment-approval-id="${esc(a.id)}">
+      <div class="approval-body">
+        <span class="channel-badge">Instagram-Kommentar</span>
+        <p class="hint" style="margin:2px 0 10px">${esc(a.authorUsername ? `@${a.authorUsername}` : "Jemand")} schrieb: „${esc(a.commentText)}“</p>
+        <label style="display:block;margin-bottom:4px">Ihre Antwort</label>
+        <textarea class="comment-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>
+        <div class="actions">
+          <button class="btn" data-comment-approve="${esc(a.id)}">Freigeben</button>
+          <button class="link" data-comment-reject="${esc(a.id)}">Ablehnen</button>
         </div>
       </div>
     </div>`;
@@ -2423,6 +2464,28 @@
       }
       return;
     }
+
+    const commentApproveBtn = e.target.closest("[data-comment-approve]");
+    const commentRejectBtn = e.target.closest("[data-comment-reject]");
+    if (commentApproveBtn || commentRejectBtn) {
+      const btn = commentApproveBtn || commentRejectBtn;
+      const id = btn.dataset.commentApprove || btn.dataset.commentReject;
+      const action = commentApproveBtn ? "approve" : "reject";
+      if (action === "reject" && !(await showConfirm({ title: "Antwort ablehnen?", message: "Sie wird dann nicht an Instagram gesendet.", confirmLabel: "Ablehnen" }))) return;
+      const card = btn.closest(".approval-card");
+      const body = action === "approve" ? { reply: card?.querySelector(".comment-reply-text")?.value ?? "" } : undefined;
+      btn.classList.add("busy");
+      try {
+        await api("POST", `/api/comment-approvals/${id}/${action}`, body);
+        card?.remove();
+        const box = $("#dash-comment-approvals");
+        if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch (err) {
+        showError(err.message || "Aktion fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#post-now-btn")) {
       const btn = e.target.closest("#post-now-btn");
       const topic = $("#f-postNowTopic")?.value || "";
@@ -2587,6 +2650,7 @@
     body.approvalMode = !!form.approvalMode?.checked;
     body.notifyOnPublish = !!form.notifyOnPublish?.checked;
     body.notifyWeeklyReport = !!form.notifyWeeklyReport?.checked;
+    body.commentAutomationEnabled = !!form.commentAutomationEnabled?.checked;
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));

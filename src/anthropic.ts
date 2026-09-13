@@ -649,3 +649,101 @@ export async function generateAnalyticsSummary(input: AnalyticsSummaryInput): Pr
   }
   return { text, costUsd: estimateCostUsd(anthropicModel, data.usage) };
 }
+
+export type CommentType = "question" | "hostile" | "other";
+
+export interface CommentClassificationInput {
+  commentText: string;
+  company: string;
+  industry: string;
+  about: string;
+  tone: string;
+  language: string;
+  /** The commented-on post's own text, for context only - never itself a source of required elements/banned words (those are already enforced when the post was created). */
+  postHeadline: string | null;
+  postCaption: string | null;
+}
+
+export interface CommentClassificationResult {
+  type: CommentType;
+  /** Only set when type === "question" - null for everything else (see safety rule in the prompt: skip rather than engage). */
+  reply: string | null;
+  costUsd: number | null;
+}
+
+/**
+ * One Anthropic call per new comment (Panel v10, KI-Kommentar-Automatisierung) - classifies a
+ * top-level Instagram comment and, only for a genuine factual question, drafts a reply. The
+ * safety rule (never argue, never justify, never engage with anything that isn't a real question)
+ * is a hard instruction here, not a soft preference - "other"/"hostile" always get reply: null,
+ * enforced again below in code (never trust the reply field for a non-"question" type) in case the
+ * model ever disobeys the instruction.
+ */
+export async function classifyAndAnswerComment(input: CommentClassificationInput): Promise<CommentClassificationResult> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("Die Kommentar-Automatisierung ist gerade nicht verfügbar.");
+  }
+
+  const languageName = input.language === "en" ? "English" : "Deutsch";
+  const system =
+    "Du bewertest einen einzelnen obersten Kommentar unter einem Instagram-Beitrag eines Kleinunternehmens und entscheidest, " +
+    "ob und wie darauf geantwortet wird. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - kein einleitender Satz, kein " +
+    'Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: {"type": "question" | "hostile" | "other", "reply": "Antworttext" oder null}. ' +
+    'Setze "type" auf "question" NUR wenn der Kommentar wirklich eine sachliche Frage stellt, die eine konkrete Antwort verdient - ' +
+    'in diesem Fall UND NUR in diesem Fall "reply" mit einer klaren, sachlichen, direkt auf die gestellte Frage eingehenden Antwort füllen, ' +
+    `auf ${languageName}, im Tonfall "${input.tone || "sachlich"}". Keine Grundsatzaussagen, keine Werbe-Floskeln, keine Begrüssungsfloskel - ` +
+    "beantworte wirklich nur die gestellte Frage, kurz und konkret. " +
+    'Setze "type" auf "hostile" bei einem feindseligen, beleidigenden oder provozierenden Kommentar - "reply" dann IMMER null. ' +
+    'Setze "type" auf "other" bei allem anderen (Lob, neutrale Aussage, Spam, unklare Aussage ohne echte Frage) - "reply" dann IMMER null. ' +
+    "SICHERHEITSREGEL, hat Vorrang vor allem oben: nie streiten, nie rechtfertigen, nie inhaltlich auf einen Kommentar eingehen, der keine " +
+    "sachliche Frage ist - insbesondere nie auf Hass oder Provokation kontern oder eingehen. Im Zweifel, ob es wirklich eine sachliche Frage " +
+    'ist, IMMER "other" statt "question" wählen - lieber einen Kommentar überspringen als eine unpassende Antwort zu geben.';
+
+  const postContextLine =
+    input.postHeadline || input.postCaption
+      ? `Kommentierter Beitrag: "${(input.postHeadline || "").slice(0, 100)}"${input.postCaption ? ` - ${input.postCaption.slice(0, 300)}` : ""}`
+      : "Kommentierter Beitrag: (kein Text verfügbar)";
+  const user =
+    `Unternehmen: ${input.company} (Branche: ${input.industry || "unbekannt"})\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `${postContextLine}\n\n` +
+    `Kommentar: "${input.commentText}"`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 400,
+          system,
+          messages: [{ role: "user", content: user }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic comment-classification",
+  );
+
+  const raw = data.content?.find((c) => c.type === "text")?.text?.trim() ?? "";
+  const costUsd = estimateCostUsd(anthropicModel, data.usage);
+  let parsed: { type?: unknown; reply?: unknown };
+  try {
+    parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    throw new ToolError(`Kommentar-Klassifizierung: ungültige Modell-Antwort - ${raw.slice(0, 200)}`);
+  }
+  const type: CommentType = parsed.type === "question" || parsed.type === "hostile" ? parsed.type : "other";
+  // Enforced in code, not just trusted from the prompt (see doc comment above): reply is only
+  // ever non-null for a genuine question, regardless of what the model put in the field.
+  const reply = type === "question" && typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : null;
+  return { type, reply, costUsd };
+}

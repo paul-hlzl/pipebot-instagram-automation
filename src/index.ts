@@ -16,6 +16,7 @@ import { createHttpApp } from "./http-server.js";
 import { startDailyPlanningSchedule } from "./panel/planning.js";
 import { startTrialEndingEmailSchedule } from "./panel/trial-emails.js";
 import { startDailyAnalyticsSnapshotSchedule, startWeeklyAnalyticsSummarySchedule } from "./panel/analytics.js";
+import { startCommentAutomationSchedule } from "./panel/comments.js";
 import {
   assertChannelEnabled,
   assertLinkedInHasImage,
@@ -946,6 +947,9 @@ async function main(): Promise<void> {
   startTrialEndingEmailSchedule();
   startDailyAnalyticsSnapshotSchedule();
   startWeeklyAnalyticsSummarySchedule();
+  // Panel v10: eigenständiger Cron, bewusst nicht Teil der stündlichen Posting-Routine (siehe
+  // comments.ts).
+  startCommentAutomationSchedule();
   // Bind to loopback only - Nginx (proxy_pass http://127.0.0.1:3000) is the only
   // intended entry point. Express/Node default to 0.0.0.0 (all interfaces) if no
   // host is given, which would expose this port directly to the internet.

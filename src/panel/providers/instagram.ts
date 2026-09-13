@@ -1,7 +1,19 @@
 import { type Provider, ProviderError, requestJson } from "./types.js";
 
 // Instagram API with Instagram Login – keine Facebook-Seite nötig.
-const SCOPES = ["instagram_business_basic", "instagram_business_content_publish"];
+// instagram_business_manage_insights (Analytics, Panel v9) und instagram_business_manage_comments
+// (Kommentar-Automatisierung, Panel v10) fehlten hier bisher komplett - beide Features riefen
+// bereits Endpunkte auf, die diese Scopes voraussetzen, ohne sie je bei der Autorisierung
+// anzufordern (siehe Session-Bericht). Standard Access deckt beide für unsere eigenen/Test-Accounts
+// (Rolle auf der App) bereits ab; Advanced Access/App Review erst für echte Fremd-Kunden-Accounts.
+// Nur NEUE/erneute Verbindungen bekommen die zusätzlichen Scopes - bereits verbundene Kunden
+// müssen einmal neu verbinden, damit ihr Token sie nachträglich erhält.
+const SCOPES = [
+  "instagram_business_basic",
+  "instagram_business_content_publish",
+  "instagram_business_manage_insights",
+  "instagram_business_manage_comments",
+];
 
 const graph = (p: string): string => {
   const v = process.env.INSTAGRAM_GRAPH_VERSION;

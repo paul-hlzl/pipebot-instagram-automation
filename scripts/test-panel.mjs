@@ -905,6 +905,81 @@ async function main() {
     ok("/api/analytics-summary ohne Daten -> 409", res.status === 409, `status=${res.status}`);
   }
 
+  // --- Kommentar-Automatisierung (Panel v10) - reines Lesen/Freigeben/Ablehnen über unsere
+  // eigene DB, kein echter Anthropic-Aufruf in dieser Suite (siehe Dateikopf). Der Testkunde hat
+  // keine Instagram-Verbindung, also schlägt approve() lokal fehl, BEVOR resolveInstagramCredentials
+  // je ein Netzwerk-Ziel erreicht (siehe credentials.ts/getCredentials) - der 502-Fall unten
+  // verletzt die "keine echten externen Aufrufe"-Regel also nicht, deckt aber den vollen
+  // Response-Pfad ab.
+  console.log("\nKommentar-Automatisierung:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/comment-approvals`);
+    ok("/api/comment-approvals ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/comment-approvals`, { headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("/api/comment-approvals mit Login -> 200", res.status === 200, `status=${res.status}`);
+    ok("approvals ist ein leeres Array ohne Kommentare", Array.isArray(body.approvals) && body.approvals.length === 0, JSON.stringify(body.approvals));
+  }
+  {
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        commentAutomationEnabled: true, commentAutomationMode: "auto",
+      }),
+    });
+    const patchBody = await patchRes.json();
+    ok("PATCH /api/me speichert commentAutomationEnabled", patchBody.customer?.commentAutomationEnabled === true, JSON.stringify(patchBody.customer?.commentAutomationEnabled));
+    ok("PATCH /api/me speichert commentAutomationMode", patchBody.customer?.commentAutomationMode === "auto", patchBody.customer?.commentAutomationMode);
+
+    const badModeRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        commentAutomationEnabled: true, commentAutomationMode: "nicht-echt",
+      }),
+    });
+    const badModeBody = await badModeRes.json();
+    ok("Ungültiger commentAutomationMode fällt zurück auf 'approval'", badModeBody.customer?.commentAutomationMode === "approval", badModeBody.customer?.commentAutomationMode);
+  }
+  {
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/comment-approvals/does-not-exist/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" } });
+    ok("Freigeben eines unbekannten Kommentars -> 404", approveRes.status === 404, `status=${approveRes.status}`);
+    const rejectRes = await fetch(`${BASE}${MOUNT}/api/comment-approvals/does-not-exist/reject`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Ablehnen eines unbekannten Kommentars -> 404", rejectRes.status === 404, `status=${rejectRes.status}`);
+  }
+  if (!customerId) {
+    ok("Freigabe-/Ablehn-Test mit echten Zeilen übersprungen (customerId unbekannt)", false, "customerId leer");
+  } else {
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(STAGING_DB);
+    const seed = (id, status) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO processed_comments (id, comment_id, customer_id, media_id, comment_text, author_username, comment_type, generated_reply, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'media_test', 'Wie lange dauert eine Behandlung?', 'testuser', 'question', 'Das dauert in der Regel etwa 45 Minuten.', ?, ?, ?)`,
+      ).run(id, `${id}_comment`, customerId, status, now, now);
+    };
+
+    const rejectId = "cmt_test_reject";
+    seed(rejectId, "pending_approval");
+    const rejectRes = await fetch(`${BASE}${MOUNT}/api/comment-approvals/${rejectId}/reject`, { method: "POST", headers: { cookie: sessionCookie } });
+    const rejectBody = await rejectRes.json();
+    ok("Ablehnen eines echten wartenden Kommentars -> 200, status rejected", rejectRes.status === 200 && rejectBody.approval?.status === "rejected", JSON.stringify(rejectBody));
+
+    const approveId = "cmt_test_approve";
+    seed(approveId, "pending_approval");
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/comment-approvals/${approveId}/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({}) });
+    ok("Freigeben ohne Instagram-Verbindung -> 502 statt Absturz", approveRes.status === 502, `status=${approveRes.status}`);
+
+    db.prepare("DELETE FROM processed_comments WHERE customer_id = ?").run(customerId);
+    db.close();
+  }
+
   // --- 6. /connect ohne Session ---
   console.log("\n/connect:");
   {
@@ -981,6 +1056,12 @@ async function main() {
         const ourCustomerInOverview = overviewBody.customers?.find((c) => c.customerId === customerId);
         ok("overview zeigt notifyOnPublish pro Kunde (Panel v8 Aufgabe 2)", typeof ourCustomerInOverview?.notifyOnPublish === "boolean", JSON.stringify(ourCustomerInOverview?.notifyOnPublish));
         ok("overview zeigt notifyWeeklyReport pro Kunde (Panel v9 Aufgabe 5)", typeof ourCustomerInOverview?.notifyWeeklyReport === "boolean", JSON.stringify(ourCustomerInOverview?.notifyWeeklyReport));
+        ok("overview zeigt commentAutomationEnabled pro Kunde (Panel v10)", ourCustomerInOverview?.commentAutomationEnabled === true, JSON.stringify(ourCustomerInOverview?.commentAutomationEnabled));
+        ok(
+          "overview zeigt commentStats30d pro Kunde (Panel v10)",
+          typeof ourCustomerInOverview?.commentStats30d?.answered === "number" && typeof ourCustomerInOverview?.commentStats30d?.skipped === "number",
+          JSON.stringify(ourCustomerInOverview?.commentStats30d),
+        );
 
         // --- Test-E-Mail (v6, Aufgabe 4) - PANEL_MAIL_DRY_RUN=1 im Staging-Prozess sorgt dafür,
         // dass hier NICHTS wirklich verschickt wird (Regel 3), nur die HTTP-/Validierungs-Logik.

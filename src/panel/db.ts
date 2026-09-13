@@ -224,6 +224,29 @@ CREATE TABLE IF NOT EXISTS analytics_summaries (
   summary TEXT NOT NULL,
   generated_at TEXT NOT NULL
 );
+
+-- Panel v10: KI-Kommentar-Automatisierung (Instagram, siehe Session-Bericht). Eine Zeile pro
+-- gesehenem obersten Kommentar - der eigenständige 10-15min-Cron (comments.ts) prueft vor jedem
+-- Verarbeiten per comment_id, ob die Zeile schon existiert, damit ein Kommentar nie zweimal
+-- klassifiziert/beantwortet wird. media_id redundant zu posts.external_post_id (dieselbe bewusste
+-- Redundanz wie schon bei pending_approvals.channel), spart einen JOIN bei jeder Anzeige. Kein
+-- Fremdschluessel auf posts - ein Kommentar-Datensatz soll ueberleben, falls der zugehoerige
+-- posts-Eintrag je geloescht wird.
+CREATE TABLE IF NOT EXISTS processed_comments (
+  id TEXT PRIMARY KEY,
+  comment_id TEXT NOT NULL UNIQUE,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  media_id TEXT NOT NULL,
+  comment_text TEXT NOT NULL,
+  author_username TEXT,
+  comment_type TEXT NOT NULL,
+  generated_reply TEXT,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS processed_comments_customer ON processed_comments(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS processed_comments_status ON processed_comments(customer_id, status);
 `);
 
 // Migration: add columns to a table that existed before this version. SQLite has no
@@ -328,6 +351,13 @@ migrateColumns("customers", [
   // Kunde kann Veroeffentlichungs-Hinweise und/oder den woechentlichen Analytics-Bericht getrennt
   // an-/abschalten). Standard aus, wie alle Benachrichtigungs-Opt-ins hier.
   ["notify_weekly_report", "INTEGER NOT NULL DEFAULT 0"],
+  // Panel v10: KI-Kommentar-Automatisierung, nur Instagram (siehe Session-Bericht). Standard aus,
+  // wie approval_mode. comment_automation_mode: 'auto' postet die generierte Antwort sofort ueber
+  // /{comment-id}/replies, 'approval' legt sie stattdessen wie ein Beitrags-Entwurf zur Freigabe
+  // ab - gleiches Grundprinzip wie approval_mode bei Beitraegen, aber ein eigener Schalter (ein
+  // Kunde kann Beitraege automatisch, Kommentare aber nur mit Freigabe wollen, oder umgekehrt).
+  ["comment_automation_enabled", "INTEGER NOT NULL DEFAULT 0"],
+  ["comment_automation_mode", "TEXT NOT NULL DEFAULT 'approval'"],
 ]);
 
 // Panel v6 task 2b: existing customers signed up before e-mail confirmation existed - treat them
@@ -387,6 +417,8 @@ export interface CustomerRow {
   skipped_providers: string | null;
   notify_on_publish: number;
   notify_weekly_report: number;
+  comment_automation_enabled: number;
+  comment_automation_mode: string;
   login_key_hash: string;
   status: string;
   consent_at: string;
@@ -525,6 +557,20 @@ export interface PlanningErrorRow {
   scheduled_for: string | null;
   message: string;
   created_at: string;
+}
+
+export interface ProcessedCommentRow {
+  id: string;
+  comment_id: string;
+  customer_id: string;
+  media_id: string;
+  comment_text: string;
+  author_username: string | null;
+  comment_type: string;
+  generated_reply: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export const nowIso = (): string => new Date().toISOString();
