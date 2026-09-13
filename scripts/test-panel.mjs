@@ -573,6 +573,7 @@ async function main() {
 
   // --- 3f. Mehrere Farbthemen (v4) ---
   console.log("\nFarbthemen:");
+  let firstCustomerThemeId = "";
   {
     const createRes = await fetch(`${BASE}${MOUNT}/api/themes`, {
       method: "POST",
@@ -583,6 +584,7 @@ async function main() {
     ok("Thema anlegen -> 201", createRes.status === 201, `status=${createRes.status}`);
     const themeId = createBody.theme?.id;
     ok("Thema hat eine id", Boolean(themeId));
+    firstCustomerThemeId = themeId;
 
     const activateRes = await fetch(`${BASE}${MOUNT}/api/themes/${themeId}/activate`, { method: "POST", headers: { cookie: sessionCookie } });
     const activateBody = await activateRes.json();
@@ -595,6 +597,35 @@ async function main() {
 
     const badActivateRes = await fetch(`${BASE}${MOUNT}/api/themes/does-not-exist/activate`, { method: "POST", headers: { cookie: sessionCookie } });
     ok("Aktivieren eines fremden/unbekannten Themas -> 404", badActivateRes.status === 404, `status=${badActivateRes.status}`);
+  }
+
+  // --- Zugriffskontrolle zwischen zwei Kunden (Security-Review 2026-09-13, Aufgabe 2 Punkt 2) -
+  // ein zweiter, komplett unabhängiger Kunde darf NIE auf die Ressourcen des ersten zugreifen
+  // können. Diese Prüfung wurde in der Sitzung manuell gegen die Sandbox verifiziert (siehe
+  // Report) - hier als dauerhafter Regressionstest verankert.
+  console.log("\nZugriffskontrolle (zwei Kunden):");
+  {
+    const otherEmail = `other-customer-${Date.now()}@example.invalid`;
+    const otherSignupRes = await fetch(`${BASE}${MOUNT}/api/signup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ consent: true, company: "Anderer Kunde GmbH", contactName: "T", email: otherEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00" }),
+    });
+    const otherCookie = cookieHeader(otherSignupRes.headers.get("set-cookie"));
+
+    const crossActivateRes = await fetch(`${BASE}${MOUNT}/api/themes/${firstCustomerThemeId}/activate`, { method: "POST", headers: { cookie: otherCookie } });
+    ok("Kunde B kann Kunde A's Farbthema nicht aktivieren -> 404", crossActivateRes.status === 404, `status=${crossActivateRes.status}`);
+
+    const crossMeRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: otherCookie } });
+    const crossMeBody = await crossMeRes.json();
+    ok("Kunde B sieht nur seine eigene Firma (keine Vermischung)", crossMeBody.customer?.company === "Anderer Kunde GmbH", crossMeBody.customer?.company);
+
+    const crossPostsRes = await fetch(`${BASE}${MOUNT}/api/posts`, { headers: { cookie: otherCookie } });
+    const crossPostsBody = await crossPostsRes.json();
+    ok("Kunde B's eigene Historie ist leer (nicht Kunde A's Daten)", Array.isArray(crossPostsBody.posts) && crossPostsBody.posts.length === 0, JSON.stringify(crossPostsBody.posts));
+
+    // Aufräumen - dieser Zusatzkunde wird nur für diesen einen Test gebraucht.
+    await fetch(`${BASE}${MOUNT}/api/me`, { method: "DELETE", headers: { cookie: otherCookie, "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
   }
 
   // --- 3g. Eigenes Logo (v4) --- ein winziges 2x2-PNG reicht fuer den Roundtrip-Test,
@@ -632,6 +663,22 @@ async function main() {
     const deleteRes = await fetch(`${BASE}${MOUNT}/api/logo`, { method: "DELETE", headers: { cookie: sessionCookie } });
     const deleteBody = await deleteRes.json();
     ok("Logo entfernen -> hasLogo wieder false", deleteBody.customer?.hasLogo === false, deleteBody.customer?.hasLogo);
+
+    // Security-Review 2026-09-13: Logo-Upload hatte als einziger kostenpflichtiger Endpunkt
+    // (sharp-Verarbeitung + Festplattenschreibzugriff) kein Rate-Limit - jetzt 20/Stunde/Kunde.
+    // 21 schnelle Uploads (mit demselben ungültigen Payload - der Zähler greift schon vor der
+    // eigentlichen Validierung) müssen ab dem 21. mit 429 abgelehnt werden.
+    const rapidResults = [];
+    for (let i = 0; i < 21; i++) {
+      rapidResults.push(
+        (await fetch(`${BASE}${MOUNT}/api/logo`, {
+          method: "POST",
+          headers: { cookie: sessionCookie, "content-type": "application/json" },
+          body: JSON.stringify({ imageBase64: "data:image/png;base64,nicht-wirklich-ein-bild" }),
+        })).status,
+      );
+    }
+    ok("Logo-Upload Rate-Limit (20/h/Kunde) greift beim 21. Versuch -> 429", rapidResults[20] === 429, JSON.stringify(rapidResults));
   }
 
   // --- 4a. POST /api/pause (customer's own pause toggle) ---
@@ -850,6 +897,21 @@ async function main() {
     } else {
       ok("/panel/api/health -> 200", res.status === 200, `status=${res.status}`);
     }
+  }
+
+  // --- 10. HTTP-Security-Header (Security-Review 2026-09-13) ---
+  console.log("\nSecurity-Header:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/`);
+    ok("X-Frame-Options: DENY", res.headers.get("x-frame-options") === "DENY");
+    ok("X-Content-Type-Options: nosniff", res.headers.get("x-content-type-options") === "nosniff");
+    ok("Referrer-Policy: no-referrer", res.headers.get("referrer-policy") === "no-referrer");
+    ok("Content-Security-Policy gesetzt", Boolean(res.headers.get("content-security-policy")));
+    ok(
+      "Strict-Transport-Security gesetzt (vorher fehlend, jetzt ergänzt)",
+      (res.headers.get("strict-transport-security") || "").includes("max-age="),
+      res.headers.get("strict-transport-security"),
+    );
   }
 
   // --- Cleanup: remove the test customer created above ---
