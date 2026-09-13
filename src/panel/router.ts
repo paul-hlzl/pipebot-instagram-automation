@@ -13,6 +13,7 @@ import {
   assertNoBannedWords,
   assertRequiredElements,
   CHANNEL_IMAGE_FORMAT,
+  CHANNEL_LABEL,
   connectionStatus,
   createPostRequest,
   createSavedTheme,
@@ -24,6 +25,7 @@ import {
   listPendingApprovalsForCustomer,
   listPlannedPosts,
   listPostsForCustomer,
+  listRecentPostRequestsForCustomer,
   listSavedThemes,
   markPlannedPostStatus,
   openPostRequestCount,
@@ -31,6 +33,7 @@ import {
   POST_REQUEST_MAX_OPEN,
   POST_REQUEST_MAX_PER_DAY,
   postRequestCountToday,
+  type PublishChannel,
   resolveImageBranding,
   scheduleInputFor,
   setContentPillars,
@@ -244,6 +247,9 @@ function publicState(c: CustomerRow) {
       customerPaused: Boolean(c.customer_paused),
       contentPillars: listContentPillars(c.id),
       lastPostRequest: lastPostRequestForCustomer(c.id),
+      // Panel v8: "Jetzt posten" mit Kanalauswahl - eine einzelne "letzte Anfrage" reicht nicht
+      // mehr, wenn ein Klick pro Kanal eine eigene Zeile anlegt (siehe listRecentPostRequestsForCustomer).
+      postRequests: listRecentPostRequestsForCustomer(c.id),
       savedThemes: listSavedThemes(c.id),
       activeThemeId: c.active_theme_id,
       hasLogo: Boolean(c.logo_url),
@@ -1039,9 +1045,22 @@ export function createPanelRouter(): Router {
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   });
 
+  const POST_NOW_CHANNELS: PublishChannel[] = ["ig_feed", "ig_story", "linkedin"];
+  const POST_NOW_ENABLED_COLUMN: Record<PublishChannel, keyof CustomerRow> = {
+    ig_feed: "ig_feed_enabled",
+    ig_story: "ig_story_enabled",
+    linkedin: "linkedin_enabled",
+  };
+
   // Reine Warteschlange - kein direkter MCP-/KI-Aufruf von hier aus (der Server hat in diesem
   // Kontext keinen Anthropic-Zugriff). Die naechste Routine-Ausfuehrung holt sich offene
   // Anfragen ueber das MCP-Tool `list_post_requests` ab.
+  //
+  // Panel v8: Kanalauswahl - ein Klick kann mehrere Kanäle gleichzeitig anfragen, jeder gewählte
+  // Kanal bekommt seine EIGENE post_requests-Zeile (nie mehr channel=null). Alles-oder-nichts:
+  // schlägt die Prüfung für auch nur einen gewählten Kanal fehl (deaktiviert, schon offen, Tages-
+  // Limit), wird die GESAMTE Anfrage abgelehnt statt einen Teil stillschweigend zu verwerfen -
+  // vorhersagbarer für den Kunden als eine Mischung aus "teils geklappt, teils nicht".
   router.post("/api/post-now", safe((req, res) => {
     const c = currentCustomer(req);
     if (!c) {
@@ -1052,18 +1071,41 @@ export function createPanelRouter(): Router {
       res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
       return;
     }
-    if (openPostRequestCount(c.id) >= POST_REQUEST_MAX_OPEN) {
-      res.status(429).json({ error: "Sie haben schon eine offene Anfrage. Bitte warten Sie, bis diese bearbeitet wurde." });
+    const requested = Array.isArray(req.body?.channels)
+      ? [...new Set(req.body.channels.filter((ch: unknown): ch is string => typeof ch === "string"))]
+      : [];
+    if (!requested.length) {
+      res.status(400).json({ error: "Bitte wählen Sie mindestens einen Kanal aus." });
       return;
     }
-    if (postRequestCountToday(c.id) >= POST_REQUEST_MAX_PER_DAY) {
-      res.status(429).json({ error: `Maximal ${POST_REQUEST_MAX_PER_DAY} Anfragen pro Tag.` });
+    const unknown = requested.filter((ch) => !POST_NOW_CHANNELS.includes(ch as PublishChannel));
+    if (unknown.length) {
+      res.status(400).json({ error: `Unbekannter Kanal: ${unknown.join(", ")}` });
+      return;
+    }
+    const channels = requested as PublishChannel[];
+    // Nie dem Client vertrauen, dass ein deaktivierter Kanal nicht mitgeschickt wird - dieselbe
+    // Prüfung, die connectBtn/das Panel selbst schon serverseitig durchsetzt.
+    const disabled = channels.filter((ch) => !c[POST_NOW_ENABLED_COLUMN[ch]]);
+    if (disabled.length) {
+      res.status(400).json({ error: `Kanal deaktiviert: ${disabled.map((ch) => CHANNEL_LABEL[ch]).join(", ")}.` });
+      return;
+    }
+    const alreadyOpen = channels.filter((ch) => openPostRequestCount(c.id, ch) >= POST_REQUEST_MAX_OPEN);
+    if (alreadyOpen.length) {
+      res.status(429).json({
+        error: `Schon eine offene Anfrage für: ${alreadyOpen.map((ch) => CHANNEL_LABEL[ch]).join(", ")}. Bitte warten Sie, bis diese bearbeitet wurde.`,
+      });
+      return;
+    }
+    if (postRequestCountToday(c.id) + channels.length > POST_REQUEST_MAX_PER_DAY) {
+      res.status(429).json({ error: `Maximal ${POST_REQUEST_MAX_PER_DAY} Anfragen pro Tag - das würde das Limit überschreiten.` });
       return;
     }
     const topic = str(req.body?.topic, 300);
-    const request = createPostRequest(c.id, topic || null);
+    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch));
     triggerRoutineNow("post-now");
-    res.json({ ok: true, request });
+    res.json(publicState(c));
   }));
 
   // Mehrere Farbthemen (Aufgabe 8): NUR ablegen/umschalten - der eigentliche accentColor/

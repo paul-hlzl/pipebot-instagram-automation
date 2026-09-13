@@ -21,8 +21,21 @@ zweiten Eintrag für dasselbe customer_id/channel/heutiges-Datum automatisch ab,
 ob der erste aus Vorausplanung oder spontaner Generierung stammt - siehe K3/K8 unten. Zusätzlich:
 LinkedIn-Entwürfe kamen inkonsistent an (manche mit Bild, manche als reiner Text-Platzhalter) -
 Entscheidung: LinkedIn bekommt IMMER ein Bild, dieselbe Bildgenerierung wie der Instagram-Feed
-(auch das jetzt server-seitig erzwungen, siehe K8). Beides direkt per `RemoteTrigger`/API in die
-live laufende Routine eingespielt.
+(auch das jetzt server-seitig erzwungen, siehe K8). **Korrektur (2026-09-13, später am selben
+Tag):** anders als hier ursprünglich behauptet, wurde dieser Textabschnitt NICHT per
+`RemoteTrigger`/API in die live laufende Routine eingespielt (der Versuch wurde vom
+Auto-Mode-Classifier blockiert, siehe `docs/SECURITY_UX_REVIEW_REPORT.md`) - der Server-seitige
+Schutz ist unabhängig davon aktiv, aber der Prompt-Text der live laufenden Routine entsprach zu
+diesem Zeitpunkt noch NICHT diesem Dokument. Vor der nächsten Prompt-Änderung bitte per
+`RemoteTrigger get` gegen den tatsächlichen Live-Stand abgleichen, nicht von diesem Datei-Header
+ausgehen.
+
+**Update 2026-09-13, Panel v8 (Kanalauswahl beim "Jetzt posten"):** K2 ergänzt - `channel`
+(ig_feed/ig_story/linkedin) auf jedem Eintrag von `list_post_requests` gibt jetzt exakt vor,
+für welchen einzelnen Kanal generiert/veröffentlicht werden soll (ein Kunde, der mehrere Kanäle
+gleichzeitig auswählt, bekommt serverseitig eine eigene Zeile pro Kanal). **Ebenfalls noch NICHT
+live gepusht** - liegt hier nur vorbereitet, braucht Pauls ausdrückliche Freigabe wie immer bei
+Änderungen an der laufenden Routine.
 
 **Update Panel v7 (2026-09-12, Bugfix):** K3b's approvalMode-true-Zweig korrigiert - verwarf
 bisher einen bereits vorbereiteten Beitrag und generierte spontan einen komplett anderen (echtes
@@ -63,13 +76,20 @@ K1. Call list_approved_pending_posts. This returns posts customers already revie
 K2. Call list_post_requests. This returns customers who clicked "Jetzt posten" in their panel
     (an explicit, time-sensitive request) - work through every entry before moving to K3, so
     these customers don't wait behind the regular schedule. For each entry:
-    a. Use its topic as the theme. If topic is empty, fall back to that customer's usual
+    a. Use its `channel` field (ig_feed/ig_story/linkedin) to know exactly which format to
+       generate/publish for THIS entry - do NOT decide the channel yourself, and do NOT treat
+       one entry as covering more than its own single channel. Panel v8: a customer can select
+       several channels at once in their panel, which files one SEPARATE entry per channel (same
+       topic, different `channel`) - handle each entry independently, exactly like any other
+       single-channel due post. A null/missing `channel` (only possible on an old, pre-v8 row)
+       means: pick whichever of that customer's enabled channels is due, same as before.
+    b. Use its topic as the theme. If topic is empty, fall back to that customer's usual
        briefing/content pillars (see K5) instead.
-    b. This request does NOT bypass approvalMode - still follow the branch in K7 for this
+    c. This request does NOT bypass approvalMode - still follow the branch in K7 for this
        customer (file it via save_pending_approval if approvalMode is true, publish directly
        if false).
-    c. On success (published, or filed for approval), call mark_post_request_done with its id.
-    d. On failure, leave it pending and move on - it will be retried on a later run.
+    d. On success (published, or filed for approval), call mark_post_request_done with its id.
+    e. On failure, leave it pending and move on - it will be retried on a later run.
 
 K3. Call list_customers. This returns every panel customer with their current settings. Skip a
     customer entirely (no tool calls for them at all) if trialExpired is true - the publish

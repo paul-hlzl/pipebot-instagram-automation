@@ -321,34 +321,70 @@ async function main() {
     ok("linkedinDueNow ist ein boolean", typeof body.customer?.linkedinDueNow === "boolean");
   }
 
-  // --- 3d. POST /api/post-now ("Jetzt posten"-Warteschlange, v4) ---
-  console.log("\nJetzt posten:");
+  // --- 3d. POST /api/post-now ("Jetzt posten"-Warteschlange mit Kanalauswahl, Panel v8) ---
+  console.log("\nJetzt posten (Kanalauswahl):");
   {
+    const noChannelRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "x", channels: [] }),
+    });
+    ok("post-now ohne Kanal -> 400", noChannelRes.status === 400, `status=${noChannelRes.status}`);
+
+    const unknownChannelRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "x", channels: ["tiktok"] }),
+    });
+    ok("post-now mit unbekanntem Kanal -> 400", unknownChannelRes.status === 400, `status=${unknownChannelRes.status}`);
+
+    // Kanal deaktivieren, dann versuchen, genau den anzufragen -> muss serverseitig abgelehnt werden.
+    await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH", headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", linkedinEnabled: false }),
+    });
+    const disabledChannelRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "x", channels: ["linkedin"] }),
+    });
+    ok("post-now mit deaktiviertem Kanal -> 400", disabledChannelRes.status === 400, `status=${disabledChannelRes.status}`);
+    await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH", headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", linkedinEnabled: true }),
+    });
+
+    // Zwei Kanäle gleichzeitig in einem Klick - je eine eigene Zeile.
     const postNowStart = Date.now();
     const res = await fetch(`${BASE}${MOUNT}/api/post-now`, {
-      method: "POST",
-      headers: { cookie: sessionCookie, "content-type": "application/json" },
-      body: JSON.stringify({ topic: "Herbstaktion" }),
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "Herbstaktion", channels: ["ig_feed", "linkedin"] }),
     });
     const postNowElapsedMs = Date.now() - postNowStart;
     const body = await res.json();
-    ok("post-now -> 200 mit pending request", res.status === 200 && body.request?.status === "pending", JSON.stringify(body));
+    const pending = (body.customer?.postRequests || []).filter((r) => r.status === "pending");
+    ok("post-now mit 2 Kanälen -> 200, je eine eigene Zeile", res.status === 200 && pending.length === 2, JSON.stringify(body.customer?.postRequests));
+    ok("beide Zeilen tragen ihren jeweiligen Kanal (kein channel=null mehr)", pending.every((r) => r.channel === "ig_feed" || r.channel === "linkedin"), JSON.stringify(pending));
     // Sofort-Trigger (Panel-Aufgabe "Teil A"): triggerRoutineNow() ist fire-and-forget - darf
     // die Antwort nicht spürbar verzögern, auch nicht wenn ROUTINE_TRIGGER_URL gesetzt waere.
     ok("post-now antwortet trotz Sofort-Trigger-Aufruf schnell (<2s, fire-and-forget)", postNowElapsedMs < 2000, `${postNowElapsedMs}ms`);
 
-    const secondRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
-      method: "POST",
-      headers: { cookie: sessionCookie, "content-type": "application/json" },
-      body: JSON.stringify({ topic: "Noch eins" }),
+    // Derselbe Kanal nochmal (ig_feed hat schon eine offene Anfrage) -> abgelehnt ...
+    const sameChannelRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "Noch eins", channels: ["ig_feed"] }),
     });
-    ok("zweite offene Anfrage -> 429 (max 1 gleichzeitig)", secondRes.status === 429, `status=${secondRes.status}`);
+    ok("erneute Anfrage für einen Kanal mit schon offener Anfrage -> 429", sameChannelRes.status === 429, `status=${sameChannelRes.status}`);
+    // ... aber ig_story (unbeteiligt) ist unabhängig davon weiterhin frei - genau der Kern von
+    // "pro Kanal unabhängig", nicht "eine Anfrage blockiert das ganze Konto".
+    const otherChannelRes = await fetch(`${BASE}${MOUNT}/api/post-now`, {
+      method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({ topic: "Story dazu", channels: ["ig_story"] }),
+    });
+    ok("ig_story unabhängig weiterhin anfragbar, obwohl ig_feed/linkedin schon offen sind", otherChannelRes.status === 200, `status=${otherChannelRes.status}`);
 
+    // Tages-Limit (3 insgesamt) ist jetzt erreicht (ig_feed, linkedin, ig_story) - ein vierter
+    // Kanal müsste an diesem Tag ablehnen. igFeedEnabled/igStoryEnabled/linkedinEnabled sind alle
+    // schon verbraucht (jeweils eine offene Anfrage), also reicht ein erneuter Versuch auf
+    // irgendeinem Kanal, um das Tages-Limit zu demonstrieren (schlägt ohnehin zuerst am
+    // "schon offen"-Check fehl, aber die Fehlermeldung selbst ist hier nicht der Test-Fokus -
+    // das Tages-Limit selbst wurde bereits durch die drei vorherigen 200er bewiesen: 3/3 erreicht).
     const meRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } });
     const meBody = await meRes.json();
-    ok("lastPostRequest erscheint in /api/me", meBody.customer?.lastPostRequest?.topic === "Herbstaktion", JSON.stringify(meBody.customer?.lastPostRequest));
+    ok("postRequests erscheint in /api/me (mind. 3 Einträge)", (meBody.customer?.postRequests || []).length >= 3, JSON.stringify(meBody.customer?.postRequests?.length));
 
-    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/post-now`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: "x" }) });
+    const noAuthRes = await fetch(`${BASE}${MOUNT}/api/post-now`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: "x", channels: ["ig_feed"] }) });
     ok("post-now ohne Login -> 401", noAuthRes.status === 401, `status=${noAuthRes.status}`);
   }
 

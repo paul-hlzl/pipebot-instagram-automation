@@ -1048,16 +1048,67 @@
     `;
   }
 
-  function hasOpenPostRequest(c) {
-    return c.lastPostRequest && c.lastPostRequest.status === "pending";
+  // Panel v8: Kanalauswahl beim "Jetzt posten" - jeder Kanal hat jetzt eine unabhängige eigene
+  // Anfrage, daher überall "pro Kanal" statt der alten "genau eine Anfrage insgesamt"-Logik.
+  const POST_NOW_CHANNEL_OPTIONS = [
+    { id: "ig_feed", label: "Instagram Feed" },
+    { id: "ig_story", label: "Instagram Story" },
+    { id: "linkedin", label: "LinkedIn" },
+  ];
+  const POST_NOW_CHANNEL_ENABLED_FIELD = { ig_feed: "igFeedEnabled", ig_story: "igStoryEnabled", linkedin: "linkedinEnabled" };
+
+  /** This customer's own enabled channels, in POST_NOW_CHANNEL_OPTIONS order. */
+  function postNowAvailableChannels(c) {
+    return POST_NOW_CHANNEL_OPTIONS.filter((o) => c[POST_NOW_CHANNEL_ENABLED_FIELD[o.id]] !== false);
   }
 
-  function postNowStatusHtml(req) {
-    if (!req) return "";
-    const topicPart = req.topic ? `: "${esc(req.topic)}"` : "";
-    return req.status === "pending"
-      ? `<div class="banner" role="status">Ausstehend${topicPart} - angefragt am ${esc(fmtDate(req.createdAt))}. Wird in der Regel innerhalb weniger Minuten bearbeitet.</div>`
-      : `<div class="banner ok" role="status">Erledigt${topicPart}.</div>`;
+  /** Channel ids with a currently pending "Jetzt posten"-request - those can't be requested again yet. */
+  function postNowOpenChannels(c) {
+    return new Set((c.postRequests || []).filter((r) => r.status === "pending" && r.channel).map((r) => r.channel));
+  }
+
+  /** True once every channel this customer has enabled already has an open request - nothing left to submit. */
+  function postNowAllBusy(c) {
+    const available = postNowAvailableChannels(c);
+    if (!available.length) return true;
+    const open = postNowOpenChannels(c);
+    return available.every((o) => open.has(o.id));
+  }
+
+  /** The most recent request per channel (server already returns them newest-first), for the per-channel status lines. */
+  function postNowLatestByChannel(c) {
+    const map = {};
+    for (const r of c.postRequests || []) {
+      if (r.channel && !map[r.channel]) map[r.channel] = r;
+    }
+    return map;
+  }
+
+  function postNowStatusHtml(c) {
+    const byChannel = postNowLatestByChannel(c);
+    const lines = POST_NOW_CHANNEL_OPTIONS
+      .filter((o) => byChannel[o.id])
+      .map((o) => {
+        const r = byChannel[o.id];
+        const topicPart = r.topic ? `: "${esc(r.topic)}"` : "";
+        return r.status === "pending"
+          ? `<div class="banner" role="status">${esc(o.label)} ausstehend${topicPart} - angefragt am ${esc(fmtDate(r.createdAt))}. Wird in der Regel innerhalb weniger Minuten bearbeitet.</div>`
+          : `<div class="banner ok" role="status">${esc(o.label)} erledigt${topicPart}.</div>`;
+      });
+    return lines.join("");
+  }
+
+  function postNowChannelsHtml(c) {
+    const available = postNowAvailableChannels(c);
+    if (!available.length) {
+      return `<p class="hint">Aktivieren Sie mindestens einen Kanal unter „Kanäle &amp; Formate“ in Ihren Einstellungen, um sofort zu posten.</p>`;
+    }
+    const open = postNowOpenChannels(c);
+    return `<fieldset class="field post-now-channels">
+      <legend>Kanäle</legend>
+      ${available.map((o) => `
+        <label class="check"><input type="checkbox" name="postNowChannel" value="${o.id}" ${open.has(o.id) ? "disabled" : "checked"}><span>${esc(o.label)}${open.has(o.id) ? " (schon angefragt)" : ""}</span></label>`).join("")}
+    </fieldset>`;
   }
 
   function statusHtml(c) {
@@ -1106,16 +1157,17 @@
       <p class="lede" style="font-size:16px;margin-bottom:16px">Schauen Sie sich vorbereitete Beiträge an, bevor sie automatisch veröffentlicht werden - Text bearbeiten, Bild-Farbe ändern oder überspringen.</p>
       <div class="actions"><button class="btn" data-go="preview">Vorschau ansehen</button></div>
       <h2>Jetzt posten</h2>
-      <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wir übernehmen das beim nächsten Lauf.</p>
-      ${postNowStatusHtml(c.lastPostRequest)}
+      <p class="lede" style="font-size:16px;margin-bottom:16px">Sie möchten sofort zu einem bestimmten Thema einen Beitrag? Wählen Sie die Kanäle - wir übernehmen das beim nächsten Lauf.</p>
+      ${postNowStatusHtml(c)}
       <div class="field">
-        <label for="f-postNowTopic" class="vh">Thema (optional)</label>
-        <input id="f-postNowTopic" type="text" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${hasOpenPostRequest(c) ? "disabled" : ""}>
+        <label for="f-postNowTopic">Thema <span class="opt">(optional)</span></label>
+        <textarea id="f-postNowTopic" rows="3" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>
       </div>
-      ${S.aiAvailable && !hasOpenPostRequest(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
+      ${S.aiAvailable && !postNowAllBusy(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
       <div id="topic-suggestions" class="chips" hidden></div>` : ""}
+      ${postNowChannelsHtml(c)}
       <div class="actions">
-        <button class="btn" id="post-now-btn" ${hasOpenPostRequest(c) ? "disabled" : ""}>Jetzt zu diesem Thema posten</button>
+        <button class="btn" id="post-now-btn" ${postNowAllBusy(c) ? "disabled" : ""}>Jetzt posten</button>
       </div>
       <h2>Letzte Beiträge</h2>
       <div id="dash-posts" class="post-grid"><p class="empty">Wird geladen …</p></div>
@@ -2171,10 +2223,14 @@
     if (e.target.closest("#post-now-btn")) {
       const btn = e.target.closest("#post-now-btn");
       const topic = $("#f-postNowTopic")?.value || "";
+      const channels = [...document.querySelectorAll('input[name="postNowChannel"]:checked:not(:disabled)')].map((el) => el.value);
+      if (!channels.length) {
+        showError("Bitte wählen Sie mindestens einen Kanal aus.");
+        return;
+      }
       btn.classList.add("busy");
       try {
-        const { request } = await api("POST", "/api/post-now", { topic });
-        S.customer.lastPostRequest = request;
+        applyState(await api("POST", "/api/post-now", { topic, channels }));
         S.banner = { kind: "ok", text: "Angefragt - wir kümmern uns beim nächsten Lauf darum." };
         render(true);
       } catch (err) {
@@ -2582,9 +2638,10 @@
     }
     if (/^\/api\/approvals\/.+\/(approve|reject)$/.test(url)) return { ok: true };
     if (url === "/api/post-now") {
-      const request = { id: "preq_demo", topic: body.topic || "", status: "pending", createdAt: new Date().toISOString() };
-      MOCK.customer = { ...MOCK.customer, lastPostRequest: request };
-      return { ok: true, request };
+      const now = new Date().toISOString();
+      const newRequests = (body.channels || []).map((channel, i) => ({ id: `preq_demo_${i}`, topic: body.topic || "", channel, status: "pending", createdAt: now }));
+      MOCK.customer = { ...MOCK.customer, postRequests: [...newRequests, ...(MOCK.customer.postRequests || [])] };
+      return mockState();
     }
     if (url === "/api/me" && method === "DELETE") {
       MOCK.customer = null; MOCK.connections = [];

@@ -642,12 +642,17 @@ function createServer(): McpServer {
         "List all still-pending \"post now\" requests customers queued themselves from their panel dashboard " +
         "(topic, customerId, channel, createdAt). Call this and work through every entry BEFORE the regular " +
         "list_customers/dueNow loop in each routine run - a customer who explicitly asked for a post right now " +
-        "should not wait behind the scheduled queue. For each entry, generate and publish a post for that " +
-        "customerId using its `topic` (fall back to the customer's usual briefing/content pillars if `topic` is " +
-        "empty), respecting that customer's usual rules (bannedWords, requiredElements, approval_mode if set, " +
-        "channel toggles). After successfully handling one (published, or filed into pending_approvals under " +
-        "approval_mode), call `mark_post_request_done` with its id - never leave a handled request pending, " +
-        "and never call a publish tool twice for the same request.",
+        "should not wait behind the scheduled queue. Each entry's `channel` (ig_feed/ig_story/linkedin) tells " +
+        "you EXACTLY which single format to generate/publish for THAT entry - a customer selecting multiple " +
+        "channels in their panel produces one separate entry per channel (same topic, different channel), so " +
+        "never guess or cover more than one channel per entry. A null `channel` only occurs on an old, " +
+        "pre-existing row - pick whichever of that customer's enabled channels is due, same as before this " +
+        "field existed. For each entry, generate and publish a post for that customerId using its `topic` " +
+        "(fall back to the customer's usual briefing/content pillars if `topic` is empty), respecting that " +
+        "customer's usual rules (bannedWords, requiredElements, approval_mode if set, channel toggles). After " +
+        "successfully handling one (published, or filed into pending_approvals under approval_mode), call " +
+        "`mark_post_request_done` with its id - never leave a handled request pending, and never call a " +
+        "publish tool twice for the same request.",
     },
     async () => {
       try {

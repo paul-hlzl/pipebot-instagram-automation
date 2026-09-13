@@ -190,7 +190,7 @@ function overview(c: CustomerRow): CustomerOverview {
 
 export type PublishChannel = "ig_feed" | "ig_story" | "linkedin";
 
-const CHANNEL_LABEL: Record<PublishChannel, string> = {
+export const CHANNEL_LABEL: Record<PublishChannel, string> = {
   ig_feed: "Instagram Feed",
   ig_story: "Instagram Story",
   linkedin: "LinkedIn",
@@ -614,11 +614,27 @@ function toPostRequest(r: PostRequestRow): PostRequest {
   return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at };
 }
 
+/** Panel v8: per CHANNEL, not per customer overall - a customer may now have up to one open
+ *  request per channel (ig_feed/ig_story/linkedin) at the same time, since a single "Jetzt
+ *  posten" click can select multiple channels at once. */
 export const POST_REQUEST_MAX_OPEN = 1;
+/** Still a total across ALL channels combined, deliberately not multiplied per channel - keeps
+ *  the original daily budget intact even though one click can now create up to 3 rows at once. */
 export const POST_REQUEST_MAX_PER_DAY = 3;
 
-/** How many still-pending requests this customer currently has (should be 0 or 1 - enforced at creation). */
-export function openPostRequestCount(customerId: string): number {
+/**
+ * How many still-pending requests this customer currently has - overall, or (Panel v8) for one
+ * specific channel, now that a single "Jetzt posten" submission can queue one request per
+ * selected channel independently (see POST_REQUEST_MAX_OPEN's new per-channel meaning below).
+ */
+export function openPostRequestCount(customerId: string, channel?: string | null): number {
+  if (channel) {
+    return (
+      db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status = 'pending' AND channel = ?").get(customerId, channel) as {
+        n: number;
+      }
+    ).n;
+  }
   return (db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status = 'pending'").get(customerId) as { n: number }).n;
 }
 
@@ -652,6 +668,19 @@ export function lastPostRequestForCustomer(customerId: string): PostRequest | nu
     .prepare("SELECT * FROM post_requests WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1")
     .get(customerId) as PostRequestRow | undefined;
   return row ? toPostRequest(row) : null;
+}
+
+/**
+ * Panel v8: a single "Jetzt posten" click can now queue one request per selected channel, so the
+ * panel needs more than just the single most recent one to show independent per-channel status
+ * (e.g. "LinkedIn ausstehend" while Instagram Feed already went through). 10 is generous - a
+ * customer is capped at POST_REQUEST_MAX_PER_DAY (3) new rows per day anyway.
+ */
+export function listRecentPostRequestsForCustomer(customerId: string, limit = 10): PostRequest[] {
+  const rows = db
+    .prepare("SELECT * FROM post_requests WHERE customer_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(customerId, limit) as PostRequestRow[];
+  return rows.map(toPostRequest);
 }
 
 /** All still-open requests across all customers, oldest first - what the routine should process before its regular customer loop. */
