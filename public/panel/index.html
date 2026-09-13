@@ -153,6 +153,23 @@
   .dash2-posts-grid img, .dash2-posts-grid .ph { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--wash); display: block; }
   .dash2-footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13.5px; color: var(--stone); }
   .dash2-footer button.link { font-size: 13.5px; }
+
+  /* ---------- Analytics (Panel v9 Aufgabe 2, Instagram v1) ---------- */
+  .an-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin: 20px 0 32px; }
+  .an-stat { border: 1px solid var(--rule); border-radius: 2px; padding: 14px 16px; }
+  .an-stat .lbl { font-size: 12.5px; color: var(--stone); margin-bottom: 6px; }
+  .an-stat .val { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+  .an-stat .delta { font-size: 12.5px; margin-top: 4px; }
+  .an-stat .delta.up { color: var(--go); }
+  .an-stat .delta.down { color: var(--stop); }
+  .an-chart-wrap { margin: 8px 0 36px; }
+  .an-chart-wrap svg { width: 100%; height: 120px; display: block; }
+  .an-chart-label { font-size: 12.5px; color: var(--stone); margin-top: 6px; display: flex; justify-content: space-between; }
+  .an-top-posts { display: flex; flex-direction: column; gap: 10px; }
+  .an-top-post { display: flex; gap: 14px; border: 1px solid var(--rule); border-radius: 2px; padding: 12px 14px; align-items: center; }
+  .an-top-post img, .an-top-post .ph { width: 64px; height: 64px; object-fit: cover; border-radius: 2px; background: var(--wash); flex: none; }
+  .an-top-post .stats { font-size: 13px; color: var(--stone); margin-top: 3px; }
+  @media (max-width: 480px) { .an-top-post { flex-wrap: wrap; } }
   @media (max-width: 980px) { .dash2-col-main, .dash2-col-side { grid-column: span 12; } }
   @media (max-width: 480px) { .dash2-top h1 { font-size: 26px; } }
 
@@ -572,7 +589,7 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const conn = (id) => S.connections.find((c) => c.provider === id);
   const prov = (id) => S.providers.find((p) => p.id === id);
-  const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "preview", "history"];
+  const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "preview", "history", "analytics"];
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
   const fmtNextPost = (iso) => {
     if (!iso) return "";
@@ -623,7 +640,7 @@
     if (S.step === "dashboard") { $("#rail").innerHTML = ""; const rc = $("#rail-current"); if (rc) rc.textContent = ""; return; }
     const list = steps();
     const cur = list.indexOf(S.step);
-    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : prov(id).name;
+    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : id === "analytics" ? "Analytics" : prov(id).name;
     const meta = (id) => {
       if (id === "company") return S.customer ? S.customer.company : "Angaben machen";
       if (id === "done" || id === "preview" || id === "history") return "";
@@ -1274,6 +1291,7 @@
       ${needsActionHtml()}
       <div class="dash2-top">
         <h1>Willkommen zurück.</h1>
+        <button type="button" class="btn" data-go="analytics">Analytics ansehen</button>
         <div class="dash2-stats">
           <span class="${c.trialExpired || c.customerPaused ? "warn" : ""}">${c.trialExpired ? "Trial abgelaufen" : c.customerPaused ? "Pausiert" : c.nextPostAt ? `Nächster Beitrag: <strong>${esc(fmtNextPost(c.nextPostAt))}</strong>` : "Kein Beitrag geplant"}</span>
           <span>Kanäle: <strong>${connectedCount}/${S.providers.length} verbunden</strong></span>
@@ -1458,6 +1476,96 @@
     }
   }
 
+  /* ================= Analytics (Panel v9 Aufgabe 2, Instagram v1) ================= */
+  function analyticsHtml() {
+    return `
+      ${bannerHtml()}
+      <h1>Analytics</h1>
+      <p class="lede">Instagram-Kennzahlen der letzten 30 Tage. Einmal täglich im Hintergrund aktualisiert.</p>
+      <div id="analytics-body"><p class="empty">Wird geladen …</p></div>
+      <div class="actions">
+        <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
+      </div>`;
+  }
+
+  function anDelta(curr, prev) {
+    if (curr == null || prev == null || prev === 0) return "";
+    const pct = Math.round(((curr - prev) / Math.abs(prev)) * 1000) / 10;
+    if (pct === 0) return `<div class="delta">± 0% ggü. Vorwoche</div>`;
+    const up = pct > 0;
+    return `<div class="delta ${up ? "up" : "down"}">${up ? "↑" : "↓"} ${Math.abs(pct)}% ggü. Vorwoche</div>`;
+  }
+
+  function anStatHtml(label, value, deltaHtml) {
+    return `<div class="an-stat"><div class="lbl">${esc(label)}</div><div class="val">${value}</div>${deltaHtml}</div>`;
+  }
+
+  /** Simple hand-rolled SVG line chart (no charting library - CSP only allows scripts from
+   *  self/Cloudflare, and a hand-rolled chart matches the rest of the panel's own-built
+   *  components like the calendar grid, not a bundled dependency). */
+  function anChartSvg(trend, field, label) {
+    const points = trend.filter((t) => t[field] != null);
+    if (points.length < 2) return `<p class="hint">Noch nicht genug Tage für einen Trend.</p>`;
+    const values = points.map((p) => p[field]);
+    const min = Math.min(...values), max = Math.max(...values);
+    const range = max - min || 1;
+    const w = 600, h = 110, pad = 6;
+    const coords = points.map((p, i) => {
+      const x = pad + (i / (points.length - 1)) * (w - pad * 2);
+      const y = pad + (1 - (p[field] - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return `
+      <div class="an-chart-wrap">
+        <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}-Trend der letzten ${points.length} Tage">
+          <polyline points="${coords.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" />
+        </svg>
+        <div class="an-chart-label"><span>${esc(fmtDate(points[0].date))}</span><span>${esc(label)}</span><span>${esc(fmtDate(points[points.length - 1].date))}</span></div>
+      </div>`;
+  }
+
+  function anTopPostHtml(p) {
+    const topicPart = p.headline ? esc(p.headline) : "Instagram-Beitrag";
+    return `<div class="an-top-post">
+      ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`}
+      <div>
+        <strong>${topicPart}</strong>
+        <div class="stats">${esc(fmtDate(p.postedAt))} · ${p.likes ?? 0} Likes · ${p.comments ?? 0} Kommentare · ${p.saved ?? 0} Gespeichert${p.reach != null ? ` · Reichweite ${p.reach}` : ""}</div>
+      </div>
+    </div>`;
+  }
+
+  function analyticsBodyHtml(d) {
+    if (!d.hasData) {
+      return `<p class="empty">Noch keine Daten. Der tägliche Abgleich mit Instagram läuft im Hintergrund - in ein paar Tagen sehen Sie hier Zahlen.</p>`;
+    }
+    return `
+      <div class="an-stats">
+        ${anStatHtml("Follower", d.current.followerCount ?? "–", anDelta(d.current.followerGrowth, d.previous.followerGrowth))}
+        ${anStatHtml("Reichweite (7 Tage)", d.current.reach, anDelta(d.current.reach, d.previous.reach))}
+        ${anStatHtml("Reichweite (30 Tage)", d.reach30d, "")}
+        ${anStatHtml("Views (7 Tage)", d.current.views, anDelta(d.current.views, d.previous.views))}
+        ${anStatHtml("Engagement-Rate", d.current.engagementRate != null ? `${d.current.engagementRate}%` : "–", anDelta(d.current.engagementRate, d.previous.engagementRate))}
+      </div>
+      <h2>Follower-Verlauf</h2>
+      ${anChartSvg(d.trend, "followerCount", "Follower")}
+      <h2>Reichweite-Verlauf</h2>
+      ${anChartSvg(d.trend, "reach", "Reichweite")}
+      <h2>Top-Beiträge (30 Tage)</h2>
+      ${d.topPosts.length ? `<div class="an-top-posts">${d.topPosts.map(anTopPostHtml).join("")}</div>` : `<p class="empty">Noch keine Beiträge mit genug Daten.</p>`}`;
+  }
+
+  async function loadAnalytics() {
+    const box = $("#analytics-body");
+    if (!box) return;
+    try {
+      const data = await api("GET", "/api/analytics");
+      box.innerHTML = analyticsBodyHtml(data);
+    } catch {
+      box.innerHTML = `<p class="empty">Analytics konnten gerade nicht geladen werden.</p>`;
+    }
+  }
+
   /* ================= Vorschau (Panel v5, Aufgabe 5) ================= */
   const PP_CHANNEL_LABEL = { ig_feed: "Instagram Feed", ig_story: "Instagram Story", linkedin: "LinkedIn" };
   const PP_STATUS_LABEL = { planned: "Geplant", edited: "Bearbeitet", approved: "Freigegeben", rejected: "Übersprungen", published: "Veröffentlicht", submitted: "Wartet auf Ihre Freigabe" };
@@ -1637,6 +1745,7 @@
     else if (S.step === "done") { stage.innerHTML = doneHtml(); loadDashboardExtras(); }
     else if (S.step === "preview") { stage.innerHTML = previewHtml(); loadPreview(); }
     else if (S.step === "history") { stage.innerHTML = historyHtml(); loadHistory(); }
+    else if (S.step === "analytics") { stage.innerHTML = analyticsHtml(); loadAnalytics(); }
     else stage.innerHTML = providerHtml(prov(S.step));
     if (focus) { stage.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
   }
@@ -2711,6 +2820,7 @@
     if (url === "/api/recover-access") return { ok: true, message: "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt. (Vorschau-Beispiel)" };
     if (url === "/api/help-chat") return { reply: "Das ist eine Vorschau ohne echte KI-Antwort - im echten Panel beantwortet der Hilfe-Chat hier Ihre Frage zum Ablauf, zu Instagram/LinkedIn oder zum Freigabe-Modus. (Vorschau-Beispiel)" };
     if (url === "/api/posts") return { posts: MOCK.posts };
+    if (url === "/api/analytics") return { hasData: false };
     if (url === "/api/logout") { MOCK.customer = null; MOCK.connections = []; return { ok: true }; }
     throw new Error("Unbekannt");
   }

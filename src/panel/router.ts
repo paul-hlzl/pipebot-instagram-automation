@@ -42,6 +42,7 @@ import {
   updatePlannedPostImage,
   updatePlannedPostText,
 } from "./credentials.js";
+import { getAnalyticsSummary } from "./analytics.js";
 import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
@@ -854,6 +855,18 @@ export function createPanelRouter(): Router {
       return;
     }
     res.json({ posts: listPostsForCustomer(c.id) });
+  });
+
+  // Panel v9 Aufgabe 2: Analytics-Tab - reines Lesen der vom täglichen Cron (analytics.ts)
+  // gespeicherten Snapshots, kein Live-Graph-API-Aufruf hier (der ist teuer/langsam genug, dass
+  // er nur einmal täglich im Hintergrund laufen soll, nicht bei jedem Tab-Aufruf).
+  router.get("/api/analytics", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    res.json(getAnalyticsSummary(c.id));
   });
 
   // 7-Tage-Vorschau (Panel v5, Aufgabe 5) - liest, was planning.ts's taegliche Vorausplanung

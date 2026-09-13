@@ -113,6 +113,75 @@ export function listTopPosts(customerId: string, days = 30, limit = 3): TopPost[
     .slice(0, limit);
 }
 
+function sumField(rows: AccountSnapshot[], field: "reach" | "views" | "totalInteractions"): number {
+  return rows.reduce((sum, r) => sum + (r[field] ?? 0), 0);
+}
+
+export interface AnalyticsSummaryWindow {
+  followerCount: number | null;
+  followerGrowth: number | null;
+  reach: number;
+  views: number;
+  engagementRate: number | null;
+}
+
+export interface AnalyticsSummary {
+  hasData: boolean;
+  current: AnalyticsSummaryWindow;
+  previous: AnalyticsSummaryWindow;
+  reach30d: number;
+  views30d: number;
+  trend: AccountSnapshot[];
+  topPosts: TopPost[];
+}
+
+/**
+ * Everything the panel's Analytics tab needs in one call: this week's key numbers, the same
+ * numbers for the week before (for the ↑/↓ % comparison the panel shows), the 30-day trend for
+ * the chart, and the top posts. `hasData` is false when the cron hasn't produced a single
+ * snapshot yet (brand new connection, or account not yet approved for insights - see session
+ * report) - the panel shows an honest "noch keine Daten" state instead of a chart full of zeroes.
+ */
+export function getAnalyticsSummary(customerId: string): AnalyticsSummary {
+  const snapshots = listAccountSnapshots(customerId, 30);
+  const topPosts = listTopPosts(customerId, 30, 3);
+  if (!snapshots.length) {
+    const empty: AnalyticsSummaryWindow = { followerCount: null, followerGrowth: null, reach: 0, views: 0, engagementRate: null };
+    return { hasData: false, current: empty, previous: empty, reach30d: 0, views30d: 0, trend: [], topPosts: [] };
+  }
+
+  // snapshots is oldest-first (see listAccountSnapshots) - the last 7 are "this week", the 7
+  // before that are "last week" (a partial history simply yields a shorter/empty "previous"
+  // window rather than throwing - a brand-new connection has no 14-day history yet).
+  const last7 = snapshots.slice(-7);
+  const prev7 = snapshots.slice(-14, -7);
+
+  const windowFor = (rows: AccountSnapshot[]): AnalyticsSummaryWindow => {
+    if (!rows.length) return { followerCount: null, followerGrowth: null, reach: 0, views: 0, engagementRate: null };
+    const latest = rows[rows.length - 1];
+    const earliest = rows[0];
+    const reach = sumField(rows, "reach");
+    const interactions = sumField(rows, "totalInteractions");
+    return {
+      followerCount: latest.followerCount,
+      followerGrowth: latest.followerCount != null && earliest.followerCount != null ? latest.followerCount - earliest.followerCount : null,
+      reach,
+      views: sumField(rows, "views"),
+      engagementRate: reach > 0 ? Math.round((interactions / reach) * 1000) / 10 : null,
+    };
+  };
+
+  return {
+    hasData: true,
+    current: windowFor(last7),
+    previous: windowFor(prev7),
+    reach30d: sumField(snapshots, "reach"),
+    views30d: sumField(snapshots, "views"),
+    trend: snapshots,
+    topPosts,
+  };
+}
+
 /** Best-effort cost logging (Panel v9 Aufgabe 3) - never blocks the feature it's logging for if the insert itself fails. */
 export function logUsageCost(customerId: string | null, feature: string, estimatedCostUsd: number | null): void {
   try {

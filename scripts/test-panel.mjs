@@ -848,6 +848,22 @@ async function main() {
     ok("posts ist ein Array", Array.isArray(body.posts));
   }
 
+  // --- Analytics (Panel v9 Aufgabe 2) - reines Lesen der vom täglichen Cron gespeicherten
+  // Snapshots, kein echter Instagram-Insights-Aufruf in dieser Suite. Der Testkunde hat keine
+  // Snapshots -> hasData muss sauber false sein (kein Crash/keine Fantasiezahlen).
+  console.log("\n/api/analytics:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/analytics`);
+    ok("/api/analytics ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/analytics`, { headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("/api/analytics mit Login -> 200", res.status === 200, `status=${res.status}`);
+    ok("hasData ist false ohne Snapshots", body.hasData === false, JSON.stringify(body));
+    ok("topPosts ist ein leeres Array", Array.isArray(body.topPosts) && body.topPosts.length === 0, JSON.stringify(body.topPosts));
+  }
+
   // --- 6. /connect ohne Session ---
   console.log("\n/connect:");
   {
