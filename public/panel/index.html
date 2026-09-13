@@ -643,12 +643,12 @@
     const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : id === "analytics" ? "Analytics" : prov(id).name;
     const meta = (id) => {
       if (id === "company") return S.customer ? S.customer.company : "Angaben machen";
-      if (id === "done" || id === "preview" || id === "history") return "";
+      if (id === "done" || id === "preview" || id === "history" || id === "analytics") return "";
       const c = conn(id);
       if (c) return c.status === "expired" ? "Abgelaufen" : c.accountName;
       return S.skipped.has(id) ? "Übersprungen" : "Nicht verbunden";
     };
-    const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "preview" || id === "history") ? false : !!conn(id) && conn(id).status !== "expired";
+    const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "preview" || id === "history" || id === "analytics") ? false : !!conn(id) && conn(id).status !== "expired";
 
     // Panel v7 fix (Teil 5): einzige sichtbare Textquelle fuer den aktuellen Schritt auf
     // schmalen Screens (siehe CSS-Kommentar bei .rail-current-mobile) - immer nur EIN Label auf
