@@ -282,7 +282,7 @@
 
   function rowHtml(c) {
     return `<tr data-id="${esc(c.customerId)}">
-      <td data-label="Firma"><div class="company-cell"><strong>${esc(c.company)}</strong><span>${esc(c.contactName)} · ${esc(c.email)}</span></div></td>
+      <td data-label="Firma"><div class="company-cell"><strong>${esc(c.company)}</strong><span>${esc(c.contactName)} · ${esc(c.email)}</span>${c.notifyOnPublish ? `<br><span>Mail-Benachrichtigung bei Veröffentlichung: an</span>` : ""}</div></td>
       <td data-label="Erstellt">${fmtDate(c.createdAt)}</td>
       <td data-label="Status"><span class="badge ${c.status === "active" ? "ok" : "paused"}">${c.status === "active" ? "aktiv" : "pausiert"}</span></td>
       <td data-label="Trial">${trialLabel(c)}</td>

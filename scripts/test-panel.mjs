@@ -321,6 +321,33 @@ async function main() {
     ok("linkedinDueNow ist ein boolean", typeof body.customer?.linkedinDueNow === "boolean");
   }
 
+  // --- 3c-2. Opt-in E-Mail-Benachrichtigung bei Veröffentlichung (Panel v8 Aufgabe 2) - der
+  // eigentliche Mail-Versand (logPost/savePendingApproval) braucht echte Publish-Tools bzw. wurde
+  // in der Sitzung direkt gegen Staging verifiziert (siehe Report); hier nur der HTTP-Teil:
+  // Speichern des Schalters + Default false bei neuem Signup.
+  console.log("\nOpt-in E-Mail bei Veröffentlichung:");
+  {
+    const meRes = await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } });
+    const meBody = await meRes.json();
+    ok("notifyOnPublish ist standardmäßig false", meBody.customer?.notifyOnPublish === false, meBody.customer?.notifyOnPublish);
+
+    const onRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", notifyOnPublish: true }),
+    });
+    const onBody = await onRes.json();
+    ok("notifyOnPublish lässt sich aktivieren", onBody.customer?.notifyOnPublish === true, onBody.customer?.notifyOnPublish);
+
+    const offRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00", notifyOnPublish: false }),
+    });
+    const offBody = await offRes.json();
+    ok("notifyOnPublish lässt sich wieder deaktivieren", offBody.customer?.notifyOnPublish === false, offBody.customer?.notifyOnPublish);
+  }
+
   // --- 3d. POST /api/post-now ("Jetzt posten"-Warteschlange mit Kanalauswahl, Panel v8) ---
   console.log("\nJetzt posten (Kanalauswahl):");
   {
@@ -894,6 +921,8 @@ async function main() {
         const overviewBody = await overviewRes.json();
         ok("/admin/api/overview mit Session -> 200", overviewRes.status === 200, `status=${overviewRes.status}`);
         ok("overview liefert metrics + customers", typeof overviewBody.metrics?.totalCustomers === "number" && Array.isArray(overviewBody.customers));
+        const ourCustomerInOverview = overviewBody.customers?.find((c) => c.customerId === customerId);
+        ok("overview zeigt notifyOnPublish pro Kunde (Panel v8 Aufgabe 2)", typeof ourCustomerInOverview?.notifyOnPublish === "boolean", JSON.stringify(ourCustomerInOverview?.notifyOnPublish));
 
         // --- Test-E-Mail (v6, Aufgabe 4) - PANEL_MAIL_DRY_RUN=1 im Staging-Prozess sorgt dafür,
         // dass hier NICHTS wirklich verschickt wird (Regel 3), nur die HTTP-/Validierungs-Logik.

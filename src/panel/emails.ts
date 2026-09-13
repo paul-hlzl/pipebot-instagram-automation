@@ -93,3 +93,39 @@ export function firstPostLiveEmail(input: { to: string; company: string }): Mail
       `Ihr Pipeflow-Team\nPipeline AI Solutions`,
   };
 }
+
+/** Panel v8 Aufgabe 2: opt-in (notify_on_publish), bei JEDER tatsächlichen Veröffentlichung -
+ *  anders als firstPostLiveEmail (immer, nur beim allerersten Post) läuft diese hier bei jedem
+ *  einzelnen Beitrag, für Kunden, die das in ihren Einstellungen aktiviert haben. */
+export function postPublishedEmail(input: { to: string; company: string; channelLabel: string }): MailInput {
+  return {
+    to: input.to,
+    subject: `Ihr ${input.channelLabel}-Beitrag ist online - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `Ihr ${input.channelLabel}-Beitrag für "${input.company}" ist gerade veröffentlicht worden.\n\n` +
+      `Im Panel sehen Sie den Beitrag im Verlauf:\n${panelUrl()}\n\n` +
+      `Sie erhalten diese Benachrichtigung, weil Sie das in Ihren Einstellungen aktiviert haben - jederzeit ` +
+      `abschaltbar.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
+/** Panel v8 Aufgabe 2: opt-in (notify_on_publish, derselbe Schalter wie postPublishedEmail),
+ *  sobald bei aktivem approval_mode ein NEUER Beitrag zur Freigabe bereitsteht - unabhängig von
+ *  der bestehenden gesammelten Erinnerung (max. 1x/Tag, pendingApprovalsSummaryEmail oben), die
+ *  unverändert weiterläuft. Dies hier ist der sofortige Einzel-Hinweis pro neuem Beitrag. */
+export function approvalNeededEmail(input: { to: string; company: string; channelLabel: string }): MailInput {
+  return {
+    to: input.to,
+    subject: `Bitte geben Sie Ihren ${input.channelLabel}-Beitrag frei - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `für "${input.company}" liegt ein neuer ${input.channelLabel}-Beitrag bereit. Sie müssen ihn noch ` +
+      `freigeben, bevor er veröffentlicht wird.\n\n` +
+      `Jetzt ansehen und freigeben:\n${panelUrl()}\n\n` +
+      `Sie erhalten diese Benachrichtigung, weil Sie das in Ihren Einstellungen aktiviert haben - jederzeit ` +
+      `abschaltbar.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}

@@ -98,6 +98,7 @@ interface CustomerAdminView {
   channels: { provider: string; accountName: string | null; status: string }[];
   postCount: number;
   lastPostAt: string | null;
+  notifyOnPublish: boolean;
 }
 
 function customerAdminView(c: CustomerRow): CustomerAdminView {
@@ -121,6 +122,7 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     channels: connections.map((r) => ({ provider: r.provider, accountName: r.account_name, status: connectionStatus(r) })),
     postCount: postStats.n,
     lastPostAt: postStats.last,
+    notifyOnPublish: Boolean(c.notify_on_publish),
   };
 }
 

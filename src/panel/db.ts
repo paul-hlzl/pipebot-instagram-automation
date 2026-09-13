@@ -259,6 +259,12 @@ migrateColumns("customers", [
   // zurueck zum ersten noch offenen Provider (firstOpenStep() kannte den Skip nicht). Comma-
   // getrennte Provider-IDs, NULL/leer = nichts uebersprungen.
   ["skipped_providers", "TEXT"],
+  // Panel v8 Aufgabe 2: Opt-in, Standard aus (0) - bei true bekommt der Kunde bei JEDER
+  // tatsaechlichen Veroeffentlichung sofort eine E-Mail (nicht nur beim allerersten Post wie die
+  // bestehende first_post_email_sent_at-Mail, die unveraendert fuer ALLE Kunden bleibt), plus
+  // einen sofortigen Hinweis, sobald bei aktivem approval_mode ein neuer Beitrag zur Freigabe
+  // bereitsteht - beides ueber denselben Schalter, siehe credentials.ts.
+  ["notify_on_publish", "INTEGER NOT NULL DEFAULT 0"],
 ]);
 
 // Panel v6 task 2b: existing customers signed up before e-mail confirmation existed - treat them
@@ -316,6 +322,7 @@ export interface CustomerRow {
   trial_ending_email_sent_at: string | null;
   approval_email_sent_at: string | null;
   skipped_providers: string | null;
+  notify_on_publish: number;
   login_key_hash: string;
   status: string;
   consent_at: string;

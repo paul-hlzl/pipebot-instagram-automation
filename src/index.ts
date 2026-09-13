@@ -224,7 +224,7 @@ function createServer(): McpServer {
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl, pillarTitle: pillar_title });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl, pillarTitle: pillar_title, channel: "ig_feed" });
         }
         return textResult(result);
       } catch (error) {
@@ -268,6 +268,7 @@ function createServer(): McpServer {
             caption,
             imageUrl: generated.imageUrl,
             pillarTitle: pillar_title,
+            channel: "ig_feed",
           });
         }
         return textResult({
@@ -367,7 +368,7 @@ function createServer(): McpServer {
         const creds = await resolveInstagramCredentials(customer_id);
         const result = await publishStoryToInstagram(imageUrl, creds);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl, pillarTitle: pillar_title });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl, pillarTitle: pillar_title, channel: "ig_story" });
         }
         return textResult(result);
       } catch (error) {
@@ -409,6 +410,7 @@ function createServer(): McpServer {
             headline,
             imageUrl: generated.imageUrl,
             pillarTitle: pillar_title,
+            channel: "ig_story",
           });
         }
         return textResult({
@@ -508,7 +510,7 @@ function createServer(): McpServer {
         const creds = await resolveLinkedInCredentials(customer_id);
         const result = await publishLinkedInPost({ text }, creds);
         if (customer_id) {
-          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text, pillarTitle: pillar_title });
+          logPost(customer_id, "linkedin", { externalPostId: result.postId ?? undefined, caption: text, pillarTitle: pillar_title, channel: "linkedin" });
         }
         return textResult(result);
       } catch (error) {
@@ -560,6 +562,7 @@ function createServer(): McpServer {
             caption: text,
             imageUrl: hasUrl ? image_url : undefined,
             pillarTitle: pillar_title,
+            channel: "linkedin",
           });
         }
         return textResult(result);

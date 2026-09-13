@@ -142,6 +142,7 @@ interface BriefingInput {
   activeWeekdays: string; instagramWeekdays: string; linkedinWeekdays: string;
   pauseFrom: string; pauseUntil: string;
   approvalMode: boolean;
+  notifyOnPublish: boolean;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -198,6 +199,7 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     pauseFrom: str(body.pauseFrom, 10),
     pauseUntil: str(body.pauseUntil, 10),
     approvalMode: bool(body.approvalMode, false),
+    notifyOnPublish: bool(body.notifyOnPublish, false),
   };
   const errors: Record<string, string> = {};
   if (data.pauseFrom && !ISO_DATE.test(data.pauseFrom)) data.pauseFrom = "";
@@ -240,6 +242,7 @@ function publicState(c: CustomerRow) {
       activeWeekdays: c.active_weekdays, instagramWeekdays: c.instagram_weekdays, linkedinWeekdays: c.linkedin_weekdays,
       pauseFrom: c.pause_from, pauseUntil: c.pause_until,
       approvalMode: Boolean(c.approval_mode),
+      notifyOnPublish: Boolean(c.notify_on_publish),
       emailVerified: Boolean(c.email_verified),
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
@@ -682,14 +685,14 @@ export function createPanelRouter(): Router {
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
          ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements,
-         active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode,
+         active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode, notify_on_publish,
          login_key_hash, email_verify_token_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
-      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0,
       sha256(randomToken()), sha256(verifyToken), now, now, now);
     setContentPillars(id, data.contentPillars);
     startSession(res, id);
@@ -716,13 +719,13 @@ export function createPanelRouter(): Router {
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
          ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
-         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, updated_at=?
+         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
-      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0,
       nowIso(), c.id);
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));

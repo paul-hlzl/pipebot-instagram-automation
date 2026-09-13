@@ -25,7 +25,7 @@ import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
 import type { LinkedInCredentials } from "../linkedin.js";
 import type { ImageBranding } from "../fal.js";
 import { sendMailBestEffort } from "./mailer.js";
-import { firstPostLiveEmail, pendingApprovalsSummaryEmail } from "./emails.js";
+import { approvalNeededEmail, firstPostLiveEmail, pendingApprovalsSummaryEmail, postPublishedEmail } from "./emails.js";
 
 const DAY = 86_400_000;
 
@@ -391,10 +391,23 @@ export interface LoggedPost {
  * this for your own (non-customer) posts - the panel only shows customer
  * history.
  */
+/** Panel v8 Aufgabe 2: Bezeichnung fürs E-Mail-Wording ("Ihr Instagram-Feed-Beitrag ist
+ *  online") - bewusst eigene, bindestrich-verbundene Variante statt CHANNEL_LABEL (das für die
+ *  Panel-UI "Instagram Feed" mit Leerzeichen nutzt), passend zusammengesetzt für einen
+ *  Fließtext-Satz. "instagram" (ohne Feed/Story-Unterscheidung) deckt alte Posts ab, die vor
+ *  dieser Funktion geloggt wurden bzw. Aufrufer, die keinen genaueren Kanal übergeben.
+ */
+const EMAIL_CHANNEL_LABEL: Record<string, string> = {
+  ig_feed: "Instagram-Feed",
+  ig_story: "Instagram-Story",
+  linkedin: "LinkedIn",
+  instagram: "Instagram",
+};
+
 export function logPost(
   customerId: string,
   provider: string,
-  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string; pillarTitle?: string },
+  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string; pillarTitle?: string; channel?: string },
 ): void {
   // Panel v6 Aufgabe 4d: vor dem Insert geprueft, damit "war das der allererste Post" korrekt
   // ist - danach waere die neue Zeile selbst schon mitgezaehlt.
@@ -414,6 +427,7 @@ export function logPost(
     post.pillarTitle ?? null,
   );
   if (isFirstPost) maybeSendFirstPostEmail(customerId);
+  maybeSendPostPublishedEmail(customerId, post.channel ?? provider);
 }
 
 /** Panel v6 Aufgabe 4d: "Ihr erster Beitrag ist live!" - garantiert nur einmal, dank des
@@ -428,6 +442,18 @@ function maybeSendFirstPostEmail(customerId: string): void {
     .run(nowIso(), customerId);
   if (result.changes === 0) return;
   sendMailBestEffort(firstPostLiveEmail({ to: row.email, company: row.company }));
+}
+
+/** Panel v8 Aufgabe 2: opt-in (notify_on_publish) - anders als maybeSendFirstPostEmail läuft
+ *  das hier bei JEDER Veröffentlichung, nicht nur der ersten, und nur für Kunden, die es
+ *  aktiviert haben. Kein "nur einmal"-Claim nötig (im Gegensatz zur first-post-Mail gibt es hier
+ *  keine Deduplizierungs-Anforderung - jeder Aufruf entspricht einer echten, neuen Veröffentlichung). */
+function maybeSendPostPublishedEmail(customerId: string, channel: string): void {
+  const row = db.prepare("SELECT email, company, notify_on_publish FROM customers WHERE id = ?").get(customerId) as
+    | { email: string; company: string; notify_on_publish: number }
+    | undefined;
+  if (!row || !row.notify_on_publish) return;
+  sendMailBestEffort(postPublishedEmail({ to: row.email, company: row.company, channelLabel: EMAIL_CHANNEL_LABEL[channel] ?? "neuer" }));
 }
 
 /** Most recent posts for one customer, newest first - used by the panel's own "Verlauf" tab. */
@@ -785,6 +811,7 @@ export function savePendingApproval(input: {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
   ).run(id, input.customerId, input.provider, input.channel, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, input.source ?? "routine", now, now);
   maybeSendApprovalsSummaryEmail(input.customerId);
+  maybeSendApprovalNeededEmail(input.customerId, input.channel);
   return toPendingApproval(
     db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow,
   );
@@ -810,6 +837,19 @@ function maybeSendApprovalsSummaryEmail(customerId: string): void {
   if (result.changes === 0) return; // gerade von einem parallelen Aufruf beansprucht
   const count = listPendingApprovalsForCustomer(customerId).length;
   sendMailBestEffort(pendingApprovalsSummaryEmail({ to: row.email, company: row.company, count }));
+}
+
+/** Panel v8 Aufgabe 2: opt-in (notify_on_publish, derselbe Schalter), sofortiger Einzel-Hinweis
+ *  für JEDEN neuen zur-Freigabe-Eintrag - unabhängig von/zusätzlich zu der gesammelten,
+ *  höchstens 1x/Tag laufenden Erinnerung oben (maybeSendApprovalsSummaryEmail), die unverändert
+ *  weiterläuft. Kein Dedup-Claim nötig, jeder Aufruf ist ein echter neuer Eintrag (savePendingApproval
+ *  ruft dies nur bei einem tatsächlichen INSERT auf, nie bei einem vom Duplikat-Schutz blockierten). */
+function maybeSendApprovalNeededEmail(customerId: string, channel: string): void {
+  const row = db.prepare("SELECT email, company, notify_on_publish FROM customers WHERE id = ?").get(customerId) as
+    | { email: string; company: string; notify_on_publish: number }
+    | undefined;
+  if (!row || !row.notify_on_publish) return;
+  sendMailBestEffort(approvalNeededEmail({ to: row.email, company: row.company, channelLabel: EMAIL_CHANNEL_LABEL[channel] ?? "neuer" }));
 }
 
 /** A customer's own pending_approvals in a given status ("pending" for the review UI), newest first. */
