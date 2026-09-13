@@ -287,6 +287,12 @@ export function createPanelRouter(): Router {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
+    // Security-Review 2026-09-13: fehlte komplett (weder hier noch in nginx) - ohne HSTS kann ein
+    // Angreifer im selben Netz (offenes WLAN etc.) den ersten Aufruf auf Klartext-HTTP herunter-
+    // stufen, bevor die Redirect-Kette in nginx greift. Kein `preload` (das erfordert eine
+    // Anmeldung bei Browserherstellern und bindet die gesamte Domain inkl. aller anderen unter
+    // mcp.pipebot.at laufenden Dienste dauerhaft - nicht ohne Ruecksprache).
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     res.setHeader(
       "Content-Security-Policy",
       `default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'`,
@@ -303,6 +309,15 @@ export function createPanelRouter(): Router {
       const c = currentCustomer(req);
       if (!c) {
         res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      // Security-Review 2026-09-13: einziger kostenpflichtiger Endpunkt (sharp-Bildverarbeitung +
+      // Festplatten-Schreibzugriff pro Aufruf) ohne jedes Limit - ein Kunde (oder ein
+      // kompromittiertes Konto) hätte das beliebig oft hintereinander auslösen können. 20/Stunde
+      // ist grosszügig fuer legitime Nutzung (ein Logo wird normalerweise einmal, vielleicht ein
+      // paarmal beim Ausprobieren, hochgeladen), begrenzt aber echten Missbrauch.
+      if (rateLimited(`logo-upload:${c.id}`, 20, 3_600_000)) {
+        res.status(429).json({ error: "Zu viele Uploads. Bitte in einer Stunde erneut versuchen." });
         return;
       }
       const raw = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64.trim() : "";
