@@ -907,7 +907,16 @@
   // Nur bei tatsaechlich konfiguriertem TURNSTILE_SITE_KEY ueberhaupt geladen/gerendert - ohne
   // Key existiert weder das Skript-Tag noch der Platzhalter-Div (siehe companyHtml()).
   let turnstileScriptRequested = false;
+  let turnstileScriptFailed = false;
   let turnstileWidgetId = null;
+  // Bugfix (Security/UX-Review 2026-09-13): nicht nur eine ID merken, sondern den DOM-Knoten
+  // selbst - nach einem fehlgeschlagenen Signup-Versuch (z.B. Turnstile lehnt ab, Banned-Word,
+  // Rate-Limit) rendert render(true) companyHtml() komplett neu, das alte #turnstile-widget-Div
+  // wird durch ein NEUES, leeres ersetzt. Der reine ID-Guard dachte danach faelschlich "schon
+  // gerendert" und liess das neue Div fuer immer leer - der Kunde konnte nie wieder absenden,
+  // ohne die Seite manuell neu zu laden (siehe TURNSTILE_SETUP.md-Testprotokoll).
+  let turnstileRenderedContainer = null;
+  const TURNSTILE_LOAD_TIMEOUT_MS = 8_000;
   function loadTurnstileScript(cb) {
     if (window.turnstile) { cb(); return; }
     if (!turnstileScriptRequested) {
@@ -916,23 +925,49 @@
       s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       s.async = true;
       s.defer = true;
+      s.onerror = () => { turnstileScriptFailed = true; showTurnstileLoadError(); };
       document.head.appendChild(s);
     }
-    const check = () => { if (window.turnstile) cb(); else setTimeout(check, 100); };
+    const deadline = Date.now() + TURNSTILE_LOAD_TIMEOUT_MS;
+    const check = () => {
+      if (window.turnstile) { cb(); return; }
+      if (turnstileScriptFailed || Date.now() > deadline) { showTurnstileLoadError(); return; }
+      setTimeout(check, 100);
+    };
     check();
+  }
+  // Bugfix (Security/UX-Review 2026-09-13, Punkt 1b): ohne dies blieb der Platzhalter bei einem
+  // blockierten/fehlgeschlagenen Laden (Adblocker, Netzwerkfehler, Firmen-Firewall) einfach für
+  // immer leer, ohne jede Erklärung - der Kunde wusste nicht, ob er warten, neu laden oder etwas
+  // anderes tun sollte. Zeigt jetzt eine klare Erklärung direkt unter dem Platzhalter; das
+  // Formular selbst bleibt nutzbar (das Absenden schlägt serverseitig ohnehin klar verständlich
+  // fehl, siehe ERRORS.state/den generischen Sicherheitsprüfung-Fehler - kein zusätzlicher
+  // Client-seitiger Block hier).
+  function showTurnstileLoadError() {
+    const container = document.getElementById("turnstile-widget");
+    if (!container || container.querySelector(".turnstile-load-error")) return;
+    const p = document.createElement("p");
+    p.className = "turnstile-load-error";
+    p.style.cssText = "font-size:14px;color:var(--stone);margin-top:8px";
+    p.textContent = "Die Sicherheitsprüfung konnte nicht geladen werden - möglicherweise blockiert ein Werbe-/Trackingblocker challenges.cloudflare.com. Bitte deaktivieren Sie ihn für diese Seite oder versuchen Sie es in einem anderen Browser, und laden Sie die Seite danach neu.";
+    container.appendChild(p);
   }
   // Explizit statt implizit gerendert (render=explicit + eigener render()-Aufruf hier), weil der
   // Platzhalter-Div erst auf Formular-Seite 2 sichtbar wird - ein automatisches Rendern beim
   // Laden waere noch versteckt (display:none von Seite 1) und wuerde sich nicht zuverlaessig
-  // sauber aufbauen. Rendert nur einmal (turnstileWidgetId-Guard), auch wenn der Kunde
-  // mehrmals zwischen Seite 1/2 wechselt.
+  // sauber aufbauen. Rendert nur einmal pro Container-Knoten (turnstileRenderedContainer-Guard) -
+  // wechselt der Kunde nur zwischen Seite 1/2 hin und her, bleibt der Knoten derselbe und es wird
+  // nicht doppelt gerendert; entsteht nach einem fehlgeschlagenen Absenden ein neuer Knoten, wird
+  // korrekt neu gerendert (siehe Bugfix-Kommentar oben).
   function renderTurnstileIfNeeded() {
-    if (!S.turnstileSiteKey || turnstileWidgetId !== null) return;
+    if (!S.turnstileSiteKey) return;
     const container = document.getElementById("turnstile-widget");
-    if (!container) return;
+    if (!container || container === turnstileRenderedContainer) return;
     loadTurnstileScript(() => {
-      if (turnstileWidgetId !== null) return;
-      turnstileWidgetId = window.turnstile.render(container, { sitekey: S.turnstileSiteKey });
+      const freshContainer = document.getElementById("turnstile-widget");
+      if (!freshContainer || freshContainer === turnstileRenderedContainer) return;
+      turnstileWidgetId = window.turnstile.render(freshContainer, { sitekey: S.turnstileSiteKey });
+      turnstileRenderedContainer = freshContainer;
     });
   }
 
@@ -2320,6 +2355,12 @@
       if (err.fields) return showFieldErrors(form, err.fields);
       S.banner = { kind: "bad", text: err.message };
       render(true);
+      // Bugfix (Security/UX-Review 2026-09-13): render(true) just rebuilt the whole form,
+      // including a brand-new empty #turnstile-widget div (see renderTurnstileIfNeeded's
+      // comment) - without this, a rejected signup (Turnstile failure, banned word, rate limit,
+      // anything) permanently lost the CAPTCHA widget and could never be retried without a full
+      // manual page reload. No-op when not on the signup form's page 2 (no container to fill).
+      if (!edit) renderTurnstileIfNeeded();
     }
   });
 
