@@ -980,6 +980,37 @@ async function main() {
     db.close();
   }
 
+  // --- Struktur/Rundgang (Panel v11) - der Rundgang-Status liegt bewusst serverseitig, damit er
+  // nicht bei jedem Login/Geraetewechsel wieder auftaucht (im Browser-Speicher war genau das bei
+  // "Später verbinden" schon einmal die Fehlerursache). Die Oberflaeche selbst (Navigation,
+  // Einstellungsgruppen, Suche) ist reines Frontend und wird per jsdom geprueft, nicht hier.
+  console.log("\nStruktur + Rundgang (v11):");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/tour-done`, { method: "POST" });
+    ok("/api/tour-done ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const before = await (await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } })).json();
+    ok("neuer Kunde hat den Rundgang noch nicht gesehen", before.customer?.tourDone === false, JSON.stringify(before.customer?.tourDone));
+
+    const res = await fetch(`${BASE}${MOUNT}/api/tour-done`, { method: "POST", headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("/api/tour-done mit Login -> 200, tourDone true", res.status === 200 && body.customer?.tourDone === true, JSON.stringify(body.customer?.tourDone));
+
+    const again = await (await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } })).json();
+    ok("Status bleibt über einen erneuten Abruf hinweg gesetzt", again.customer?.tourDone === true, JSON.stringify(again.customer?.tourDone));
+  }
+  {
+    // Panel v11 ("nur zeigen, was tatsaechlich funktioniert"): das Panel muss die erteilten
+    // Berechtigungen einer Verbindung kennen, um die Kommentar-Automatisierung zu sperren, wenn
+    // instagram_business_manage_comments fehlt. Der Testkunde hat keine Verbindung - geprueft wird
+    // daher nur, dass das Feld sauber als Array existiert (kein undefined im Frontend).
+    const me = await (await fetch(`${BASE}${MOUNT}/api/me`, { headers: { cookie: sessionCookie } })).json();
+    ok("connections ist ein Array", Array.isArray(me.connections), JSON.stringify(me.connections));
+    ok("jede Verbindung liefert ihre Berechtigungen als Array", me.connections.every((k) => Array.isArray(k.scopes)), JSON.stringify(me.connections));
+    ok("Zugangsdaten werden nie mitgeliefert", me.connections.every((k) => !("accessToken" in k) && !("access_token_enc" in k)), JSON.stringify(me.connections));
+  }
+
   // --- 6. /connect ohne Session ---
   console.log("\n/connect:");
   {

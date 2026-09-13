@@ -271,6 +271,9 @@ function publicState(c: CustomerRow) {
       notifyWeeklyReport: Boolean(c.notify_weekly_report),
       commentAutomationEnabled: Boolean(c.comment_automation_enabled),
       commentAutomationMode: c.comment_automation_mode || "approval",
+      // Panel v11: steuert nur, ob der einmalige Erst-Rundgang noch angeboten wird - die
+      // "Was kann Pipeflow?"-Ansicht selbst ist davon unabhaengig immer erreichbar.
+      tourDone: Boolean(c.tour_done_at),
       emailVerified: Boolean(c.email_verified),
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
@@ -292,6 +295,12 @@ function publicState(c: CustomerRow) {
       connectedAt: r.connected_at,
       expiresAt: r.expires_at,
       status: connectionStatus(r),
+      // Panel v11 ("nur zeigen, was tatsaechlich funktioniert"): das Panel muss unterscheiden
+      // koennen, ob eine Funktion fuer DIESE Verbindung ueberhaupt greift - z. B. laeuft die
+      // Kommentar-Automatisierung nur mit instagram_business_manage_comments, das aelteren
+      // Verbindungen fehlt (erst in v10 zu den SCOPES ergaenzt, siehe providers/instagram.ts).
+      // Nur die Namen der erteilten Berechtigungen, keine Tokens.
+      scopes: (r.scopes ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     })),
   };
 }
@@ -761,6 +770,20 @@ export function createPanelRouter(): Router {
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   }));
+
+  // Panel v11: Erst-Rundgang als gesehen markieren. Serverseitig statt im Browser-Speicher, damit
+  // er nicht bei jedem Login/Geraetewechsel wieder auftaucht (siehe db.ts, tour_done_at).
+  // Bewusst nur setzbar, nie zuruecksetzbar ueber die API - wiederholen geht ueber die Navigation,
+  // dafuer braucht es keinen Server-Zustand.
+  router.post("/api/tour-done", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    db.prepare("UPDATE customers SET tour_done_at = ?, updated_at = ? WHERE id = ? AND tour_done_at IS NULL").run(nowIso(), nowIso(), c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+  });
 
   // Persönlicher Zugangslink – ersetzt jeden älteren Link
   router.post("/api/access-link", (req, res) => {

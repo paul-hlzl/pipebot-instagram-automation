@@ -358,6 +358,10 @@ migrateColumns("customers", [
   // Kunde kann Beitraege automatisch, Kommentare aber nur mit Freigabe wollen, oder umgekehrt).
   ["comment_automation_enabled", "INTEGER NOT NULL DEFAULT 0"],
   ["comment_automation_mode", "TEXT NOT NULL DEFAULT 'approval'"],
+  // Panel v11: Erst-Rundgang genau einmal pro Kunde zeigen. Bewusst serverseitig und nicht im
+  // Browser-Speicher - beim "Später verbinden" (skipped_providers) war genau das schon einmal die
+  // Fehlerursache (Reload/anderes Geraet = Zustand weg). NULL = noch nicht gesehen/abgeschlossen.
+  ["tour_done_at", "TEXT"],
 ]);
 
 // Panel v6 task 2b: existing customers signed up before e-mail confirmation existed - treat them
@@ -419,6 +423,7 @@ export interface CustomerRow {
   notify_weekly_report: number;
   comment_automation_enabled: number;
   comment_automation_mode: string;
+  tour_done_at: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;

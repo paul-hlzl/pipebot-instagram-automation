@@ -44,6 +44,12 @@
 
   /* ---------- Layout ---------- */
   .shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 72px; max-width: 1040px; margin: 0 auto; padding: 64px 32px 120px; }
+  /* Panel v11: die breiten Ansichten (Übersicht/Einstellungen/Funktionsübersicht) waren bisher
+     doppelt begrenzt - .stage.dash-wide (1240px) aus v9 konnte nie greifen, weil .shell selbst bei
+     1040px endete. Die aeussere Grenze wird jetzt fuer genau diese Ansichten mitgezogen, sonst
+     bliebe der Desktop weiter ein zentrierter Schmalstreifen. Text-Ansichten (Vorschau, Verlauf,
+     Analytics, Onboarding) behalten bewusst die schmale, gut lesbare Spalte. */
+  .shell.shell-wide { max-width: 1320px; }
 
   /* ---------- Die Pipeline (Fortschritt) ---------- */
   .rail { position: sticky; top: 40px; align-self: start; }
@@ -361,6 +367,69 @@
   .overlay { position: fixed; inset: 0; background: rgba(255,255,255,.94); display: grid; place-items: center; font-size: 18px; font-weight: 500; z-index: 10; }
   .loading { color: var(--stone); padding: 40px 0; }
 
+  /* ---------- Dauer-Navigation (Panel v11) ----------
+     Ersetzt fuer eingerichtete Kunden das Zurueckspringen in die Onboarding-Schrittkette: die
+     Schritt-Linie gehoert ab jetzt ausschliesslich der Erstanmeldung, alles Weitere laeuft ueber
+     diese Leiste. Bewusst textlich (keine Deko-Icons), flach, in der bestehenden Palette - nur
+     ein Unterstrich markiert die aktive Ansicht. Auf Mobil umbricht sie in zwei Zeilen statt
+     horizontal zu scrollen (Vorgabe: kein horizontales Scrollen). */
+  .mainnav { border-bottom: 1px solid var(--rule); background: var(--paper); }
+  .mainnav[hidden] { display: none; }
+  .mainnav ul { display: flex; flex-wrap: wrap; gap: 0 4px; list-style: none; margin: 0 auto; padding: 0 32px; max-width: 1320px; }
+  .mainnav button { display: inline-flex; align-items: center; min-height: 48px; padding: 0 12px; border: 0; border-bottom: 3px solid transparent; background: none; cursor: pointer; font-size: 15px; font-weight: 500; color: var(--stone); }
+  .mainnav button:hover { color: var(--ink); }
+  .mainnav button[aria-current="page"] { color: var(--ink); font-weight: 700; border-bottom-color: var(--ink); }
+  .mainnav .nav-badge { display: inline-block; min-width: 18px; margin-left: 7px; padding: 0 5px; border-radius: 20px; background: var(--stop); color: var(--paper); font-size: 11.5px; font-weight: 700; line-height: 18px; text-align: center; }
+
+  /* ---------- Einstellungen (Panel v11) ----------
+     Eine Seite, feste Gruppen, jede Einstellung hat genau einen Ort. Zweispaltig auf dem Desktop
+     (Gruppen-Sprungliste klebt links, Formular rechts nutzt die Breite), einspaltig auf Mobil mit
+     umbrechenden Sprung-Chips. Die Gruppen sind reine Abschnitte innerhalb EINES <form id="company">
+     - dadurch bleibt der bestehende Speichern-Pfad (PATCH /api/me mit allen Feldern) unveraendert. */
+  .stage.settings-wide { max-width: 1180px; }
+  .set-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; align-items: start; }
+  .set-side { position: sticky; top: 24px; }
+  .set-side ul { list-style: none; margin: 0; padding: 0; }
+  .set-side button { display: block; width: 100%; min-height: 40px; padding: 8px 10px; border: 0; border-left: 3px solid transparent; background: none; text-align: left; cursor: pointer; font-size: 14.5px; color: var(--stone); }
+  .set-side button:hover { color: var(--ink); background: var(--wash); }
+  .set-side button.is-active { color: var(--ink); font-weight: 600; border-left-color: var(--ink); }
+  .set-search { position: relative; margin-bottom: 28px; }
+  .set-search input { width: 100%; height: 46px; padding: 0 14px; border: 1px solid var(--ink); border-radius: 2px; background: var(--paper); font: inherit; }
+  .set-search .hint { margin: 6px 0 0; font-size: 13px; color: var(--stone); }
+  .setgroup { padding: 0 0 8px; margin: 0 0 40px; border-bottom: 1px solid var(--rule); scroll-margin-top: 24px; }
+  .setgroup:last-of-type { border-bottom: 0; }
+  .setgroup > h2 { font-size: 21px; margin: 0 0 4px; }
+  .setgroup > .setgroup-lede { margin: 0 0 22px; font-size: 14.5px; color: var(--stone); max-width: 46em; }
+  .setgroup.is-flash { animation: setFlash 1.4s ease-out; }
+  @keyframes setFlash { 0%, 40% { background: var(--wash); } 100% { background: transparent; } }
+  .is-filtered { display: none !important; }
+  .set-noresult { padding: 24px 0; color: var(--stone); }
+  /* Folgen-Hinweis fuer alles, was Geld kostet oder live veroeffentlicht (Vorgabe Punkt 2). */
+  .consequence { display: block; margin: -14px 0 22px; padding: 10px 14px; background: var(--wash); border-left: 3px solid var(--ink); font-size: 13.5px; }
+  .consequence strong { font-weight: 700; }
+  /* Nicht nutzbare Funktion: sichtbar, aber klar gesperrt - nie stumm dastehen lassen. */
+  .locked { margin: -14px 0 22px; padding: 10px 14px; background: #FDF2E0; border: 1px solid #E8C468; font-size: 13.5px; }
+  .locked button.link { font-weight: 600; }
+  .check.is-disabled { opacity: .55; }
+
+  /* ---------- Funktionsuebersicht + Rundgang (Panel v11) ---------- */
+  .guide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px 28px; margin-top: 8px; }
+  .guide-item { padding: 0 0 18px; border-bottom: 1px solid var(--rule); }
+  .guide-item h3 { font-size: 15.5px; margin: 0 0 4px; }
+  .guide-item p { margin: 0 0 10px; font-size: 14.5px; color: var(--stone); }
+  .guide-item .link { font-weight: 600; }
+  .guide-item.is-off h3::after { content: " · aktuell aus"; color: var(--stone); font-weight: 400; font-size: 13px; }
+  .tour-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: end center; background: rgba(0,0,0,.35); padding: 20px; }
+  .tour-overlay[hidden] { display: none; }
+  .tour-card { width: 100%; max-width: 520px; margin-bottom: 6vh; padding: 26px 26px 20px; background: var(--paper); border: 1px solid var(--ink); border-radius: 2px; }
+  .tour-step { font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--stone); margin: 0 0 8px; }
+  .tour-card h2 { font-size: 22px; margin: 0 0 10px; }
+  .tour-card p { font-size: 15px; color: var(--stone); margin: 0 0 18px; }
+  .tour-dots { display: flex; gap: 6px; margin-bottom: 18px; }
+  .tour-dots i { width: 26px; height: 4px; background: var(--rule); }
+  .tour-dots i.on { background: var(--ink); }
+  .tour-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+
   /* ---------- Mobil ---------- */
   @media (max-width: 820px) {
     .top { padding: 0 20px; height: 60px; }
@@ -415,6 +484,27 @@
     .history li { grid-template-columns: 56px 1fr; row-gap: 4px; }
     .history img, .history-ph { width: 56px; height: 56px; }
     .history time { grid-column: 2; white-space: normal; }
+
+    /* Panel v11, Mobil: Navigation umbricht in zwei Zeilen statt horizontal zu scrollen; jeder
+       Eintrag bleibt >= 44px hoch und teilt sich die Breite, damit nichts ueberlaeuft (derselbe
+       Fehler wie zweimal bei der alten Schritt-Navigation - siehe Kommentar bei .rail oben). */
+    .mainnav ul { padding: 0 12px; gap: 0; }
+    .mainnav li { flex: 1 1 33%; }
+    .mainnav button { width: 100%; justify-content: center; min-height: 46px; padding: 0 6px; font-size: 14px; text-align: center; }
+    /* Einstellungen einspaltig; die Gruppenliste wird zur umbrechenden Chip-Reihe oben. */
+    .set-layout { grid-template-columns: 1fr; gap: 20px; }
+    .set-side { position: static; }
+    .set-side ul { display: flex; flex-wrap: wrap; gap: 8px; }
+    .set-side li { flex: 1 1 auto; }
+    .set-side button { min-height: 44px; padding: 8px 14px; border: 1px solid var(--rule); border-left-width: 1px; border-radius: 20px; text-align: center; }
+    .set-side button.is-active { border-color: var(--ink); border-left-color: var(--ink); }
+    .setgroup { scroll-margin-top: 12px; }
+    .set-search input { height: 48px; }
+    .guide-grid { grid-template-columns: 1fr; gap: 0; }
+    .tour-card { padding: 22px 18px 18px; margin-bottom: 0; }
+    .tour-card h2 { font-size: 20px; }
+    .tour-actions { flex-direction: column-reverse; align-items: stretch; }
+    .tour-actions .btn, .tour-actions .link { width: 100%; justify-content: center; }
   }
 
   @media (max-width: 380px) {
@@ -492,6 +582,7 @@
 <div id="demo" class="demo" hidden>Vorschau: Hier wird nichts gespeichert und keine echte Verbindung aufgebaut.</div>
 <div id="sandbox-banner" class="sandbox-banner" hidden role="status">⚠️ TESTVERSION — hier werden neue Funktionen ausprobiert. Keine echten Kunden, keine echten Daten, keine echten Instagram-/LinkedIn-Verbindungen.</div>
 <div id="trialbar" class="trialbar" style="display:none" role="status"></div>
+<nav id="mainnav" class="mainnav" aria-label="Bereiche" hidden><ul id="mainnav-list"></ul></nav>
 
 <div class="shell">
   <nav class="rail" aria-label="Fortschritt"><p id="rail-current" class="rail-current-mobile" aria-hidden="true"></p><ol id="rail"></ol></nav>
@@ -517,6 +608,19 @@
     </form>
   </div>
   <button type="button" id="help-chat-toggle" aria-label="Hilfe-Chat öffnen">💬</button>
+</div>
+
+<div id="tour-overlay" class="tour-overlay" hidden>
+  <div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+    <p class="tour-step" id="tour-step"></p>
+    <h2 id="tour-title"></h2>
+    <p id="tour-text"></p>
+    <div class="tour-dots" id="tour-dots" aria-hidden="true"></div>
+    <div class="tour-actions">
+      <button type="button" class="link" id="tour-skip">Rundgang beenden</button>
+      <button type="button" class="btn" id="tour-next">Weiter</button>
+    </div>
+  </div>
 </div>
 
 <div id="confirm-overlay" class="confirm-overlay" hidden>
@@ -583,7 +687,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [] };
+  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0 };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -593,8 +697,18 @@
   // Fertig - Vorschau/Verlauf/Analytics sind eigene Dashboard-Unteransichten (siehe DETAIL_VIEWS),
   // kein Rail-Schritt mehr, werden ausschliesslich ueber die Dashboard-/Fertig-Buttons erreicht.
   const steps = () => ["company", ...S.providers.map((p) => p.id), "done"];
-  // Ansichten ohne Rail: das Dashboard selbst plus die drei ehemaligen Rail-Schritte.
-  const DETAIL_VIEWS = ["dashboard", "preview", "history", "analytics"];
+  // Panel v11: Verwaltungs-Ansichten. Keine davon ist je ein Schritt der Erstanmeldung - sie
+  // haben nie den Rail, sondern die Dauer-Navigation (siehe renderMainNav/MAIN_NAV).
+  const DETAIL_VIEWS = ["dashboard", "preview", "history", "analytics", "settings", "guide"];
+  // Reihenfolge = Reihenfolge in der Navigationsleiste. "Beiträge" fasst Vorschau und Verlauf
+  // zusammen (zwei Unter-Reiter innerhalb der Ansicht), damit die Leiste kurz bleibt.
+  const MAIN_NAV = [
+    { view: "dashboard", label: "Übersicht" },
+    { view: "preview", label: "Beiträge", match: ["preview", "history"] },
+    { view: "settings", label: "Einstellungen" },
+    { view: "analytics", label: "Analytics" },
+    { view: "guide", label: "Was kann Pipeflow?" },
+  ];
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
   const fmtNextPost = (iso) => {
     if (!iso) return "";
@@ -636,6 +750,28 @@
     return data;
   }
   const applyState = (d) => { S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer?.skippedProviders || []); };
+
+  /* ================= Rendering: Dauer-Navigation (Panel v11) ================= */
+  // Sichtbar, sobald ein Kunde eingerichtet ist (mind. ein Kanal verbunden) - exakt dieselbe
+  // Bedingung, die auch ueber den Landepunkt entscheidet (landingStep/overviewStep). Waehrend der
+  // Erstanmeldung bleibt sie aus, dort fuehrt ausschliesslich die Schritt-Linie.
+  const isEstablished = () => Boolean(S.customer && S.connections.length > 0);
+
+  function renderMainNav() {
+    const nav = $("#mainnav");
+    if (!nav) return;
+    if (!isEstablished()) {
+      nav.hidden = true;
+      $("#mainnav-list").innerHTML = "";
+      return;
+    }
+    nav.hidden = false;
+    $("#mainnav-list").innerHTML = MAIN_NAV.map((item) => {
+      const active = (item.match || [item.view]).includes(S.step);
+      const badge = item.view === "dashboard" && S.pendingCommentCount ? `<span class="nav-badge">${S.pendingCommentCount}</span>` : "";
+      return `<li><button type="button" data-go="${item.view}" ${active ? 'aria-current="page"' : ""}>${esc(item.label)}${badge}</button></li>`;
+    }).join("");
+  }
 
   /* ================= Rendering: Pipeline ================= */
   function renderRail() {
@@ -947,6 +1083,322 @@
         <div id="formpart-actions">${actionsHtml}</div>
       </form>
       ${!edit ? recoverAccessHtml() : ""}`;
+  }
+
+  /* ================= Einstellungen (Panel v11) =================
+     Ersetzt fuer eingerichtete Kunden das Bearbeiten ueber den Onboarding-Schritt "Unternehmen".
+     Alle Felder liegen weiterhin in EINEM <form id="company"> - der bestehende Speichern-Pfad
+     (submit-Handler + PATCH /api/me mit allen Feldern gleichzeitig) bleibt damit unveraendert,
+     nur die Reihenfolge/Gruppierung ist neu. Jede Einstellung existiert genau einmal und genau
+     hier; das Onboarding-Formular (companyHtml) zeigt sie nur noch bei der Erstanmeldung.
+     Der Konto-Block steht bewusst AUSSERHALB des Formulars: er enthaelt nur Aktionen
+     (Zugangslink/Abmelden/Loeschen), die nie mitgespeichert werden sollen. */
+  const SETTINGS_GROUPS = [
+    { id: "unternehmen", label: "Mein Unternehmen" },
+    { id: "aussehen", label: "Aussehen" },
+    { id: "inhalt", label: "Inhalt & Sprache" },
+    { id: "kanaele", label: "Kanäle & Zeitplan" },
+    { id: "automatik", label: "Freigaben & Automatik" },
+    { id: "mail", label: "Benachrichtigungen" },
+    { id: "konto", label: "Konto" },
+  ];
+
+  /** True, wenn die Instagram-Verbindung die erst in v10 ergaenzte Kommentar-Berechtigung noch
+   *  nicht hat - aeltere Verbindungen haben sie nie erteilt bekommen und muessen einmal neu
+   *  verbunden werden, sonst laeuft die Kommentar-Automatisierung ins Leere. */
+  function commentScopeMissing() {
+    const ig = conn("instagram");
+    if (!ig) return true;
+    return !(ig.scopes || []).includes("instagram_business_manage_comments");
+  }
+
+  function settingsHtml() {
+    const c = S.customer;
+    S.pillarsDraft = (c.contentPillars || []).map((p) => ({ title: p.title || "", description: p.description || "", weight: p.weight || 1 }));
+    const igMissing = commentScopeMissing();
+    const trialLine = c.trialExpired
+      ? "Ihr Testzeitraum ist abgelaufen - aktuell wird nichts automatisch veröffentlicht."
+      : c.trialDaysLeft != null
+        ? `Testzeitraum: noch ${c.trialDaysLeft} ${c.trialDaysLeft === 1 ? "Tag" : "Tage"}.`
+        : "Ihr Zugang ist unbefristet freigeschaltet.";
+
+    const group = (id, lede, body) => {
+      const g = SETTINGS_GROUPS.find((x) => x.id === id);
+      return `<section class="setgroup" id="setgroup-${id}" data-group="${id}">
+        <h2>${esc(g.label)}</h2>
+        <p class="setgroup-lede">${lede}</p>
+        ${body}
+      </section>`;
+    };
+
+    return `
+      ${bannerHtml()}
+      ${emailVerifyBannerHtml(c)}
+      <h1>Einstellungen</h1>
+      <p class="lede">Alles, was wir für Sie tun, lässt sich hier ändern - in sieben Gruppen. Wenn Sie etwas suchen, tippen Sie es einfach ein.</p>
+      <div class="set-layout">
+        <aside class="set-side">
+          <ul>${SETTINGS_GROUPS.map((g) => `<li><button type="button" data-setjump="${g.id}">${esc(g.label)}</button></li>`).join("")}</ul>
+        </aside>
+        <div>
+          <div class="set-search">
+            <label class="vh" for="set-search-input">Einstellung suchen</label>
+            <input id="set-search-input" type="search" placeholder="Einstellung suchen, z. B. Kommentar, Farbe, Hashtag" autocomplete="off" value="${esc(S.settingsQuery)}">
+            <p class="hint" id="set-search-hint">Zeigt sofort nur die passenden Einstellungen an.</p>
+          </div>
+          <form id="company" novalidate>
+            ${group("unternehmen", "Wer Sie sind und worum es in Ihren Beiträgen geht. Diese Angaben sind die Grundlage für jeden generierten Text.", `
+              <div class="grid2">
+                <div class="field">
+                  <label for="f-company">Firmenname</label>
+                  <input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization">
+                </div>
+                <div class="field">
+                  <label for="f-website">Website <span class="opt">(optional)</span></label>
+                  <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://">
+                  ${S.aiAvailable ? `<p class="hint"><button type="button" class="link" id="analyze-website">Vorschlag aus meiner Website holen</button></p>` : ""}
+                </div>
+                <div class="field">
+                  <label for="f-contactName">Ihr Name</label>
+                  <input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name">
+                </div>
+                <div class="field">
+                  <label for="f-email">E-Mail</label>
+                  <input id="f-email" name="email" type="email" value="${esc(c.email)}" required autocomplete="email">
+                </div>
+              </div>
+              <div id="website-suggestion" hidden></div>
+              <div class="field">
+                <label for="f-industry">Branche <span class="opt">(optional)</span></label>
+                <input id="f-industry" name="industry" type="text" value="${esc(c.industry)}" placeholder="z. B. Physiotherapie, Tischlerei, Steuerberatung">
+              </div>
+              <div class="field">
+                <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
+                <textarea id="f-about" name="about" placeholder="Stichworte reichen.">${esc(c.about)}</textarea>
+                <p class="hint">Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
+                <div id="ai-suggestion" hidden></div>
+              </div>
+              <div class="field">
+                <label for="f-tone">Tonalität</label>
+                <select id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+              </div>`)}
+
+            ${group("aussehen", "Wie Ihre generierten Bilder aussehen: Farbe, Beschriftung, Logo.", `
+              <div class="grid2">
+                <div class="field">
+                  <label for="f-accentColor">Akzentfarbe für Ihre Bilder <span class="opt">(optional)</span></label>
+                  <div class="colorrow">
+                    <input id="f-accentColor" name="accentColor" type="color" value="${esc(c.accentColor || "#0a0e1a")}">
+                    <input type="text" value="${esc(c.accentColor || "")}" placeholder="Standard" readonly aria-hidden="true" tabindex="-1">
+                  </div>
+                  <div class="swatches" role="group" aria-label="Vorschläge">
+                    ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
+                  </div>
+                  <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Farbthema verwendet.</strong>" : ""}</p>
+                </div>
+                <div class="field">
+                  <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
+                  <input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">
+                  <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
+                  <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
+                    <span class="lp-headline" id="lp-headline">Ihr Beitrag</span>
+                    <span class="lp-watermark" id="lp-watermark">${esc(c.watermarkText || c.company || "Pipeline")}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="field" id="themes-section">${themesSectionHtml(c)}</div>
+              <div class="field" id="logo-section">${logoSectionHtml(c)}</div>`)}
+
+            ${group("inhalt", "Worüber und wie geschrieben wird - Themen, Sprache und harte Grenzen für jeden Text.", `
+              <div class="field" id="pillars-section">${renderPillarsSection()}</div>
+              <div class="grid2">
+                <div class="field">
+                  <label for="f-ctaPreference">Bevorzugter Aufruf am Ende des Beitrags</label>
+                  <select id="f-ctaPreference" name="ctaPreference">${Object.entries(CTAS).map(([k, v]) => `<option value="${k}" ${(c.ctaPreference || "link_bio") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+                </div>
+                <div class="field">
+                  <label for="f-hashtagPreference">Hashtags</label>
+                  <select id="f-hashtagPreference" name="hashtagPreference">${Object.entries(HASHTAGS).map(([k, v]) => `<option value="${k}" ${(c.hashtagPreference || "wenige") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+                </div>
+                <div class="field">
+                  <label for="f-language">Sprache der Beiträge</label>
+                  <select id="f-language" name="language">${Object.entries(LANGUAGES).map(([k, v]) => `<option value="${k}" ${(c.language || "de") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+                </div>
+              </div>
+              <label class="check"><input type="checkbox" name="emojisEnabled" ${c.emojisEnabled !== false ? "checked" : ""}><span>Emojis in Beiträgen verwenden</span></label>
+              <div class="field" style="margin-top:22px">
+                <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
+                <input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">
+                <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
+              </div>
+              <div class="field">
+                <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
+                <input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">
+                <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
+              </div>
+              <div class="field">
+                <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
+                <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
+                <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
+              </div>`)}
+
+            ${group("kanaele", "Wo und wann veröffentlicht wird. Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.", `
+              <div class="field">
+                <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
+                <label class="check"><input type="checkbox" name="igFeedEnabled" ${c.igFeedEnabled !== false ? "checked" : ""}><span>Instagram Feed-Beiträge</span></label>
+                <label class="check"><input type="checkbox" name="igStoryEnabled" ${c.igStoryEnabled !== false ? "checked" : ""}><span>Instagram Storys</span></label>
+                <label class="check"><input type="checkbox" name="linkedinEnabled" ${c.linkedinEnabled !== false ? "checked" : ""}><span>LinkedIn-Beiträge</span></label>
+              </div>
+              <fieldset class="field">
+                <legend>An welchen Tagen posten - Instagram?</legend>
+                <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+              </fieldset>
+              <fieldset class="field">
+                <legend>An welchen Tagen posten - LinkedIn?</legend>
+                <div class="seg wd" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+              </fieldset>
+              <span class="consequence">Jeder angehakte Tag bedeutet einen echten Beitrag, der <strong>automatisch veröffentlicht wird</strong> (bzw. auf Ihre Freigabe wartet, wenn der Freigabe-Modus an ist).</span>
+              <div class="grid2">
+                <div class="field">
+                  <label for="f-postTime">Um wie viel Uhr?</label>
+                  <input id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900">
+                </div>
+                <div class="field">
+                  <label for="f-pauseFrom">Pause/Urlaub von <span class="opt">(optional)</span></label>
+                  <input id="f-pauseFrom" name="pauseFrom" type="date" value="${esc(c.pauseFrom || "")}">
+                </div>
+              </div>
+              <div class="field">
+                <label for="f-pauseUntil">Pause/Urlaub bis <span class="opt">(optional)</span></label>
+                <input id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}">
+                <p class="hint">In diesem Zeitraum wird für Sie nichts veröffentlicht.</p>
+              </div>
+              <div class="field">
+                <label>Posting vorübergehend anhalten</label>
+                <p class="hint" style="margin:0 0 10px">${c.customerPaused ? "Aktuell pausiert - es wird nichts veröffentlicht, bis Sie fortsetzen." : "Läuft. Sie können jederzeit anhalten, ohne Einstellungen zu verlieren."}</p>
+                <button type="button" class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
+              </div>`)}
+
+            ${group("automatik", "Was ohne Ihr Zutun passiert - und was vorher über Ihren Tisch geht.", `
+              <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben</span></label>
+              <span class="consequence">${c.approvalMode
+                ? "Aktuell an: <strong>ohne Ihre Freigabe geht nichts online.</strong> Vorbereitete Beiträge warten auf der Übersicht auf Sie."
+                : "Aktuell aus: <strong>Beiträge gehen automatisch online</strong>, ohne dass Sie sie vorher sehen."}</span>
+              <label class="check${igMissing ? " is-disabled" : ""}"><input type="checkbox" name="commentAutomationEnabled" ${c.commentAutomationEnabled ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Instagram-Kommentare automatisch mit KI beantworten</span></label>
+              ${igMissing
+                ? `<p class="locked">Dafür fehlt der Instagram-Verbindung noch die Berechtigung zum Lesen und Beantworten von Kommentaren. <button type="button" class="link" data-go="instagram">Instagram einmal neu verbinden</button>, danach lässt sich das hier einschalten.</p>`
+                : `<span class="consequence">Nur echte Fragen bekommen eine Antwort. Lob, neutrale Kommentare, Spam und Hass-Kommentare werden <strong>immer übersprungen</strong>, nie beantwortet.</span>`}
+              <div class="field">
+                <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
+                <label class="check"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher.</span></label>
+                <label class="check"><input type="radio" name="commentAutomationMode" value="auto" ${c.commentAutomationMode === "auto" ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Automatisch abschicken</span></label>
+                ${c.commentAutomationEnabled && c.commentAutomationMode === "auto"
+                  ? `<span class="consequence" style="margin-top:10px">Aktuell automatisch: Antworten gehen <strong>sofort und ungeprüft</strong> unter Ihrem Namen online (höchstens 10 pro Stunde).</span>`
+                  : ""}
+              </div>`)}
+
+            ${group("mail", "Alle E-Mails an einer Stelle. Standardmäßig ist alles aus - Sie bekommen nur, was Sie hier anhaken.", `
+              <label class="check"><input type="checkbox" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""}><span>E-Mail, wenn ein Beitrag veröffentlicht wird${c.approvalMode ? " (bzw. sobald einer auf Ihre Freigabe wartet)" : ""}</span></label>
+              <label class="check"><input type="checkbox" name="notifyWeeklyReport" ${c.notifyWeeklyReport ? "checked" : ""}><span>Einmal pro Woche ein Analytics-Bericht per E-Mail (Kennzahlen + kurze Einordnung)</span></label>`)}
+
+            <div class="actions" style="margin-top:8px"><button class="btn" type="submit">Änderungen speichern</button></div>
+          </form>
+
+          ${group("konto", "Verbindungen, Zugang und Ihr Konto. Änderungen hier wirken sofort, ohne Speichern.", `
+            <h3 style="margin-bottom:10px">Verbundene Kanäle</h3>
+            ${channelsSummaryHtml()}
+            <h3 style="margin-bottom:6px">Status</h3>
+            <p class="hint" style="margin:0 0 22px">${esc(trialLine)}</p>
+            <h3 style="margin-bottom:6px">Zugang auf anderen Geräten</h3>
+            <p class="hint" style="margin:0 0 10px">Auf diesem Gerät bleiben Sie angemeldet. Für ein anderes Gerät erzeugen Sie einen persönlichen Link - behandeln Sie ihn wie ein Passwort, ein neuer Link ersetzt den alten.</p>
+            <div id="linkbox"><button type="button" class="link" id="mklink">Persönlichen Link erzeugen</button></div>
+            <div class="actions" style="margin-top:16px">
+              <button type="button" class="link" id="logout">Abmelden</button>
+              <button type="button" class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button>
+            </div>
+            <p class="hint">Löschen entfernt Angaben, verbundene Kanäle und den Beitrags-Verlauf endgültig.</p>`)}
+          <p class="set-noresult" id="set-noresult" hidden>Dazu gibt es keine Einstellung. Versuchen Sie es mit einem anderen Wort - oder fragen Sie im Hilfe-Chat unten rechts.</p>
+        </div>
+      </div>`;
+  }
+
+  /* ================= Was kann Pipeflow? (Panel v11) =================
+     Dauerhaft ueber die Navigation erreichbar, nicht nur einmalig beim ersten Login. Jede Funktion
+     bekommt genau einen Satz und einen Link genau dorthin, wo man sie benutzt/einstellt - damit
+     niemand mehr raten muss, was das Produkt kann. "aktuell aus" steht dort, wo eine Funktion beim
+     Kunden gerade abgeschaltet ist; nicht nutzbare Funktionen (fehlende Berechtigung) sagen, was
+     zu tun ist, statt still dazustehen. */
+  function guideFeatures() {
+    const c = S.customer;
+    const igMissing = commentScopeMissing();
+    return [
+      { title: "Beiträge laufen von selbst", text: "An den Tagen und zur Uhrzeit, die Sie festlegen, entsteht automatisch ein Beitrag - Text und Bild inklusive.", go: "settings:kanaele", link: "Tage und Uhrzeit einstellen" },
+      { title: "Die nächsten 7 Tage vorab sehen", text: "Alles, was vorbereitet ist, können Sie vorher lesen, den Text ändern, die Bildfarbe tauschen oder einen Beitrag überspringen.", go: "preview", link: "Vorschau ansehen" },
+      { title: "Freigabe vor Veröffentlichung", text: "Auf Wunsch geht nichts online, bevor Sie es gesehen und freigegeben haben.", go: "settings:automatik", link: "Freigabe-Modus einstellen", off: !c.approvalMode },
+      { title: "Sofort zu einem Thema posten", text: "Sie haben gerade etwas zu erzählen? Thema eingeben, Kanäle wählen - der Rest passiert automatisch.", go: "dashboard", link: "Auf der Übersicht" },
+      { title: "Kommentare automatisch beantworten", text: igMissing
+          ? "Echte Fragen unter Ihren Instagram-Beiträgen werden beantwortet, Hass und Spam nie. Dafür muss Instagram einmal neu verbunden werden."
+          : "Echte Fragen unter Ihren Instagram-Beiträgen bekommen eine Antwort - Lob, Spam und Hass-Kommentare werden immer übersprungen.",
+        go: "settings:automatik", link: igMissing ? "Was zu tun ist" : "Kommentar-Automatik einstellen", off: !c.commentAutomationEnabled },
+      { title: "Content-Säulen", text: "Legen Sie Ihre festen Themenbereiche fest - die Beiträge wechseln sich dann sinnvoll zwischen ihnen ab, statt sich zu wiederholen.", go: "settings:inhalt", link: "Säulen bearbeiten" },
+      { title: "Ihr Aussehen", text: "Akzentfarbe, Beschriftung, eigenes Logo und gespeicherte Farbthemen bestimmen, wie Ihre Bilder aussehen.", go: "settings:aussehen", link: "Aussehen ändern" },
+      { title: "Harte Grenzen für jeden Text", text: "Wörter, die nie vorkommen dürfen, und Elemente, die immer vorkommen müssen - beides wird erzwungen, nicht nur gewünscht.", go: "settings:inhalt", link: "Grenzen festlegen" },
+      { title: "Zahlen zu Ihrem Instagram-Konto", text: "Follower, Reichweite und Ihre besten Beiträge der letzten 30 Tage, dazu eine kurze Einordnung in einfacher Sprache. Für LinkedIn gibt es das nicht.", go: "analytics", link: "Analytics ansehen" },
+      { title: "Wochenbericht per E-Mail", text: "Einmal pro Woche die wichtigsten Kennzahlen ins Postfach, ohne sich einloggen zu müssen.", go: "settings:mail", link: "E-Mails einstellen", off: !c.notifyWeeklyReport },
+      { title: "Alles, was schon veröffentlicht wurde", text: "Der vollständige Verlauf Ihrer Beiträge mit Bild, Text und Zeitpunkt.", go: "history", link: "Verlauf öffnen" },
+      { title: "Urlaub und Pause", text: "Für einen Zeitraum oder bis auf Weiteres anhalten - Ihre Einstellungen bleiben dabei erhalten.", go: "settings:kanaele", link: "Pause einstellen" },
+      { title: "Website-Analyse und KI-Hilfe", text: "Aus Ihrer Website-Adresse einen Vorschlag für Ihre Beschreibung holen oder Stichworte in einen fertigen Text verwandeln.", go: "settings:unternehmen", link: "Beschreibung bearbeiten" },
+      { title: "Hilfe-Chat", text: "Fragen zum Ablauf, zu Instagram/LinkedIn oder zu Ihren Zahlen beantwortet der Chat unten rechts jederzeit.", go: null, link: null },
+    ];
+  }
+
+  function guideHtml() {
+    return `
+      ${bannerHtml()}
+      <h1>Was kann Pipeflow?</h1>
+      <p class="lede">Ein Überblick über alles, was für Sie möglich ist - mit dem direkten Weg dorthin. Diese Seite bleibt dauerhaft über die Navigation erreichbar.</p>
+      <div class="actions" style="margin:-16px 0 32px"><button type="button" class="link" id="restart-tour">Kurzen Rundgang noch einmal starten</button></div>
+      <div class="guide-grid">
+        ${guideFeatures().map((f) => `
+          <div class="guide-item${f.off ? " is-off" : ""}">
+            <h3>${esc(f.title)}</h3>
+            <p>${esc(f.text)}</p>
+            ${f.go ? `<button type="button" class="link" data-guide-go="${esc(f.go)}">${esc(f.link)} →</button>` : ""}
+          </div>`).join("")}
+      </div>`;
+  }
+
+  /* ================= Erst-Rundgang (Panel v11) =================
+     Wenige Schritte, jederzeit schliessbar, kein Zwang und keine Modal-Kette. Der Status liegt
+     serverseitig (customers.tour_done_at, siehe /api/tour-done) - nicht im Browser-Speicher, weil
+     genau das bei "Später verbinden" (skipped_providers) schon einmal die Fehlerursache war.
+     Wiederholbar ueber "Was kann Pipeflow?". */
+  const TOUR = [
+    { title: "Willkommen - kurz gezeigt, wo was liegt", text: "Vier kurze Hinweise, dann kennen Sie sich aus. Sie können jederzeit abbrechen und den Rundgang später über „Was kann Pipeflow?“ wiederholen." },
+    { title: "Übersicht", text: "Ihre Startseite: was als Nächstes online geht, was auf Ihre Freigabe wartet, die letzten Beiträge - und der Knopf, um sofort zu einem Thema zu posten." },
+    { title: "Beiträge", text: "Hier sehen Sie die nächsten sieben Tage im Voraus und können Texte ändern oder Beiträge überspringen, bevor sie erscheinen. Daneben liegt der Verlauf." },
+    { title: "Einstellungen", text: "Alles Änderbare an einem Ort, in sieben Gruppen - mit einem Suchfeld ganz oben. Wenn Sie etwas nicht finden: dort eintippen, zum Beispiel „Kommentar“ oder „Farbe“." },
+  ];
+
+  function renderTour() {
+    const overlay = $("#tour-overlay");
+    if (!overlay) return;
+    if (S.tourIndex < 0) { overlay.hidden = true; return; }
+    const step = TOUR[S.tourIndex];
+    overlay.hidden = false;
+    $("#tour-step").textContent = `Schritt ${S.tourIndex + 1} von ${TOUR.length}`;
+    $("#tour-title").textContent = step.title;
+    $("#tour-text").textContent = step.text;
+    $("#tour-dots").innerHTML = TOUR.map((_, i) => `<i class="${i <= S.tourIndex ? "on" : ""}"></i>`).join("");
+    $("#tour-next").textContent = S.tourIndex === TOUR.length - 1 ? "Fertig" : "Weiter";
+  }
+
+  async function endTour() {
+    S.tourIndex = -1;
+    renderTour();
+    if (S.customer && !S.customer.tourDone) {
+      try { applyState(await api("POST", "/api/tour-done")); } catch { /* nicht kritisch - beim naechsten Mal erneut */ }
+    }
   }
 
   function formPartLabel(part) {
@@ -1267,7 +1719,7 @@
         <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
       </dl>
       <div class="actions">
-        <button class="btn" data-go="company">Stil bearbeiten</button>
+        <button class="btn" data-go="${isEstablished() ? "settings" : "company"}">Einstellungen bearbeiten</button>
         <button class="link" data-go="${S.providers[0]?.id || "company"}">Kanäle verwalten</button>
         <button class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
       </div>
@@ -1359,10 +1811,10 @@
         </div>
       </div>
       <div class="dash2-footer">
-        <button type="button" class="link" data-go="company">Stil bearbeiten</button>
-        <span id="linkbox"><button type="button" class="link" id="mklink">Persönlichen Link erzeugen</button></span>
+        <span>Alles Änderbare liegt jetzt an einem Ort:</span>
+        <button type="button" class="link" data-go="settings">Einstellungen</button>
+        <button type="button" class="link" data-go="guide">Was kann Pipeflow?</button>
         <button type="button" class="link" id="logout">Abmelden</button>
-        <button type="button" class="link" id="delete-account" style="color:var(--stop)">Konto löschen</button>
       </div>`;
   }
 
@@ -1490,12 +1942,22 @@
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
   const PLATFORM_LABEL = (p) => prov(p)?.name || p;
 
+  /** Panel v11: Vorschau und Verlauf sind ein Bereich ("Beiträge") mit zwei Reitern - in der
+   *  Navigation steht dafuer nur ein Eintrag, damit die Leiste kurz bleibt. Fuer einen Kunden
+   *  mitten im Onboarding (noch keine Navigation) wird nichts angezeigt. */
+  function postsTabsHtml(active) {
+    if (!isEstablished()) return "";
+    const tab = (view, label) => `<button type="button" class="link" data-go="${view}" ${active === view ? 'aria-current="page" style="font-weight:700;text-decoration:underline"' : ""}>${label}</button>`;
+    return `<div class="actions" style="margin:-24px 0 28px">${tab("preview", "Die nächsten 7 Tage")}${tab("history", "Bereits veröffentlicht")}</div>`;
+  }
+
   function historyHtml() {
     const c = S.customer;
     return `
       ${bannerHtml()}
       <h1>Ihre bisherigen Beiträge</h1>
       <p class="lede">Hier sehen Sie, was in Ihrem Namen veröffentlicht wurde.${c.nextPostAt && !c.trialExpired ? ` Nächster Beitrag: ${esc(fmtNextPost(c.nextPostAt))}.` : ""}</p>
+      ${postsTabsHtml("history")}
       <div id="historylist"><p class="empty">Wird geladen …</p></div>
       <div class="actions">
         <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
@@ -1530,7 +1992,7 @@
     return `
       ${bannerHtml()}
       <h1>Analytics</h1>
-      <p class="lede">Instagram-Kennzahlen der letzten 30 Tage. Einmal täglich im Hintergrund aktualisiert.</p>
+      <p class="lede">Instagram-Kennzahlen der letzten 30 Tage, einmal täglich im Hintergrund aktualisiert. Für LinkedIn gibt es diese Zahlen nicht - die Schnittstelle dafür steht uns nicht offen.</p>
       <div id="analytics-body"><p class="empty">Wird geladen …</p></div>
       <div class="actions">
         <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
@@ -1648,6 +2110,7 @@
       ${bannerHtml()}
       <h1>Vorschau - die nächsten 7 Tage</h1>
       <p class="lede">Diese Beiträge hat Pipeflow für Sie vorbereitet. Passen Sie Text oder Bild-Farbe an oder überspringen Sie einen Beitrag, bevor er automatisch veröffentlicht wird.${c.approvalMode ? " Da Sie Beiträge vor Veröffentlichung freigeben, können Sie das hier schon vorab tun - nach Ihrer Freigabe wird in der Regel innerhalb weniger Minuten veröffentlicht." : ""}</p>
+      ${postsTabsHtml("preview")}
       <div id="preview-strip"><p class="empty">Wird geladen …</p></div>
       <p class="preview-hint">← Tage seitlich wischen, um sie zu wechseln.</p>
       <div id="preview-detail"></div>
@@ -1794,22 +2257,96 @@
   function render(focus) {
     renderTrialBar();
     renderRail();
+    renderMainNav();
+    const wideView = S.step === "dashboard" || S.step === "settings" || S.step === "guide";
     $(".shell")?.classList.toggle("no-rail", DETAIL_VIEWS.includes(S.step));
+    $(".shell")?.classList.toggle("shell-wide", wideView);
     $("#stage")?.classList.toggle("dash-wide", S.step === "dashboard");
+    $("#stage")?.classList.toggle("settings-wide", S.step === "settings" || S.step === "guide");
     const stage = $("#stage");
     if (S.step === "dashboard") { stage.innerHTML = dashboardHtml(); loadDashboardExtras(); }
     else if (S.step === "company") stage.innerHTML = companyHtml();
+    else if (S.step === "settings") stage.innerHTML = settingsHtml();
+    else if (S.step === "guide") stage.innerHTML = guideHtml();
     else if (S.step === "done") { stage.innerHTML = doneHtml(); loadDashboardExtras(); }
     else if (S.step === "preview") { stage.innerHTML = previewHtml(); loadPreview(); }
     else if (S.step === "history") { stage.innerHTML = historyHtml(); loadHistory(); }
     else if (S.step === "analytics") { stage.innerHTML = analyticsHtml(); loadAnalytics(); }
     else stage.innerHTML = providerHtml(prov(S.step));
     if (focus) { stage.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
+    if (S.step === "settings") {
+      // Suchbegriff ueberlebt das Neu-Rendern (z. B. nach dem Speichern), und ein Sprungziel aus
+      // der Funktionsuebersicht landet direkt bei der richtigen Gruppe statt nur "irgendwo" in den
+      // Einstellungen.
+      if (S.settingsQuery) applySettingsFilter(S.settingsQuery);
+      if (S.settingsTarget) { jumpToSettingsGroup(S.settingsTarget); S.settingsTarget = null; }
+    }
+    maybeStartTour();
   }
 
-  function go(step) {
+  /** Der Rundgang startet genau einmal, erst wenn der Kunde fertig eingerichtet auf der Übersicht
+   *  landet - nie mitten im Onboarding und nie ungefragt ueber einer anderen Ansicht. */
+  function maybeStartTour() {
+    if (DEMO) return;
+    if (S.tourIndex >= 0) { renderTour(); return; }
+    if (S.step !== "dashboard" || !isEstablished() || !S.customer || S.customer.tourDone) return;
+    S.tourIndex = 0;
+    renderTour();
+  }
+
+  function jumpToSettingsGroup(id) {
+    const el = document.getElementById(`setgroup-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.remove("is-flash");
+    void el.offsetWidth; // Neustart der Hervorhebung erzwingen, falls dieselbe Gruppe erneut angesprungen wird
+    el.classList.add("is-flash");
+    document.querySelectorAll("[data-setjump]").forEach((b) => b.classList.toggle("is-active", b.dataset.setjump === id));
+  }
+
+  /** Blendet Gruppen/Felder aus, die nicht zum Suchbegriff passen - die Eingaben bleiben dabei im
+   *  Formular (nur versteckt), es geht also nie ein Wert verloren. */
+  function applySettingsFilter(rawQuery) {
+    const q = rawQuery.trim().toLowerCase();
+    const groups = [...document.querySelectorAll(".setgroup")];
+    if (!groups.length) return;
+    let anyVisible = false;
+    groups.forEach((group) => {
+      const groupTitle = (group.querySelector("h2")?.textContent || "").toLowerCase();
+      const blocks = [...group.querySelectorAll(":scope > .field, :scope > .check, :scope > fieldset, :scope > h3, :scope > .consequence, :scope > .locked, :scope > .grid2, :scope > .dash-channels, :scope > .actions, :scope > p, :scope > div")];
+      if (!q) {
+        group.classList.remove("is-filtered");
+        blocks.forEach((b) => b.classList.remove("is-filtered"));
+        anyVisible = true;
+        return;
+      }
+      const groupMatches = groupTitle.includes(q);
+      let hits = 0;
+      blocks.forEach((b) => {
+        const match = groupMatches || (b.textContent || "").toLowerCase().includes(q);
+        b.classList.toggle("is-filtered", !match);
+        if (match) hits++;
+      });
+      const visible = groupMatches || hits > 0;
+      group.classList.toggle("is-filtered", !visible);
+      if (visible) anyVisible = true;
+    });
+    const none = $("#set-noresult");
+    if (none) none.hidden = anyVisible;
+    const hint = $("#set-search-hint");
+    if (hint) hint.textContent = q ? `Gefiltert nach „${rawQuery.trim()}“ - Feld leeren, um wieder alles zu sehen.` : "Zeigt sofort nur die passenden Einstellungen an.";
+  }
+
+  // Panel v11: "settings:aussehen" springt zur Einstellungs-Ansicht UND dort zur Gruppe - so kann
+  // jede Stelle im Panel (Funktionsuebersicht, Dashboard-Hinweise) direkt auf die zustaendige
+  // Einstellung zeigen, statt nur grob "in die Einstellungen" zu schicken.
+  function go(target) {
+    const [step, groupId] = String(target).split(":");
     if (!DETAIL_VIEWS.includes(step) && !steps().includes(step)) return;
-    if (step !== "company" && !S.customer) step = "company";
+    if (step === "settings" && !isEstablished()) return go("company");
+    if (step !== "company" && !S.customer) return go("company");
+    if (groupId) S.settingsTarget = groupId;
+    if (step !== "settings") S.settingsQuery = "";
     S.step = step; S.banner = null;
     history.replaceState(null, "", location.pathname + (DEMO && location.search.includes("demo") ? "?demo" : ""));
     render(true);
@@ -1854,6 +2391,12 @@
     }
     if (e.target.id === "f-pillar-keywords") {
       S.pillarAiKeywords = e.target.value;
+    }
+    // Panel v11: Einstellungs-Suche - filtert beim Tippen, ohne neu zu rendern (das wuerde den
+    // Fokus aus dem Feld reissen und nicht gespeicherte Eingaben in anderen Feldern verwerfen).
+    if (e.target.id === "set-search-input") {
+      S.settingsQuery = e.target.value;
+      applySettingsFilter(S.settingsQuery);
     }
   });
 
@@ -2480,6 +3023,7 @@
         card?.remove();
         const box = $("#dash-comment-approvals");
         if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+        refreshPendingCommentBadge();
       } catch (err) {
         showError(err.message || "Aktion fehlgeschlagen.");
         btn.classList.remove("busy");
@@ -2582,6 +3126,21 @@
       return;
     }
 
+    // --- Panel v11: Einstellungs-Sprungliste, Funktionsuebersicht, Rundgang ---
+    const jump = e.target.closest("[data-setjump]");
+    if (jump) { jumpToSettingsGroup(jump.dataset.setjump); return; }
+
+    const guideGo = e.target.closest("[data-guide-go]");
+    if (guideGo) { go(guideGo.dataset.guideGo); return; }
+
+    if (e.target.closest("#restart-tour")) { S.tourIndex = 0; renderTour(); return; }
+    if (e.target.closest("#tour-skip")) { await endTour(); return; }
+    if (e.target.closest("#tour-next")) {
+      if (S.tourIndex >= TOUR.length - 1) await endTour();
+      else { S.tourIndex++; renderTour(); }
+      return;
+    }
+
     const t = e.target.closest("[data-go],[data-connect],[data-disconnect],#mklink,#logout,[data-copy]");
     if (!t) return;
 
@@ -2640,17 +3199,21 @@
     const fd = new FormData(form);
     const body = Object.fromEntries(fd.entries());
     const edit = !!S.customer;
-    if (!edit) body.consent = !!form.consent?.checked;
     // FormData omits unchecked boxes entirely (rather than sending false), so read these
-    // directly off the elements instead of trusting fd.entries() for them.
-    body.igFeedEnabled = !!form.igFeedEnabled?.checked;
-    body.igStoryEnabled = !!form.igStoryEnabled?.checked;
-    body.linkedinEnabled = !!form.linkedinEnabled?.checked;
-    body.emojisEnabled = !!form.emojisEnabled?.checked;
-    body.approvalMode = !!form.approvalMode?.checked;
-    body.notifyOnPublish = !!form.notifyOnPublish?.checked;
-    body.notifyWeeklyReport = !!form.notifyWeeklyReport?.checked;
-    body.commentAutomationEnabled = !!form.commentAutomationEnabled?.checked;
+    // direkt von den Elementen. Panel v11: ueber querySelector statt ueber den Namens-Zugriff
+    // (form.igFeedEnabled) - der lieferte bei nachtraeglich eingefuegtem Markup undefined, was
+    // still ein "false" gespeichert haette, und ein Feldname wie "action"/"method" wuerde dort
+    // ohnehin die Form-Eigenschaft treffen statt das Feld.
+    const checked = (name) => Boolean(form.querySelector(`[name="${name}"]`)?.checked);
+    if (!edit) body.consent = checked("consent");
+    body.igFeedEnabled = checked("igFeedEnabled");
+    body.igStoryEnabled = checked("igStoryEnabled");
+    body.linkedinEnabled = checked("linkedinEnabled");
+    body.emojisEnabled = checked("emojisEnabled");
+    body.approvalMode = checked("approvalMode");
+    body.notifyOnPublish = checked("notifyOnPublish");
+    body.notifyWeeklyReport = checked("notifyWeeklyReport");
+    body.commentAutomationEnabled = checked("commentAutomationEnabled");
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
@@ -2678,15 +3241,21 @@
       return showFieldErrors(form, errors);
     }
 
+    // Panel v11: Auf Seite 1 des Signup-Formulars gibt es keinen Absenden-Knopf (nur "Weiter") -
+    // wer dort die Eingabetaste drueckt, loest trotzdem submit aus und lief bisher in einen
+    // Absturz (btn war null). Der Ablauf selbst bleibt gleich, nur ohne "busy"-Anzeige.
     const btn = form.querySelector("button[type=submit]");
-    btn.classList.add("busy");
+    btn?.classList.add("busy");
     try {
       applyState(await api(edit ? "PATCH" : "POST", edit ? "/api/me" : "/api/signup", body));
-      S.step = edit ? landingStep() : S.providers[0]?.id || "done";
+      // Panel v11: Aus den Einstellungen heraus bleibt man nach dem Speichern in den Einstellungen
+      // (und in derselben Gruppe) - vorher sprang das Formular zurueck aufs Dashboard, was genau
+      // das "wo bin ich jetzt?"-Gefuehl erzeugt hat, um das es in dieser Runde geht.
+      S.step = edit ? (S.step === "settings" ? "settings" : landingStep()) : S.providers[0]?.id || "done";
       S.banner = edit ? { kind: "ok", text: "Angaben gespeichert." } : null;
       render(true);
     } catch (err) {
-      btn.classList.remove("busy");
+      btn?.classList.remove("busy");
       if (err.fields) return showFieldErrors(form, err.fields);
       S.banner = { kind: "bad", text: err.message };
       render(true);
@@ -2753,6 +3322,20 @@
     }
     if (q.has("connected") || q.has("error") || q.has("verified")) history.replaceState(null, "", location.pathname);
     render(false);
+    refreshPendingCommentBadge();
+  }
+
+  /** Panel v11: Zahl neben "Übersicht" in der Navigation, damit wartende Kommentar-Antworten auch
+   *  von anderen Ansichten aus sichtbar sind. Nur ein Aufruf beim Laden bzw. nach einer Aktion -
+   *  bewusst kein Polling. Schlaegt der Aufruf fehl, bleibt die Leiste einfach ohne Zahl. */
+  async function refreshPendingCommentBadge() {
+    const c = S.customer;
+    if (DEMO || !c || !c.commentAutomationEnabled || c.commentAutomationMode === "auto") { S.pendingCommentCount = 0; return; }
+    try {
+      const { approvals } = await api("GET", "/api/comment-approvals");
+      S.pendingCommentCount = approvals.length;
+      renderMainNav();
+    } catch { /* Zahl ist nur ein Hinweis, kein kritischer Zustand */ }
   }
 
   /* ================= Vorschau-Modus (ohne Server) ================= */
