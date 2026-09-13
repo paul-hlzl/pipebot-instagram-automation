@@ -589,7 +589,12 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const conn = (id) => S.connections.find((c) => c.provider === id);
   const prov = (id) => S.providers.find((p) => p.id === id);
-  const steps = () => ["company", ...S.providers.map((p) => p.id), "done", "preview", "history", "analytics"];
+  // Panel v9 Punkt 7: die Erstanmeldungs-Kette (Rail) besteht nur noch aus Unternehmen/Kanaelen/
+  // Fertig - Vorschau/Verlauf/Analytics sind eigene Dashboard-Unteransichten (siehe DETAIL_VIEWS),
+  // kein Rail-Schritt mehr, werden ausschliesslich ueber die Dashboard-/Fertig-Buttons erreicht.
+  const steps = () => ["company", ...S.providers.map((p) => p.id), "done"];
+  // Ansichten ohne Rail: das Dashboard selbst plus die drei ehemaligen Rail-Schritte.
+  const DETAIL_VIEWS = ["dashboard", "preview", "history", "analytics"];
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }) : "";
   const fmtNextPost = (iso) => {
     if (!iso) return "";
@@ -634,21 +639,22 @@
 
   /* ================= Rendering: Pipeline ================= */
   function renderRail() {
-    // Panel v6 Aufgabe 3: die Schritt-Kette bleibt fuer den Erst-Assistenten unveraendert (siehe
-    // unten), zeigt sich aber gar nicht erst, sobald das neue Dashboard der Landepunkt ist - dort
-    // uebernehmen die Dashboard-Kacheln die Navigation.
-    if (S.step === "dashboard") { $("#rail").innerHTML = ""; const rc = $("#rail-current"); if (rc) rc.textContent = ""; return; }
+    // Panel v6 Aufgabe 3 / v9 Punkt 7: die Schritt-Kette bleibt fuer den Erst-Assistenten
+    // unveraendert (siehe unten), zeigt sich aber gar nicht erst fuer das Dashboard und seine
+    // Unteransichten (Vorschau/Verlauf/Analytics, siehe DETAIL_VIEWS) - dort uebernehmen die
+    // Dashboard-Kacheln bzw. das "Zurück zur Übersicht" die Navigation.
+    if (DETAIL_VIEWS.includes(S.step)) { $("#rail").innerHTML = ""; const rc = $("#rail-current"); if (rc) rc.textContent = ""; return; }
     const list = steps();
     const cur = list.indexOf(S.step);
-    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : id === "preview" ? "Vorschau" : id === "history" ? "Verlauf" : id === "analytics" ? "Analytics" : prov(id).name;
+    const label = (id) => id === "company" ? "Unternehmen" : id === "done" ? "Fertig" : prov(id).name;
     const meta = (id) => {
       if (id === "company") return S.customer ? S.customer.company : "Angaben machen";
-      if (id === "done" || id === "preview" || id === "history" || id === "analytics") return "";
+      if (id === "done") return "";
       const c = conn(id);
       if (c) return c.status === "expired" ? "Abgelaufen" : c.accountName;
       return S.skipped.has(id) ? "Übersprungen" : "Nicht verbunden";
     };
-    const isDone = (id) => id === "company" ? !!S.customer : (id === "done" || id === "preview" || id === "history" || id === "analytics") ? false : !!conn(id) && conn(id).status !== "expired";
+    const isDone = (id) => id === "company" ? !!S.customer : id === "done" ? false : !!conn(id) && conn(id).status !== "expired";
 
     // Panel v7 fix (Teil 5): einzige sichtbare Textquelle fuer den aktuellen Schritt auf
     // schmalen Screens (siehe CSS-Kommentar bei .rail-current-mobile) - immer nur EIN Label auf
@@ -1747,7 +1753,7 @@
   function render(focus) {
     renderTrialBar();
     renderRail();
-    $(".shell")?.classList.toggle("no-rail", S.step === "dashboard");
+    $(".shell")?.classList.toggle("no-rail", DETAIL_VIEWS.includes(S.step));
     $("#stage")?.classList.toggle("dash-wide", S.step === "dashboard");
     const stage = $("#stage");
     if (S.step === "dashboard") { stage.innerHTML = dashboardHtml(); loadDashboardExtras(); }
@@ -1761,7 +1767,7 @@
   }
 
   function go(step) {
-    if (step !== "dashboard" && !steps().includes(step)) return;
+    if (!DETAIL_VIEWS.includes(step) && !steps().includes(step)) return;
     if (step !== "company" && !S.customer) step = "company";
     S.step = step; S.banner = null;
     history.replaceState(null, "", location.pathname + (DEMO && location.search.includes("demo") ? "?demo" : ""));
