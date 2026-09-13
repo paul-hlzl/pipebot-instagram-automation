@@ -193,7 +193,9 @@
   .btn:hover { background: var(--paper); color: var(--ink); }
   .btn[disabled], .btn[aria-disabled=true] { background: var(--wash); border-color: var(--rule); color: var(--stone); cursor: not-allowed; }
   .btn.busy { opacity: .7; pointer-events: none; }
+  .link.busy { opacity: .6; pointer-events: none; }
   .link { background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 15px; }
+  .link[disabled] { color: var(--stone); cursor: not-allowed; text-decoration: none; }
   .fine { font-size: 14px; color: var(--stone); margin-top: 16px; }
 
   /* Anleitung */
@@ -2046,9 +2048,11 @@
       }
       return;
     }
-    if (e.target.closest("#theme-save")) {
+    const themeSaveBtn = e.target.closest("#theme-save");
+    if (themeSaveBtn) {
       const name = prompt("Name für dieses Farbthema (z. B. \"Sommer-Kampagne\"):");
       if (!name || !name.trim()) return;
+      themeSaveBtn.classList.add("busy");
       try {
         const accentColor = $("#f-accentColor")?.value || "";
         const watermarkText = $("#f-watermarkText")?.value || "";
@@ -2058,27 +2062,33 @@
         if (section) section.innerHTML = themesSectionHtml(S.customer);
       } catch (err) {
         showError(err.message || "Konnte nicht gespeichert werden.");
+        themeSaveBtn.classList.remove("busy");
       }
       return;
     }
     const activateBtn = e.target.closest("[data-theme-activate]");
     if (activateBtn) {
+      activateBtn.classList.add("busy");
       try {
         applyState(await api("POST", `/api/themes/${activateBtn.dataset.themeActivate}/activate`));
         const section = $("#themes-section");
         if (section) section.innerHTML = themesSectionHtml(S.customer);
       } catch (err) {
         showError(err.message || "Konnte nicht aktiviert werden.");
+        activateBtn.classList.remove("busy");
       }
       return;
     }
-    if (e.target.closest("#theme-deactivate")) {
+    const themeDeactivateBtn = e.target.closest("#theme-deactivate");
+    if (themeDeactivateBtn) {
+      themeDeactivateBtn.classList.add("busy");
       try {
         applyState(await api("POST", "/api/themes/deactivate"));
         const section = $("#themes-section");
         if (section) section.innerHTML = themesSectionHtml(S.customer);
       } catch (err) {
         showError(err.message || "Konnte nicht geändert werden.");
+        themeDeactivateBtn.classList.remove("busy");
       }
       return;
     }

@@ -109,7 +109,76 @@ Test-Kunden für Zugriffskontrolle, echte SSRF-Payloads gegen die Cloudflare-sit
 
 ## Aufgabe 3: Nutzerfreundlichkeits-Review
 
-*(wird während der Sitzung befüllt)*
+Methodik: kein echter Browser verfügbar in dieser Sitzung - Code (Templates, CSS, Event-Handler)
+systematisch gelesen, dort wo es um tatsächliches Verhalten (nicht nur Optik) ging zusätzlich
+per `jsdom` gegen die laufende Sandbox ausgeführt. Kontrast rechnerisch (WCAG-Formel) statt
+visuell geprüft - eine echte visuelle Prüfung am Bildschirm bleibt offen (siehe "Bekannte
+Risiken" in Aufgabe 4).
+
+### Gefunden und direkt behoben (einfach, risikoarm)
+
+1. **Drei Buttons ganz ohne Ladeanzeige:** "+ Aktuelle Farbe/Beschriftung als Thema speichern",
+   ein Farbthema aktivieren, und "stattdessen eigene Farbe verwenden" (Formular-Bereich "Ihr
+   Stil") lösten einen Netzwerk-Aufruf aus, ohne den Button währenddessen sichtbar zu
+   deaktivieren - ein Doppelklick auf einer langsamen Verbindung hätte den Aufruf zweimal
+   ausgelöst, oder es hätte einfach nach "hängt" ausgesehen. Jetzt: gleiches `busy`-Muster wie
+   bei jedem anderen Button im Panel (Klasse `busy` während des Requests, `finally`/Catch setzt
+   sie zurück).
+2. **`.link`-Buttons mit `disabled`-Attribut hatten keine garantiert sichtbare Deaktivierung.**
+   Mehrere bestehende Buttons (Logo entfernen, Konto löschen, Posting pausieren,
+   Bestätigungsmail erneut senden, Zugangslink anfordern) setzen beim Laden korrekt
+   `btn.disabled = true`, aber es gab nur eine CSS-Regel für `.btn[disabled]`, keine für
+   `.link[disabled]` (alle genannten Buttons sind `.link`-Buttons) - je nach Browser blieb die
+   Deaktivierung dadurch optisch unauffällig bis unsichtbar. Jetzt eine explizite
+   `.link[disabled]`-Regel ergänzt (grau, kein Unterstrich, `not-allowed`-Cursor) - konsistent
+   mit der bestehenden `.btn[disabled]`-Optik.
+
+Beide Fixes: `public/panel/index.html`, in der Sandbox geladen und auf Ladefehler-frei geprüft
+(kompletter Seitenaufruf ohne JS-Fehler).
+
+### Geprüft, in Ordnung
+
+- **Fehlermeldungen:** kein einziger roher/technischer Fehlertext gefunden. Jeder unerwartete
+  Server-Fehler (500) landet in einem zentralen Error-Handler (`router.ts`/`admin.ts`), der
+  IMMER eine freundliche, deutsche Standardmeldung zurückgibt ("Da ist auf unserer Seite etwas
+  schiefgelaufen. Bitte versuchen Sie es erneut."), nie den echten Fehler/Stacktrace. Alle
+  client-seitigen Fallback-Texte (21 Stellen mit `err.message || "..."`) sind ebenfalls klares,
+  konkretes Deutsch.
+- **Ladezustände (sonst):** die meisten kostenpflichtigen/langsamen Aktionen (KI-Vorschläge,
+  Bild-Neuerstellung, Hochladen, Freigeben/Ablehnen, Trennen, Website analysieren) hatten
+  bereits ein klares Muster - Button deaktiviert + oft zusätzlich Text wie "Wird erstellt …"/
+  "Wird recherchiert …" statt nur eines Spinners. Gutes, konsistentes Muster im ganzen Panel.
+- **Leere Zustände:** wirken einladend, nicht wie ein Fehler - z. B. "Noch keine Beiträge
+  veröffentlicht. Sobald der erste online geht, erscheint er hier." statt einer nackten
+  "0 Ergebnisse"-Meldung. Neutrale graue Farbe (`--stone`), keine Alarmfarbe.
+- **Konsistenz der Begriffe:** "Content-Säule(n)" wird ausnahmslos so genannt (keine
+  "Themen-Bereiche" o. ä. gefunden), "Freigabe-Modus" konsistent. "Beitrag"(Substantiv) vs.
+  "posten"(Verb) sind zwei verschiedene Wortarten für dasselbe Konzept, keine echte
+  Inkonsistenz.
+- **Kontrast (rechnerisch, WCAG-Formel):** Haupttext `--ink` #000 auf `--paper` #FFF = 21:1.
+  Sekundärtext `--stone` #666 auf Weiß = 5,7:1. Fehlerfarbe `--stop` #B42318 = 6,6:1.
+  Erfolgsfarbe `--go` #137A3F = 5,4:1. Alle drei über der WCAG-AA-Mindestanforderung (4,5:1 für
+  normalen Text) - unabhängig von tatsächlicher Bildschirmwiedergabe (keine echte visuelle
+  Prüfung möglich, siehe oben).
+- **Formular-Validierung:** company/contactName/email/consent zeigen einen konkreten Fehler
+  direkt am Feld (nicht nur oben auf der Seite) - sowohl beim Signup als auch beim späteren
+  Bearbeiten des Profils (beide nutzen dieselbe `parseBriefing()`/`fields`-Fehlerstruktur
+  serverseitig).
+- **Buttons als klickbar erkennbar:** `.btn` hat durchgängig Rahmen/Hintergrund-Kontrast,
+  `.link` durchgängig Unterstrich - keine Stelle gefunden, an der ein klickbares Element wie
+  reiner Fließtext aussieht.
+
+### Vorgemerkt, nicht selbst umgebaut (größer / Design-Entscheidung)
+
+- **Leere Zustände und echte Ladefehler sehen optisch identisch aus** (dieselbe `.empty`-Klasse
+  für "noch nichts da" UND "konnte nicht geladen werden"). Ein Kunde kann die beiden Fälle nicht
+  auf einen Blick unterscheiden, und ein echter Ladefehler bietet keinen "erneut versuchen"-
+  Button - nur ein manuelles Neuladen der Seite hilft. Würde eine eigene Fehler-Optik (andere
+  Farbe/Icon) plus Retry-Buttons an mehreren Stellen brauchen - keine Ein-Zeilen-Änderung, daher
+  hier nur vermerkt.
+- **Keine echte visuelle/Screenreader-Prüfung möglich** (kein Browser in dieser Sitzung) - die
+  rechnerische Kontrastprüfung und der Code-Review ersetzen keinen echten Blick auf den
+  gerenderten Bildschirm bzw. einen echten Screenreader-Durchlauf.
 
 ---
 
