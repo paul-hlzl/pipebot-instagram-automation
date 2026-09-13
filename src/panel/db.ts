@@ -165,6 +165,55 @@ CREATE TABLE IF NOT EXISTS content_pillars (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS content_pillars_customer ON content_pillars(customer_id);
+
+-- Panel v9: Instagram-Analytics (v1, Instagram only - siehe Session-Bericht). Ein Snapshot pro
+-- Kunde/Tag statt eines laufenden Zählers, damit ein Trend über die Zeit entsteht, nicht nur der
+-- jeweils aktuelle Stand. UNIQUE(customer_id, snapshot_date) macht einen erneuten Lauf am selben
+-- Tag idempotent (siehe saveAccountSnapshot: INSERT OR REPLACE).
+CREATE TABLE IF NOT EXISTS analytics_account_snapshots (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  snapshot_date TEXT NOT NULL,
+  follower_count INTEGER,
+  reach INTEGER,
+  views INTEGER,
+  accounts_engaged INTEGER,
+  total_interactions INTEGER,
+  created_at TEXT NOT NULL,
+  UNIQUE(customer_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS analytics_account_snapshots_customer_date ON analytics_account_snapshots(customer_id, snapshot_date DESC);
+
+-- Eine Zeile pro Abruf (nicht pro Post) - Engagement wächst über Zeit, die letzte Zeile pro
+-- post_id ist der aktuelle Stand (siehe listTopPosts/latestPostSnapshot: ORDER BY fetched_at DESC
+-- LIMIT 1 pro Post). customer_id redundant zu posts.customer_id, aber spart einen JOIN bei jeder
+-- Abfrage (dieselbe bewusste Redundanz wie schon bei pending_approvals.provider/channel).
+CREATE TABLE IF NOT EXISTS analytics_post_snapshots (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  likes INTEGER,
+  comments INTEGER,
+  saved INTEGER,
+  shares INTEGER,
+  reach INTEGER,
+  fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS analytics_post_snapshots_post ON analytics_post_snapshots(post_id, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS analytics_post_snapshots_customer ON analytics_post_snapshots(customer_id, fetched_at DESC);
+
+-- Panel v9 Aufgabe 3: Kosten-Sichtbarkeit für neue KI-Aufrufe (Analytics-Zusammenfassung) - diese
+-- Tabelle existierte trotz Erwähnung im Auftrag NOCH NICHT im Code (siehe Session-Bericht), hier
+-- als schlanke Grundlage neu angelegt statt eine nicht vorhandene Altlast vorauszusetzen.
+CREATE TABLE IF NOT EXISTS usage_costs (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT REFERENCES customers(id) ON DELETE CASCADE,
+  feature TEXT NOT NULL,
+  estimated_cost_usd REAL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS usage_costs_customer ON usage_costs(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS usage_costs_feature ON usage_costs(feature, created_at DESC);
 `);
 
 // Migration: add columns to a table that existed before this version. SQLite has no
@@ -353,6 +402,38 @@ export interface PostRow {
   image_url: string | null;
   posted_at: string;
   pillar_title: string | null;
+}
+
+export interface AnalyticsAccountSnapshotRow {
+  id: string;
+  customer_id: string;
+  snapshot_date: string;
+  follower_count: number | null;
+  reach: number | null;
+  views: number | null;
+  accounts_engaged: number | null;
+  total_interactions: number | null;
+  created_at: string;
+}
+
+export interface AnalyticsPostSnapshotRow {
+  id: string;
+  post_id: string;
+  customer_id: string;
+  likes: number | null;
+  comments: number | null;
+  saved: number | null;
+  shares: number | null;
+  reach: number | null;
+  fetched_at: string;
+}
+
+export interface UsageCostRow {
+  id: string;
+  customer_id: string | null;
+  feature: string;
+  estimated_cost_usd: number | null;
+  created_at: string;
 }
 
 export interface ContentPillarRow {

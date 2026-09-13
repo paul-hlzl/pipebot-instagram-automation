@@ -15,6 +15,7 @@ import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 import { startDailyPlanningSchedule } from "./panel/planning.js";
 import { startTrialEndingEmailSchedule } from "./panel/trial-emails.js";
+import { startDailyAnalyticsSnapshotSchedule } from "./panel/analytics.js";
 import {
   assertChannelEnabled,
   assertLinkedInHasImage,
@@ -943,6 +944,7 @@ async function main(): Promise<void> {
   startTokenRefreshSchedule();
   startDailyPlanningSchedule();
   startTrialEndingEmailSchedule();
+  startDailyAnalyticsSnapshotSchedule();
   // Bind to loopback only - Nginx (proxy_pass http://127.0.0.1:3000) is the only
   // intended entry point. Express/Node default to 0.0.0.0 (all interfaces) if no
   // host is given, which would expose this port directly to the internet.
