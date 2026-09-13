@@ -313,7 +313,14 @@ export async function generatePlannedPostContent(input: {
     "Hashtag-Stil, statt zu raten. " +
     (input.bannedWords.length ? `Verwende NIEMALS eines dieser Wörter: ${input.bannedWords.join(", ")}. ` : "") +
     (input.requiredElements.length
-      ? `Baue JEDES der folgenden Elemente irgendwo ein (Headline oder Caption): ${input.requiredElements.join(", ")}. `
+      ? isStory
+        // Bugfix: bei Stories ist die Caption laut Vorgabe oben immer leer - "Headline oder
+        // Caption" liess dem Modell hier faelschlich die Wahl und fuehrte dazu, dass Pflicht-
+        // Elemente regelmaessig in der (dann verworfenen) Caption landeten statt in der
+        // tatsaechlich geprueften Headline (siehe checkTextsFor in planning.ts). Jetzt eindeutig
+        // auf die Headline festgelegt, wie bei publish_generated_story tatsaechlich validiert.
+        ? `Baue JEDES der folgenden Elemente in die Headline ein - Instagram Stories haben keine Caption, es gibt keinen anderen Platz dafür: ${input.requiredElements.join(", ")}. `
+        : `Baue JEDES der folgenden Elemente irgendwo ein (Headline oder Caption): ${input.requiredElements.join(", ")}. `
       : "") +
     (input.avoidNote ? `WICHTIG, vorheriger Versuch war ungültig: ${input.avoidNote} - korrigiere das jetzt.` : "");
 
