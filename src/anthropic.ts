@@ -11,6 +11,23 @@ export function anthropicAvailable(): boolean {
 
 interface AnthropicResponse {
   content?: { type: string; text?: string }[];
+  usage?: { input_tokens?: number; output_tokens?: number };
+}
+
+/** Rough cost estimate for usage_costs (Panel v9 Aufgabe 3) - not exact billing, just a visible
+ *  order-of-magnitude figure for the admin overview. Rates as of the session that added this
+ *  (2026-09) for the models this project actually uses; unrecognized model names fall back to
+ *  Haiku 4.5's rate (the configured default, ANTHROPIC_MODEL) rather than guessing high. */
+const MODEL_RATES_PER_MTOK: Record<string, { input: number; output: number }> = {
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  "claude-sonnet-5": { input: 2, output: 10 },
+  "claude-opus-5": { input: 5, output: 25 },
+};
+export function estimateCostUsd(model: string, usage: { input_tokens?: number; output_tokens?: number } | undefined): number | null {
+  if (!usage) return null;
+  const key = Object.keys(MODEL_RATES_PER_MTOK).find((k) => model.startsWith(k)) ?? "claude-haiku-4-5";
+  const rate = MODEL_RATES_PER_MTOK[key];
+  return Math.round((((usage.input_tokens ?? 0) * rate.input + (usage.output_tokens ?? 0) * rate.output) / 1_000_000) * 1e6) / 1e6;
 }
 
 /**
@@ -526,4 +543,101 @@ export async function helpChatReply(input: { messages: HelpChatMessage[]; accoun
     throw new ToolError("Der Hilfe-Chat konnte gerade nicht antworten.");
   }
   return text;
+}
+
+export interface AnalyticsSummaryTopPost {
+  headline: string | null;
+  caption: string | null;
+  likes: number | null;
+  comments: number | null;
+  saved: number | null;
+  reach: number | null;
+}
+
+export interface AnalyticsSummaryInput {
+  company: string;
+  industry: string;
+  followerCount: number | null;
+  followerGrowth7d: number | null;
+  reach7d: number;
+  reachPrev7d: number;
+  views7d: number;
+  engagementRate7d: number | null;
+  reach30d: number;
+  topPosts: AnalyticsSummaryTopPost[];
+}
+
+export interface AnalyticsSummaryResult {
+  text: string;
+  costUsd: number | null;
+}
+
+/**
+ * Panel v9 Aufgabe 3 ("was bedeutet das für mich") - turns the already-computed numbers from
+ * analytics.ts's getAnalyticsSummary() into a short German plain-language assessment. Takes the
+ * numbers as plain input rather than importing panel/analytics.ts's types, to keep this file
+ * (generic Anthropic-call helpers) free of a dependency on panel-specific modules - same
+ * separation as every other function in this file (suggestTopics, generatePlannedPostContent, ...).
+ */
+export async function generateAnalyticsSummary(input: AnalyticsSummaryInput): Promise<AnalyticsSummaryResult> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("Die KI-Zusammenfassung ist gerade nicht verfügbar.");
+  }
+
+  const system =
+    "Du bist ein Social-Media-Analyst und erklärst einem Kleinunternehmer verständlich, was seine Instagram-Zahlen der letzten Woche bedeuten. " +
+    "Schreibe auf Deutsch, kurz (maximal 5-6 Sätze), in einfacher Sprache ohne Fachjargon. Struktur: 1) was in der letzten Woche gut lief " +
+    "(konkret, mit Zahl wenn sinnvoll), 2) falls aus den Daten erkennbar, wieso ein bestimmter Beitrag gut performt hat, 3) genau EINE konkrete, " +
+    "umsetzbare Empfehlung für die kommende Woche. Kein Markdown, keine Aufzählungszeichen, reiner Fließtext. Erfinde keine Zahlen oder Gründe, " +
+    "die nicht aus den gelieferten Daten hervorgehen - ist die Datenlage dünn (wenige Tage, keine Top-Beiträge), sag das ehrlich statt zu spekulieren.";
+
+  const growthLine =
+    input.followerGrowth7d != null ? `${input.followerGrowth7d >= 0 ? "+" : ""}${input.followerGrowth7d}` : "unbekannt";
+  const topPostLines = input.topPosts.length
+    ? input.topPosts
+        .map(
+          (p, i) =>
+            `${i + 1}. "${(p.headline || p.caption || "(ohne Titel)").slice(0, 80)}" - ${p.likes ?? 0} Likes, ${p.comments ?? 0} Kommentare, ` +
+            `${p.saved ?? 0} gespeichert, Reichweite ${p.reach ?? "unbekannt"}`,
+        )
+        .join("\n")
+    : "(keine Beiträge mit Daten in den letzten 30 Tagen)";
+  const user =
+    `Unternehmen: ${input.company} (Branche: ${input.industry || "unbekannt"})\n\n` +
+    `Follower aktuell: ${input.followerCount ?? "unbekannt"} (Veränderung letzte 7 Tage: ${growthLine})\n` +
+    `Reichweite letzte 7 Tage: ${input.reach7d} (Vorwoche: ${input.reachPrev7d})\n` +
+    `Views letzte 7 Tage: ${input.views7d}\n` +
+    `Engagement-Rate letzte 7 Tage: ${input.engagementRate7d != null ? `${input.engagementRate7d}%` : "unbekannt"}\n` +
+    `Reichweite letzte 30 Tage gesamt: ${input.reach30d}\n\n` +
+    `Beste Beiträge der letzten 30 Tage:\n${topPostLines}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        {
+          model: anthropicModel,
+          max_tokens: 400,
+          system,
+          messages: [{ role: "user", content: user }],
+        },
+        {
+          headers: {
+            "x-api-key": anthropicApiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic analytics-summary",
+  );
+
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) {
+    throw new ToolError("Die KI-Zusammenfassung konnte nicht erstellt werden.");
+  }
+  return { text, costUsd: estimateCostUsd(anthropicModel, data.usage) };
 }

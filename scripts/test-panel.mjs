@@ -862,6 +862,22 @@ async function main() {
     ok("/api/analytics mit Login -> 200", res.status === 200, `status=${res.status}`);
     ok("hasData ist false ohne Snapshots", body.hasData === false, JSON.stringify(body));
     ok("topPosts ist ein leeres Array", Array.isArray(body.topPosts) && body.topPosts.length === 0, JSON.stringify(body.topPosts));
+    ok("aiSummary ist null ohne Cache", body.aiSummary === null, JSON.stringify(body.aiSummary));
+  }
+
+  // --- KI-Zusammenfassung (Panel v9 Aufgabe 3) - ohne Snapshots gibt es nichts zu
+  // zusammenzufassen, das muss sauber mit 409 abgelehnt werden statt einen (kostenpflichtigen)
+  // Anthropic-Aufruf mit Fantasiedaten zu machen. Der Erfolgsfall (echter Anthropic-Aufruf) wird
+  // bewusst NICHT hier getestet, sondern manuell/per jsdom mit echten Testdaten (siehe Session-
+  // Bericht) - diese Suite soll keine echten API-Kosten pro Lauf verursachen.
+  console.log("\n/api/analytics-summary:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/analytics-summary`, { method: "POST" });
+    ok("/api/analytics-summary ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/analytics-summary`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("/api/analytics-summary ohne Daten -> 409", res.status === 409, `status=${res.status}`);
   }
 
   // --- 6. /connect ohne Session ---

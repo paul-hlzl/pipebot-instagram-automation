@@ -42,7 +42,7 @@ import {
   updatePlannedPostImage,
   updatePlannedPostText,
 } from "./credentials.js";
-import { getAnalyticsSummary } from "./analytics.js";
+import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache } from "./analytics.js";
 import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
@@ -866,8 +866,46 @@ export function createPanelRouter(): Router {
       res.status(401).json({ error: "Nicht angemeldet" });
       return;
     }
-    res.json(getAnalyticsSummary(c.id));
+    res.json({ ...getAnalyticsSummary(c.id), aiSummary: getSummaryCache(c.id) });
   });
+
+  // Panel v9 Aufgabe 3: "Zusammenfassung anzeigen" - generiert bei Bedarf eine frische
+  // KI-Zusammenfassung (statt immer nur die Wochen-Cache aus dem Hintergrund-Lauf zu zeigen) und
+  // aktualisiert dabei denselben Cache, den auch runWeeklyAnalyticsSummaries() befuellt. Kosten
+  // werden in generateAndCacheSummary() bereits in usage_costs geloggt.
+  router.post(
+    "/api/analytics-summary",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      if (rateLimited(`analytics-summary:${c.id}`, 6, 10 * 60_000)) {
+        res.status(429).json({ error: "Zu viele Anfragen. Bitte in ein paar Minuten erneut versuchen." });
+        return;
+      }
+      if (!c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "Die KI-Zusammenfassung ist gerade nicht verfügbar." });
+        return;
+      }
+      if (!getAnalyticsSummary(c.id).hasData) {
+        res.status(409).json({ error: "Noch keine Analytics-Daten vorhanden." });
+        return;
+      }
+      try {
+        const result = await generateAndCacheSummary(c);
+        res.json(result);
+      } catch (err) {
+        console.error("[panel] analytics-summary fehlgeschlagen:", err);
+        res.status(502).json({ error: "Die Zusammenfassung konnte gerade nicht erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
 
   // 7-Tage-Vorschau (Panel v5, Aufgabe 5) - liest, was planning.ts's taegliche Vorausplanung
   // bereits vorbereitet hat. Nur Lesen, kein KI-/Bild-Aufruf hier.

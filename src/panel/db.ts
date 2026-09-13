@@ -214,6 +214,16 @@ CREATE TABLE IF NOT EXISTS usage_costs (
 );
 CREATE INDEX IF NOT EXISTS usage_costs_customer ON usage_costs(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS usage_costs_feature ON usage_costs(feature, created_at DESC);
+
+-- Panel v9 Aufgabe 3: zwischengespeicherte KI-Zusammenfassung pro Kunde - ein Satz Cache pro
+-- Kunde (nicht historisiert), damit sowohl der "Zusammenfassung anzeigen"-Button als auch der
+-- wöchentliche Hintergrund-Lauf (für den E-Mail-Bericht, Punkt 5) dieselbe aktuelle Zusammenfassung
+-- lesen können, ohne bei jedem Seitenaufruf neu zu generieren (das würde unnötig Kosten erzeugen).
+CREATE TABLE IF NOT EXISTS analytics_summaries (
+  customer_id TEXT PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+  summary TEXT NOT NULL,
+  generated_at TEXT NOT NULL
+);
 `);
 
 // Migration: add columns to a table that existed before this version. SQLite has no
@@ -434,6 +444,12 @@ export interface UsageCostRow {
   feature: string;
   estimated_cost_usd: number | null;
   created_at: string;
+}
+
+export interface AnalyticsSummaryRow {
+  customer_id: string;
+  summary: string;
+  generated_at: string;
 }
 
 export interface ContentPillarRow {

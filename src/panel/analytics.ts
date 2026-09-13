@@ -8,11 +8,12 @@
  * v1 scope: Instagram only (see session report - LinkedIn analytics deliberately out of scope,
  * different API/constraints, can be added later as its own effort).
  */
-import { db, nowIso, type AnalyticsAccountSnapshotRow, type CustomerRow, type PostRow } from "./db.js";
+import { db, nowIso, type AnalyticsAccountSnapshotRow, type AnalyticsSummaryRow, type CustomerRow, type PostRow } from "./db.js";
 import { resolveInstagramCredentials } from "./credentials.js";
 import { fetchAccountInsights, fetchMediaInsights } from "../instagram-insights.js";
 import { viennaDateStr } from "./schedule.js";
 import { randomToken } from "./crypto.js";
+import { generateAnalyticsSummary } from "../anthropic.js";
 
 function toAccountSnapshot(r: AnalyticsAccountSnapshotRow) {
   return {
@@ -208,6 +209,51 @@ export function usageCostSummary(days = 30): { feature: string; count: number; t
     .all(since) as { feature: string; count: number; totalUsd: number }[];
 }
 
+export interface CachedAnalyticsSummary {
+  summary: string;
+  generatedAt: string;
+}
+
+export function getSummaryCache(customerId: string): CachedAnalyticsSummary | null {
+  const row = db.prepare("SELECT * FROM analytics_summaries WHERE customer_id = ?").get(customerId) as AnalyticsSummaryRow | undefined;
+  return row ? { summary: row.summary, generatedAt: row.generated_at } : null;
+}
+
+function saveSummaryCache(customerId: string, summary: string): string {
+  const generatedAt = nowIso();
+  db.prepare(
+    `INSERT INTO analytics_summaries (customer_id, summary, generated_at) VALUES (?, ?, ?)
+     ON CONFLICT(customer_id) DO UPDATE SET summary = excluded.summary, generated_at = excluded.generated_at`,
+  ).run(customerId, summary, generatedAt);
+  return generatedAt;
+}
+
+/**
+ * Generates a fresh AI summary from the customer's current numbers, logs the estimated cost to
+ * usage_costs (feature "analytics-summary", same pattern as every other AI call in this codebase),
+ * and caches it so both the on-demand button and the weekly background run share one place. Throws
+ * ToolError (via generateAnalyticsSummary) if there is no data yet or the Anthropic call fails -
+ * callers should not call this for a customer whose getAnalyticsSummary().hasData is false.
+ */
+export async function generateAndCacheSummary(customer: CustomerRow): Promise<CachedAnalyticsSummary> {
+  const data = getAnalyticsSummary(customer.id);
+  const { text, costUsd } = await generateAnalyticsSummary({
+    company: customer.company,
+    industry: customer.industry ?? "",
+    followerCount: data.current.followerCount,
+    followerGrowth7d: data.current.followerGrowth,
+    reach7d: data.current.reach,
+    reachPrev7d: data.previous.reach,
+    views7d: data.current.views,
+    engagementRate7d: data.current.engagementRate,
+    reach30d: data.reach30d,
+    topPosts: data.topPosts.map((p) => ({ headline: p.headline, caption: p.caption, likes: p.likes, comments: p.comments, saved: p.saved, reach: p.reach })),
+  });
+  logUsageCost(customer.id, "analytics-summary", costUsd);
+  const generatedAt = saveSummaryCache(customer.id, text);
+  return { summary: text, generatedAt };
+}
+
 interface SnapshotRunSummary {
   startedAt: string;
   finishedAt: string;
@@ -292,4 +338,66 @@ export function startDailyAnalyticsSnapshotSchedule(hourUtc = 4): NodeJS.Timeout
     run();
     setInterval(run, 24 * 3_600_000);
   }, msUntilNextUtcHour(hourUtc));
+}
+
+interface WeeklySummaryRunResult {
+  startedAt: string;
+  finishedAt: string;
+  customersChecked: number;
+  summariesGenerated: number;
+  errors: number;
+}
+
+/**
+ * Once a week: pre-generate the AI summary for every active customer who has analytics data, so
+ * it is ready both for the on-demand "Zusammenfassung anzeigen" button (serves the cache instead
+ * of making the customer wait for a fresh Anthropic call) and for the weekly e-mail report (Panel
+ * v9 Aufgabe 5, weekly-report.mjs) without that script needing to call Anthropic itself. Same
+ * K9-style isolation as runDailyAnalyticsSnapshot - one customer's failure never blocks the rest.
+ */
+export async function runWeeklyAnalyticsSummaries(): Promise<WeeklySummaryRunResult> {
+  const startedAt = nowIso();
+  let customersChecked = 0;
+  let summariesGenerated = 0;
+  let errors = 0;
+
+  const customers = db.prepare("SELECT * FROM customers WHERE status = 'active' AND customer_paused = 0").all() as CustomerRow[];
+  for (const customer of customers) {
+    const hasConnection = db.prepare("SELECT 1 FROM connections WHERE customer_id = ? AND provider = 'instagram'").get(customer.id);
+    if (!hasConnection) continue;
+    customersChecked++;
+    try {
+      if (!getAnalyticsSummary(customer.id).hasData) continue;
+      await generateAndCacheSummary(customer);
+      summariesGenerated++;
+    } catch (err) {
+      errors++;
+      console.error(`[analytics] Wöchentliche Zusammenfassung fehlgeschlagen für Kunde ${customer.id}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return { startedAt, finishedAt: nowIso(), customersChecked, summariesGenerated, errors };
+}
+
+function msUntilNextWeeklySlot(weekdayUtc: number, hourUtc: number): number {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hourUtc, 0, 0, 0));
+  let dayDiff = (weekdayUtc - next.getUTCDay() + 7) % 7;
+  if (dayDiff === 0 && next.getTime() <= now.getTime()) dayDiff = 7;
+  next.setUTCDate(next.getUTCDate() + dayDiff);
+  return next.getTime() - now.getTime();
+}
+
+/** Fixed weekly slot, default Monday 05:00 UTC - after the daily analytics snapshot has run at
+ *  04:00, so the week-over-week numbers it summarizes are already up to date. Same fixed-wall-clock
+ *  anchoring as the daily schedules, so a restart at any time never permanently shifts the day. */
+export function startWeeklyAnalyticsSummarySchedule(weekdayUtc = 1, hourUtc = 5): NodeJS.Timeout {
+  const run = () =>
+    runWeeklyAnalyticsSummaries()
+      .then((summary) => console.log("[panel] Wöchentliche Analytics-Zusammenfassungen:", summary))
+      .catch((err) => console.error("[panel] Wöchentliche Analytics-Zusammenfassungen unerwartet fehlgeschlagen:", err));
+  return setTimeout(() => {
+    run();
+    setInterval(run, 7 * 24 * 3_600_000);
+  }, msUntilNextWeeklySlot(weekdayUtc, hourUtc));
 }

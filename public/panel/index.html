@@ -1552,7 +1552,15 @@
       <h2>Reichweite-Verlauf</h2>
       ${anChartSvg(d.trend, "reach", "Reichweite")}
       <h2>Top-Beiträge (30 Tage)</h2>
-      ${d.topPosts.length ? `<div class="an-top-posts">${d.topPosts.map(anTopPostHtml).join("")}</div>` : `<p class="empty">Noch keine Beiträge mit genug Daten.</p>`}`;
+      ${d.topPosts.length ? `<div class="an-top-posts">${d.topPosts.map(anTopPostHtml).join("")}</div>` : `<p class="empty">Noch keine Beiträge mit genug Daten.</p>`}
+      <h2>Was bedeutet das für mich?</h2>
+      <div id="analytics-summary-box">${analyticsSummaryBoxHtml(d.aiSummary)}</div>
+      <p class="hint"><button type="button" class="link" id="analytics-summary-btn">Zusammenfassung anzeigen</button></p>`;
+  }
+
+  function analyticsSummaryBoxHtml(aiSummary) {
+    if (!aiSummary) return `<p class="empty">Noch keine Zusammenfassung erstellt.</p>`;
+    return `<p>${esc(aiSummary.summary)}</p><p class="hint">Stand: ${esc(fmtCreated(aiSummary.generatedAt))}</p>`;
   }
 
   async function loadAnalytics() {
@@ -1919,6 +1927,24 @@
     }
   }
 
+  async function analyticsSummaryUi() {
+    const btn = $("#analytics-summary-btn");
+    const box = $("#analytics-summary-box");
+    if (!btn || !box) return;
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = "Wird erstellt …";
+    try {
+      const result = await api("POST", "/api/analytics-summary", {});
+      box.innerHTML = analyticsSummaryBoxHtml(result);
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--stop)">${esc(err.message || "Die Zusammenfassung konnte gerade nicht erstellt werden.")}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+    }
+  }
+
   /* ================= Eigener Bestaetigungs-/Hinweis-Dialog ================= */
   /* Ersetzt window.confirm()/window.alert() ueberall im Panel durch ein Overlay im
      bestehenden Design (statt haesslichem, browserabhaengigem nativen Popup). Fokus wird beim
@@ -2136,6 +2162,7 @@
     if (e.target.closest("#ai-improve")) return improveBriefing();
     if (e.target.closest("#analyze-website")) return analyzeWebsiteSuggestion();
     if (e.target.closest("#suggest-topics")) return suggestTopicsUi();
+    if (e.target.closest("#analytics-summary-btn")) return analyticsSummaryUi();
     const topicChip = e.target.closest("[data-topic-chip]");
     if (topicChip) {
       const input = $("#f-postNowTopic");
