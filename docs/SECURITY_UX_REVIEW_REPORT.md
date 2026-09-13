@@ -184,4 +184,74 @@ Beide Fixes: `public/panel/index.html`, in der Sandbox geladen und auf Ladefehle
 
 ## Aufgabe 4: Deploy + Zusammenfassung
 
-*(am Ende der Sitzung)*
+### Ablauf dieser Sitzung
+1. Tag `pre-captcha-security-review` gesetzt, Branch `captcha-security-ux-review-2026-09-13`
+   angelegt (von `main`, Stand `7ffb068`).
+2. Alle vier Aufgaben nacheinander bearbeitet, JEDE Änderung zuerst in der Sandbox
+   (`instagram-mcp-staging`) gebaut und getestet (Details siehe oben je Aufgabe), dann in
+   getrennten, nachvollziehbaren Commits auf dem Branch festgehalten.
+3. `npm run test:panel` mehrfach zwischendurch und ein letztes Mal ganz am Ende laufen lassen:
+   **122 von 122 Tests bestehen** (113 bestehende + 9 in dieser Sitzung neu ergänzte
+   Regressionstests für Zugriffskontrolle, Security-Header und das Logo-Rate-Limit).
+4. Branch per Fast-Forward in `main` gemergt (kein Konflikt, `main` hatte sich währenddessen
+   nicht bewegt).
+5. Produktion (`instagram-mcp`) neu gestartet um **10:17 UTC**, außerhalb des `:43`-
+   Routine-Fensters. Health-Check danach: 200 OK, alle Security-Header vorhanden.
+6. Direkt nach dem Neustart ein reales Signal aus der laufenden Routine im Log gesehen: ein
+   Aufruf von `publish_linkedin_post` MIT `customer_id` wurde vom neuen harten Schutz (aus der
+   letzten Sitzung, LinkedIn-Bild-Pflicht) korrekt abgelehnt - der Fix greift also nachweislich
+   auch unter echter Last, nicht nur im Test.
+
+### 1. CAPTCHA-Stand
+Vollständig fertig getestet (Sandbox, Cloudflare-Test-Keys, alle vier Fälle aus 1a + Fallback
+aus 1b). Zwei echte Bugs dabei gefunden und behoben (Widget-Soft-Lock nach Fehlversuch,
+fehlender Ladefehler-Fallback). Anleitung für Paul fertig: `docs/TURNSTILE_SETUP.md`. Es fehlen
+nur noch die ECHTEN Cloudflare-Keys (siehe Punkt 4 unten).
+
+### 2. Sicherheits-Review
+Alle 11 angefragten Punkte geprüft (Tabelle oben). Zwei echte Lücken gefunden und behoben
+(HSTS-Header, Logo-Upload-Rate-Limit). Alles andere bestätigt in Ordnung, teils mit
+lebendigen Zwei-Kunden-Tests in der Sandbox gegengeprüft, nicht nur Code gelesen. Ein
+theoretischer, praktisch irrelevanter Timing-Rest bei der E-Mail-Wiederherstellung bewusst
+nicht behoben (dokumentiert, Aufwand/Nutzen).
+
+### 3. Nutzerfreundlichkeits-Review
+Zwei einfache Fixes direkt umgesetzt (fehlende Ladeanzeigen bei drei Buttons,
+`.link[disabled]`-Optik). Alles andere geprüft und in Ordnung befunden (Fehlermeldungen,
+bestehende Ladezustände, leere Zustände, Begriffs-Konsistenz, Formular-Validierung,
+rechnerischer Kontrast). Zwei größere Punkte nur vorgemerkt: leere Zustände sehen optisch
+identisch zu echten Ladefehlern aus (keine Retry-Buttons), und es gab keine Möglichkeit für
+eine echte visuelle/Screenreader-Prüfung ohne Browser in dieser Sitzung.
+
+### 4. Was Paul jetzt noch manuell tun muss
+- **Echte Cloudflare-Turnstile-Keys anlegen** und in die Produktions-`.env` eintragen, dann
+  `pm2 restart instagram-mcp` - Schritt für Schritt in `docs/TURNSTILE_SETUP.md`. Bis dahin ist
+  Signup weiterhin ungeschützt gegen automatisierte Bot-Anmeldungen (siehe Risiko unten).
+- **Entscheiden, ob die vorbereitete Routine-Prompt-Textänderung** (K3a + LinkedIn-Bild-Hinweis
+  in `docs/ROUTINE_TEIL1.md`, aus der VORHERIGEN Sitzung, noch nicht live gepusht - siehe
+  Chat-Bericht von damals) jetzt per `RemoteTrigger` in die laufende Cloud-Routine eingespielt
+  werden soll. Server-seitig ist der eigentliche Schutz bereits unabhängig davon aktiv (siehe
+  das reale Log-Beispiel oben), die Prompt-Änderung ist reine Zusatzabsicherung.
+- Optional, kein Zeitdruck: die in Aufgabe 3 vorgemerkten größeren UX-Punkte (Retry-Buttons für
+  echte Ladefehler, eine echte visuelle Durchsicht am Bildschirm) bei Gelegenheit einplanen.
+
+### Bekannte Risiken (aktueller Ist-Zustand, keine Sofortmaßnahme nötig)
+- **Signup ohne echtes CAPTCHA**, bis Paul die Cloudflare-Keys einträgt (s. o.) - das Formular
+  selbst ist robust (Rate-Limits, Validierung), aber ohne Turnstile bleibt automatisiertes
+  Massen-Signup grundsätzlich möglich.
+- **Theoretischer Timing-Seitenkanal** bei `/api/recover-access` (Millisekundenbereich, siehe
+  Sicherheits-Review Punkt 11) - bewusst nicht behoben, minimal praktisches Risiko.
+- **Keine echte visuelle/Screenreader-Prüfung** dieser Sitzung möglich (kein Browser) - die
+  rechnerische Kontrastprüfung und der Code-Review sind ein guter Anhaltspunkt, ersetzen aber
+  keinen echten Blick auf den gerenderten Bildschirm.
+- Produktions-`.env` einmalig eingesehen (Admin-Passwort für `test:panel`'s Admin-Login-Test) -
+  dabei versehentlich Klartext-Secrets im eigenen Bash-Tool-Output dieser Sitzung gelandet
+  (kein externer Versand, nur die eigene Sitzungs-Historie) - siehe Hinweis direkt unten.
+
+### Hinweis in eigener Sache
+Bei einem `pm2 env`-Befehl während der Turnstile-Einrichtung ist eine eigene Redaktions-Maske
+fehlgeschlagen (falsches Trennzeichen-Muster) und PANEL_ENCRYPTION_KEY/PANEL_ADMIN_PASSWORD/
+MCP_AUTH_TOKEN sind einmal im Klartext in der Tool-Ausgabe dieser Sitzung gelandet - nicht an
+einen Dritten geschickt, nur in der eigenen Sitzungs-Historie sichtbar. Secrets selbst wurden
+nicht verändert (Regel 5 eingehalten), nur einmal versehentlich angezeigt. Der Vollständigkeit
+halber hier vermerkt statt stillschweigend übergangen.
