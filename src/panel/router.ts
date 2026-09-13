@@ -127,6 +127,21 @@ function rateLimited(key: string, max: number, windowMs: number): boolean {
   return list.length > max;
 }
 
+/**
+ * One-line analytics summary for the help-chat's accountContext (Panel v9 Aufgabe 4) - only ever
+ * called with the currently logged-in customer's own id (see the /api/help-chat handler), never
+ * reachable with another customer's id from client input.
+ */
+function analyticsContextLine(customerId: string): string {
+  const a = getAnalyticsSummary(customerId);
+  if (!a.hasData) return "noch keine Daten (der tägliche Abgleich mit Instagram läuft im Hintergrund, in ein paar Tagen verfügbar)";
+  const growth = a.current.followerGrowth != null ? `${a.current.followerGrowth >= 0 ? "+" : ""}${a.current.followerGrowth}` : "unbekannt";
+  return (
+    `Follower ${a.current.followerCount ?? "unbekannt"} (letzte 7 Tage ${growth}), Reichweite letzte 7 Tage ${a.current.reach} ` +
+    `(Vorwoche ${a.previous.reach}), Views letzte 7 Tage ${a.current.views}, Engagement-Rate ${a.current.engagementRate != null ? `${a.current.engagementRate}%` : "unbekannt"}`
+  );
+}
+
 const clientIp = (req: Request): string =>
   (String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || req.socket.remoteAddress || "unknown").trim();
 
@@ -630,7 +645,8 @@ export function createPanelRouter(): Router {
           `- E-Mail bestätigt: ${c.email_verified ? "ja" : "nein"}\n` +
           `- Freigabe-Modus: ${c.approval_mode ? "an" : "aus"}\n` +
           `- Kanäle: ${channelLines.join(", ")}\n` +
-          `- Wartende Freigaben: ${approvalsWaiting}`;
+          `- Wartende Freigaben: ${approvalsWaiting}\n` +
+          `- Analytics: ${analyticsContextLine(c.id)}`;
       }
 
       try {
