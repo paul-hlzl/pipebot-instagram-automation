@@ -590,7 +590,7 @@
     if (!res.ok) throw Object.assign(new Error(data.error || "Unbekannter Fehler"), { status: res.status, fields: data.fields });
     return data;
   }
-  const applyState = (d) => { S.customer = d.customer; S.connections = d.connections || []; };
+  const applyState = (d) => { S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer?.skippedProviders || []); };
 
   /* ================= Rendering: Pipeline ================= */
   function renderRail() {
@@ -1519,7 +1519,7 @@
 
   function firstOpenStep() {
     if (!S.customer) return "company";
-    const open = S.providers.find((p) => !conn(p.id) || conn(p.id).status !== "ok");
+    const open = S.providers.find((p) => !S.skipped.has(p.id) && (!conn(p.id) || conn(p.id).status !== "ok"));
     return open ? open.id : "done";
   }
 
@@ -2222,7 +2222,12 @@
       if (DEMO) { e.preventDefault(); return demoConnect(t.dataset.connect); }
       t.classList.add("busy"); return; // echter Link zur Plattform
     }
-    if (t.dataset.skip) S.skipped.add(t.dataset.skip);
+    if (t.dataset.skip) {
+      S.skipped.add(t.dataset.skip);
+      // Serverseitig persistieren, damit ein Reload/Tab-Wechsel vor dem naechsten Schritt nicht
+      // wieder hierher zurueckspringt (firstOpenStep()) - nie blockierend fuer die Navigation.
+      if (!DEMO) api("POST", `/api/skip-provider/${t.dataset.skip}`).catch(() => {});
+    }
     if (t.dataset.go) return go(t.dataset.go);
 
     if (t.dataset.disconnect) {

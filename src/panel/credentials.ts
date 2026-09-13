@@ -20,7 +20,7 @@ import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
-import { isDue, isDueForChannel, nextPostAt, type ScheduleInput } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, viennaDateStr, type ScheduleInput } from "./schedule.js";
 import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
 import type { LinkedInCredentials } from "../linkedin.js";
 import type { ImageBranding } from "../fal.js";
@@ -579,6 +579,27 @@ export function assertRequiredElements(customerId: string | undefined, ...texts:
   }
 }
 
+/**
+ * Bugreport 2026-09-13: LinkedIn-Entwürfe kamen inkonsistent an - manche mit generiertem Bild,
+ * manche als reiner Text-Platzhalter, je nachdem ob der spontane K4-K8-Pfad an ein Bild dachte
+ * oder nicht. Entscheidung: LinkedIn bekommt IMMER ein Bild, dieselbe Konvention, die die
+ * Vorausplanung (planning.ts) bereits für jeden Kanal verwendet - siehe CHANNEL_IMAGE_FORMAT
+ * oben ("linkedin" -> "feed", exakt wie ig_feed). Hart durchgesetzt statt nur im Routine-Prompt
+ * zu stehen, damit ein vom Modell übersehener Fall nicht wieder zu einem bildlosen Entwurf
+ * führt. Call this from every LinkedIn-bound save/publish path (save_pending_approval,
+ * submitPlannedPostForApproval, publish_linkedin_post) before the actual save/network call.
+ */
+export function assertLinkedInHasImage(channel: string, imageUrl: string | null | undefined): void {
+  if (channel !== "linkedin") return;
+  if (!imageUrl || !imageUrl.trim()) {
+    throw new Error(
+      "LinkedIn-Beiträge brauchen immer ein Bild (dieselbe Bildgenerierung wie für den Instagram-Feed - " +
+        "CHANNEL_IMAGE_FORMAT.linkedin ist \"feed\"). Zuerst generate_post_image aufrufen und dessen imageUrl " +
+        "mitgeben (bzw. publish_linkedin_image_post statt publish_linkedin_post verwenden), dann erneut versuchen.",
+    );
+  }
+}
+
 export interface PostRequest {
   id: string;
   customerId: string;
@@ -682,10 +703,38 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
 }
 
 /**
+ * Hard, server-side duplicate guard (bug: 8 pending_approvals rows for one approvalMode customer
+ * on one day - see report 2026-09-13). True if this customer/channel already has a row that still
+ * counts as "in the queue" for the given Vienna calendar date - 'pending' (awaiting the customer's
+ * review) or 'approved' (reviewed, waiting to be published). A 'rejected' or already-'published'
+ * row never blocks a fresh attempt - only an open, undecided slot does. Deliberately keyed on
+ * `channel` (ig_feed/ig_story/linkedin), not the coarser `provider` - a customer can legitimately
+ * get one ig_feed AND one ig_story entry the same day, that's two different channels.
+ */
+export function hasPendingOrApprovedToday(customerId: string, channel: string, dateStr: string = viennaDateStr()): boolean {
+  const rows = db
+    .prepare(
+      `SELECT created_at FROM pending_approvals
+       WHERE customer_id = ? AND channel = ? AND status IN ('pending', 'approved')
+       ORDER BY created_at DESC LIMIT 10`,
+    )
+    .all(customerId, channel) as { created_at: string }[];
+  return rows.some((r) => viennaDateStr(new Date(r.created_at)) === dateStr);
+}
+
+/**
  * Used by `save_pending_approval` (the MCP tool) when a customer has `approval_mode` on -
  * files a generated post away for the customer to review in their panel instead of
  * publishing it. Whether to call this instead of a publish tool is the routine's own decision
  * (based on `approvalMode` from list_customers) - nothing here intercepts the publish tools.
+ *
+ * Returns null instead of inserting when `hasPendingOrApprovedToday` already holds for this
+ * customer/channel - a hard guard against the K3b/K4-K8 duplicate-draft bug, enforced here (the
+ * one place both callers - the `save_pending_approval` tool AND `submitPlannedPostForApproval`,
+ * which also calls this function - go through) rather than relying on the routine prompt text to
+ * remember to check first. Deliberately unconditional: it doesn't matter whether the existing
+ * entry came from spontaneous generation or from the nightly pre-planning - either way the
+ * slot is already covered, so a second one is never created.
  */
 export function savePendingApproval(input: {
   customerId: string;
@@ -698,7 +747,8 @@ export function savePendingApproval(input: {
   /** Panel v7: defaults to 'routine' (the MCP tool wrapper never passes this - every call through
    *  it IS a spontaneous generation). submitPlannedPostForApproval passes 'planning' explicitly. */
   source?: string;
-}): PendingApproval {
+}): PendingApproval | null {
+  if (hasPendingOrApprovedToday(input.customerId, input.channel)) return null;
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
@@ -909,6 +959,7 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
   const checkTexts = plan.channel === "ig_story" ? [plan.headline ?? undefined] : [plan.headline ?? undefined, plan.caption ?? undefined];
   assertNoBannedWords(plan.customerId, ...checkTexts);
   assertRequiredElements(plan.customerId, ...checkTexts);
+  assertLinkedInHasImage(plan.channel, plan.imageUrl);
 
   const provider = plan.channel === "linkedin" ? "linkedin" : "instagram";
   const approval = savePendingApproval({
@@ -921,6 +972,10 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
     pillarTitle: plan.pillarTitle ?? undefined,
     source: "planning",
   });
+  // Mark 'submitted' even when savePendingApproval returned null (hasPendingOrApprovedToday
+  // already found another open entry for this customer/channel/day, e.g. filed earlier the same
+  // day via the K4-K8 spontaneous path) - the slot is covered either way, and leaving this
+  // planned_post at 'planned' would make K3b retry it every single run, forever.
   markPlannedPostStatus(plan.id, "submitted");
   return approval;
 }

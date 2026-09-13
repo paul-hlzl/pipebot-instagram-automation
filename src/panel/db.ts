@@ -254,6 +254,11 @@ migrateColumns("customers", [
   // most once per calendar day per customer, regardless of how many pending_approvals rows
   // appear in that window.
   ["approval_email_sent_at", "TEXT"],
+  // Sandbox-Bugcheck (2026-09-13): "Später verbinden" war bisher rein clientseitig (nur im
+  // Speicher) - ein Reload/Tab-Wechsel zwischen den Connect-Schritten sprang deshalb wieder
+  // zurueck zum ersten noch offenen Provider (firstOpenStep() kannte den Skip nicht). Comma-
+  // getrennte Provider-IDs, NULL/leer = nichts uebersprungen.
+  ["skipped_providers", "TEXT"],
 ]);
 
 // Panel v6 task 2b: existing customers signed up before e-mail confirmation existed - treat them
@@ -310,6 +315,7 @@ export interface CustomerRow {
   first_post_email_sent_at: string | null;
   trial_ending_email_sent_at: string | null;
   approval_email_sent_at: string | null;
+  skipped_providers: string | null;
   login_key_hash: string;
   status: string;
   consent_at: string;

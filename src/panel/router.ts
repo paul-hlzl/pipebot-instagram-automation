@@ -247,6 +247,7 @@ function publicState(c: CustomerRow) {
       savedThemes: listSavedThemes(c.id),
       activeThemeId: c.active_theme_id,
       hasLogo: Boolean(c.logo_url),
+      skippedProviders: (c.skipped_providers ?? "").split(",").filter(Boolean),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -984,6 +985,30 @@ export function createPanelRouter(): Router {
     }
     db.prepare("DELETE FROM connections WHERE customer_id = ? AND provider = ?").run(c.id, String(req.params.provider));
     res.json(publicState(c));
+  });
+
+  // Bugcheck-Fix (2026-09-13): "Später verbinden" persistieren, unabhaengig davon ob der
+  // Provider gerade verfuegbar/konfiguriert ist - das ist rein additiv (nie blockierend) und
+  // laeuft komplett unabhaengig von isConfigured()/available, siehe /connect/:provider unten,
+  // das genau umgekehrt genau DAS prueft. Ohne diese Persistenz sprang ein Reload zwischen zwei
+  // Connect-Schritten wieder zum ersten noch offenen Provider zurueck (firstOpenStep() kannte
+  // den client-seitigen Skip nicht).
+  router.post("/api/skip-provider/:provider", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const provider = getProvider(String(req.params.provider));
+    if (!provider) {
+      res.status(404).json({ error: "Unbekannter Anbieter" });
+      return;
+    }
+    const skipped = new Set((c.skipped_providers ?? "").split(",").filter(Boolean));
+    skipped.add(provider.id);
+    db.prepare("UPDATE customers SET skipped_providers = ?, updated_at = ? WHERE id = ?")
+      .run([...skipped].join(","), nowIso(), c.id);
+    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
   });
 
   // Kunde pausiert/setzt sein eigenes Posting fort - anders als die Admin-Sperre (status)

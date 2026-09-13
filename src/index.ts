@@ -17,6 +17,7 @@ import { startDailyPlanningSchedule } from "./panel/planning.js";
 import { startTrialEndingEmailSchedule } from "./panel/trial-emails.js";
 import {
   assertChannelEnabled,
+  assertLinkedInHasImage,
   assertNoBannedWords,
   assertRequiredElements,
   getCustomerOverview,
@@ -490,6 +491,17 @@ function createServer(): McpServer {
     },
     async ({ text, customer_id, pillar_title }) => {
       try {
+        if (customer_id) {
+          // Bugreport 2026-09-13: panel customers got an inconsistent mix of image and plain-text
+          // LinkedIn posts. Decision: panel customers always get an image (see
+          // assertLinkedInHasImage) - this plain-text tool stays available ONLY for the operator's
+          // own account (no customer_id), which deliberately posts text-only some days per
+          // linkedin-styleguide.md. Panel customers must use publish_linkedin_image_post instead.
+          throw new Error(
+            "Für Panel-Kunden (customer_id gesetzt) immer publish_linkedin_image_post verwenden, nie " +
+              "publish_linkedin_post - LinkedIn-Beiträge brauchen für Kunden immer ein Bild.",
+          );
+        }
         assertChannelEnabled(customer_id, "linkedin");
         assertNoBannedWords(customer_id, text);
         assertRequiredElements(customer_id, text);
@@ -699,6 +711,7 @@ function createServer(): McpServer {
         const checkTexts = channel === "ig_story" ? [headline] : [headline, caption];
         assertNoBannedWords(customer_id, ...checkTexts);
         assertRequiredElements(customer_id, ...checkTexts);
+        assertLinkedInHasImage(channel, image_url);
         const provider = channel === "linkedin" ? "linkedin" : "instagram";
         const approval = savePendingApproval({
           customerId: customer_id,
@@ -709,6 +722,13 @@ function createServer(): McpServer {
           imageUrl: image_url,
           pillarTitle: pillar_title,
         });
+        if (!approval) {
+          return errorResult(new Error(
+            `Für ${customer_id}/${channel} liegt heute bereits ein Entwurf in der Warteschlange (pending oder ` +
+            "approved) - kein weiterer wird erstellt. Nicht erneut versuchen; einfach mit dem nächsten fälligen " +
+            "Kunden/Kanal weitermachen, wie bei jedem anderen K9-Skip.",
+          ));
+        }
         return textResult(approval);
       } catch (error) {
         console.error("save_pending_approval:", toToolMessage(error));

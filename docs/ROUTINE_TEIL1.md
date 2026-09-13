@@ -12,6 +12,18 @@ Beiträge aus `planned_posts`, siehe `docs/PANEL_V5_REPORT.md` und `docs/ROUTINE
 Direkt per `RemoteTrigger`/API in die live laufende Routine eingespielt, nicht nur hier
 dokumentiert - dieser Datei-Inhalt entspricht dem tatsächlichen Live-Stand der Routine.
 
+**Update 2026-09-13 (Bugfix, mehrfache Entwürfe + LinkedIn-Bild-Inkonsistenz):** Ein Kunde hatte
+8 Einträge im Freigabe-Bereich statt max. 3 (einer pro Kanal) - jeder Routine-Lauf (stündlich +
+Sofort-Trigger + manuelle Tests) hatte spontan einen weiteren Entwurf generiert, ohne zu prüfen,
+ob für diesen Kunden/Kanal/Tag schon einer offen war. Server-seitig jetzt hart erzwungen (nicht
+nur hier im Prompt): `save_pending_approval` und `submit_planned_post_for_approval` lehnen einen
+zweiten Eintrag für dasselbe customer_id/channel/heutiges-Datum automatisch ab, unabhängig davon
+ob der erste aus Vorausplanung oder spontaner Generierung stammt - siehe K3/K8 unten. Zusätzlich:
+LinkedIn-Entwürfe kamen inkonsistent an (manche mit Bild, manche als reiner Text-Platzhalter) -
+Entscheidung: LinkedIn bekommt IMMER ein Bild, dieselbe Bildgenerierung wie der Instagram-Feed
+(auch das jetzt server-seitig erzwungen, siehe K8). Beides direkt per `RemoteTrigger`/API in die
+live laufende Routine eingespielt.
+
 **Update Panel v7 (2026-09-12, Bugfix):** K3b's approvalMode-true-Zweig korrigiert - verwarf
 bisher einen bereits vorbereiteten Beitrag und generierte spontan einen komplett anderen (echtes
 Kundenfeedback, siehe `docs/ROUTINE_TEIL1_V7.md` und `docs/PANEL_V7_REPORT.md`). Nutzt jetzt das
@@ -76,6 +88,15 @@ K3. Call list_customers. This returns every panel customer with their current se
     if you checked it again - if you only did the feed and planned to "come back" for the story
     later, it would never happen today. So: if both are enabled, always do both now, not one now
     and one "later".
+
+K3a. Before generating anything new for a due customer/channel (K4-K8), remember that the server
+     now hard-enforces "at most one open draft per customer/channel/day" - `save_pending_approval`
+     and `submit_planned_post_for_approval` both refuse a second one automatically (see their
+     error message if it happens: "liegt heute bereits ein Entwurf..." / already-submitted). This
+     is a safety net, not a license to skip thinking about it - if you already handled this
+     customer/channel earlier in the SAME run (or know from list_approved_pending_posts/K1 that
+     it's already in the queue), don't bother calling generate_post_image/generate_story_image
+     again just to have it rejected at the end; skip straight to the next due customer/channel.
 
 K3b. Before proceeding to K4 for this due customer/channel, call get_planned_post with this
      customer_id, this channel (ig_feed/ig_story/linkedin), and today's date (YYYY-MM-DD).
@@ -151,6 +172,16 @@ K8. Decide how to fulfil this customer's due post, checking approvalMode (from l
       approves it themselves in their panel; a LATER run's K1 step is what actually publishes
       it once approved. Do not treat this as a failure or retry it - filing it for approval IS
       the successful outcome for an approvalMode customer.
+
+    LinkedIn ALWAYS gets an image too - same convention as the pre-planning (CHANNEL_IMAGE_FORMAT
+    treats linkedin the same as ig_feed): call generate_post_image for it exactly like for
+    Instagram (if this same run already generated one for this customer's ig_feed post today,
+    reuse that exact image_url for LinkedIn instead of generating a second one - saves a
+    generation call for the same slot). Then always publish_linkedin_image_post (never
+    publish_linkedin_post - that tool now hard-refuses any call that has a customer_id) or always
+    pass image_url on save_pending_approval for channel "linkedin". The server rejects a LinkedIn
+    save/publish for a customer with no image, so this is enforced either way - but don't rely on
+    that and generate the image up front like for every other channel.
 
 K9. If anything fails for one customer (generation error, publish error, network issue,
     anything): skip that customer and continue with the next one. A single customer's problem
