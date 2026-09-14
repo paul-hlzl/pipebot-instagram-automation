@@ -6,6 +6,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { getConfig } from "./config.js";
 import { linkedinOAuthRouter } from "./linkedin-oauth-route.js";
 import { createPanelRouter } from "./panel/router.js";
+import { createInstagramWebhookRouter } from "./panel/webhooks.js";
 
 function isValidToken(provided: string, expected: string): boolean {
   const providedBuf = Buffer.from(provided);
@@ -50,6 +51,11 @@ export function createHttpApp(createMcpServer: () => McpServer): express.Express
   // own express.json() (50kb limit), so it must be mounted before the global
   // express.json() below, or that would already consume the request body.
   app.use("/panel", createPanelRouter());
+
+  // Meta-Webhooks (Panel v11): oeffentlich, unauthentifiziert (Absicherung ueber HMAC-Signatur
+  // im Router selbst), braucht den RAW Body fuer die Signaturpruefung - muss darum vor dem
+  // globalen express.json() unten gemountet sein, sonst waere der Body schon konsumiert/geparst.
+  app.use("/webhooks", createInstagramWebhookRouter());
 
   app.use(express.json({ limit: "10mb" }));
 

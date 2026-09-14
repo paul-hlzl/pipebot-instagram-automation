@@ -51,6 +51,7 @@ import { sendMailBestEffort } from "./mailer.js";
 import { accessRecoveryEmail, verificationEmail } from "./emails.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, helpChatReply, improveBriefing, suggestPillarsWithSearch, suggestTopics, type HelpChatMessage } from "../anthropic.js";
+import { subscribeToCommentWebhook } from "../instagram-comments.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 
@@ -1404,6 +1405,17 @@ export function createPanelRouter(): Router {
         now,
       });
       console.log(`[panel] ${stored.customer_id} hat ${provider.name} verbunden (${result.accountName})`);
+      if (pid === "instagram") {
+        // Panel v11: Webhook-Abo fuer sofortige Kommentar-Antworten - best-effort, darf den
+        // Connect-Flow nie blockieren (der Cron-Fallback deckt den Kunden trotzdem ab, siehe
+        // comments.ts Dateikopf).
+        subscribeToCommentWebhook(result.accountId, { accessToken: result.accessToken, igUserId: result.accountId }).catch((err) =>
+          console.error(
+            `[panel] ${stored.customer_id}: Webhook-Abo (comments) fehlgeschlagen - faellt bis zum naechsten Cron-Lauf zurueck:`,
+            err instanceof Error ? err.message : err,
+          ),
+        );
+      }
       backTo(res, { connected: pid });
     } catch (err) {
       console.error(`[panel] OAuth ${pid} fehlgeschlagen:`, err);

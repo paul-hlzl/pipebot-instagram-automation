@@ -15,7 +15,8 @@
     "pretest:panel": "pm2 restart instagram-mcp-staging > /dev/null",
     "test:panel": "node scripts/test-panel.mjs",
     "test:watermark": "node scripts/test-watermark.mjs",
-    "backup:db": "node scripts/backup-db.mjs"
+    "backup:db": "node scripts/backup-db.mjs",
+    "subscribe:webhooks": "node scripts/subscribe-webhooks.mjs"
   },
   "keywords": [
     "mcp",

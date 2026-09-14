@@ -1,19 +1,29 @@
 /**
- * KI-Kommentar-Automatisierung (Panel v10, Instagram v1 - siehe Session-Bericht). Eigenständiger
- * Cron alle COMMENT_CRON_INTERVAL_MINUTES Minuten (bewusst NICHT Teil der stündlichen
- * Posting-Routine oder der taeglichen Analytics-/Planungs-Crons) - holt für jeden Kunden mit
- * aktivierter Automatisierung die Kommentare der letzten COMMENT_LOOKBACK_DAYS Tage veröffentlichter
- * Beiträge, klassifiziert jeden neuen obersten Kommentar per KI und beantwortet ihn (automatisch
- * oder erst nach Freigabe, je nach comment_automation_mode). Ein Fehler bei einem Kunden/Post
- * bricht den Lauf für alle anderen nicht ab - gleiches K9-Isolationsprinzip wie überall sonst
- * (planUpcomingPosts, runDailyAnalyticsSnapshot).
+ * KI-Kommentar-Automatisierung (Panel v10, Instagram v1 - siehe Session-Bericht).
+ *
+ * Seit Panel v11 (Webhooks, siehe Session-Bericht 2026-09-14) ist der primäre Auslöser das
+ * `comments`-Webhook-Feld von Meta (webhooks.ts -> handleWebhookComment unten) - ein neuer
+ * Kommentar wird dadurch typischerweise innerhalb von Sekunden beantwortet, nicht erst beim
+ * nächsten Cron-Tick. Der Cron alle COMMENT_CRON_INTERVAL_MINUTES Minuten (bewusst NICHT Teil der
+ * stündlichen Posting-Routine oder der taeglichen Analytics-/Planungs-Crons) läuft unverändert
+ * als Sicherheitsnetz weiter - falls ein Webhook-Event verloren geht (Meta liefert nicht
+ * garantiert, ein Kundenserver war kurz down, das Abo wurde nie eingerichtet) - holt er für jeden
+ * Kunden mit aktivierter Automatisierung die Kommentare der letzten COMMENT_LOOKBACK_DAYS Tage
+ * veröffentlichter Beiträge nach. Beide Wege laufen über dieselbe classifyAndRespondToComment()
+ * und denselben `processed_comments`-Dedupe (isCommentProcessed) - ein Kommentar, den der Webhook
+ * schon beantwortet hat, wird vom Cron nie doppelt angefasst, und umgekehrt. Klassifiziert jeden
+ * neuen obersten Kommentar per KI und beantwortet ihn (automatisch oder erst nach Freigabe, je
+ * nach comment_automation_mode). Ein Fehler bei einem Kunden/Post bricht den Lauf für alle
+ * anderen nicht ab - gleiches K9-Isolationsprinzip wie überall sonst (planUpcomingPosts,
+ * runDailyAnalyticsSnapshot).
  *
  * v1 scope: Instagram only (LinkedIn siehe Session-Bericht - Community Management API erfordert
  * eine eigene Partner-Bewerbung, separat zu bewerten). Kein eigenes Retry/Dead-Letter für einen
- * Kommentar, dessen Antwort-Versand fehlschlägt - er bleibt unverarbeitet und wird beim nächsten
- * Lauf automatisch erneut versucht (IG-Fehler sind meist transient); ebenso keine Pagination über
- * die erste Seite von /{media-id}/comments hinaus (ausreichend für das erwartete Kommentar-Volumen
- * kleiner Business-Accounts).
+ * Kommentar, dessen Antwort-Versand fehlschlägt - er bleibt unverarbeitet und wird vom nächsten
+ * Cron-Lauf automatisch erneut versucht (IG-Fehler sind meist transient); ebenso keine Pagination
+ * über die erste Seite von /{media-id}/comments hinaus (ausreichend für das erwartete
+ * Kommentar-Volumen kleiner Business-Accounts - betrifft nur den Cron-Pfad, der Webhook-Pfad
+ * bekommt jeden Kommentar einzeln zugestellt und braucht keine Pagination).
  */
 import { db, nowIso, type CustomerRow, type PostRow, type ProcessedCommentRow } from "./db.js";
 import { resolveInstagramCredentials } from "./credentials.js";
@@ -21,9 +31,12 @@ import { fetchTopLevelComments, postCommentReply, type IncomingComment } from ".
 import { classifyAndAnswerComment } from "../anthropic.js";
 import { logUsageCost } from "./analytics.js";
 import { randomToken } from "./crypto.js";
+import type { InstagramCredentials } from "../instagram.js";
 
 const COMMENT_LOOKBACK_DAYS = 14;
-const COMMENT_CRON_INTERVAL_MINUTES = 12;
+/** Jetzt nur noch Sicherheitsnetz-Intervall (siehe Dateikopf) - per Env überschreibbar, Default
+ *  auf 45 Minuten entspannt (vorher 12, als der Cron noch der einzige Auslöser war). */
+const COMMENT_CRON_INTERVAL_MINUTES = Number(process.env.COMMENT_CRON_FALLBACK_MINUTES) || 45;
 /** Configurable constant (Punkt 4) - caps actual reply-POSTs to Instagram per customer/hour, whether auto-sent or approved-then-sent, to avoid anything that looks like spam/abuse to the platform. */
 const COMMENT_AUTO_REPLY_MAX_PER_HOUR = Number(process.env.PANEL_COMMENT_REPLY_MAX_PER_HOUR) || 10;
 const REQUIRED_SCOPE = "instagram_business_manage_comments";
@@ -170,6 +183,108 @@ interface CustomerCommentResult {
   errors: number;
 }
 
+type ClassifyOutcome = "answered" | "skipped" | "pending_approval" | "error" | "rate_limited";
+
+/**
+ * Klassifiziert einen einzelnen, noch nicht verarbeiteten obersten Kommentar per KI und
+ * beantwortet ihn (oder legt ihn zur Freigabe an), je nach comment_automation_mode. Geteilte
+ * Kernlogik für BEIDE Auslöser (Cron-Pfad in processCustomerComments und der Webhook-Pfad in
+ * handleWebhookComment unten) - ein Kommentar bekommt exakt dieselbe Behandlung unabhängig davon,
+ * wie er hereinkam. `post` ist optional: beim Webhook-Pfad kann ein Kommentar auf einem Media
+ * eintreffen, das nicht (mehr) in der eigenen `posts`-Tabelle steht (z.B. ein organischer,
+ * nicht über die Pipeline veröffentlichter Beitrag) - classifyAndAnswerComment kommt bewusst
+ * auch ganz ohne Post-Kontext aus ("kein Text verfügbar"), statt den Kommentar deswegen zu
+ * verwerfen.
+ */
+async function classifyAndRespondToComment(
+  customer: CustomerRow,
+  post: PostRow | undefined,
+  mediaId: string,
+  comment: IncomingComment,
+  creds: InstagramCredentials,
+): Promise<ClassifyOutcome> {
+  let classification;
+  try {
+    classification = await classifyAndAnswerComment({
+      commentText: comment.text,
+      company: customer.company,
+      industry: customer.industry ?? "",
+      about: customer.about ?? "",
+      tone: customer.tone ?? "sachlich",
+      language: customer.language ?? "de",
+      postHeadline: post?.headline ?? null,
+      postCaption: post?.caption ?? null,
+    });
+    logUsageCost(customer.id, "comment-reply", classification.costUsd);
+  } catch (err) {
+    // Keine Zeile gespeichert - wird beim naechsten Cron-Lauf erneut versucht (kein Anthropic-
+    // Verbrauch, wenn dieser Aufruf selbst schon fehlgeschlagen ist).
+    console.error(`[comments] ${customer.id}/${comment.id}: Klassifizierung fehlgeschlagen:`, err instanceof Error ? err.message : err);
+    return "error";
+  }
+
+  if (classification.type !== "question" || !classification.reply) {
+    saveProcessedComment({
+      commentId: comment.id,
+      customerId: customer.id,
+      mediaId,
+      commentText: comment.text,
+      authorUsername: comment.username,
+      commentType: classification.type,
+      generatedReply: null,
+      status: "skipped",
+    });
+    return "skipped";
+  }
+
+  if (customer.comment_automation_mode !== "auto") {
+    saveProcessedComment({
+      commentId: comment.id,
+      customerId: customer.id,
+      mediaId,
+      commentText: comment.text,
+      authorUsername: comment.username,
+      commentType: classification.type,
+      generatedReply: classification.reply,
+      status: "pending_approval",
+    });
+    return "pending_approval";
+  }
+
+  // Auto-Modus: sofort senden, aber nie ueber das Stunden-Limit hinaus (Punkt 4) - wird dieser
+  // Kunde gerade gedrosselt, bleibt der Kommentar unverarbeitet (keine Zeile gespeichert) und
+  // wird spaeter erneut versucht (naechster Webhook-Retry von Meta bzw. der Cron-Fallback).
+  if (repliesSentInLastHour(customer.id) >= COMMENT_AUTO_REPLY_MAX_PER_HOUR) {
+    console.error(`[comments] ${customer.id}: Stunden-Limit (${COMMENT_AUTO_REPLY_MAX_PER_HOUR}) erreicht - Kommentar ${comment.id} folgt spaeter.`);
+    return "rate_limited";
+  }
+  try {
+    await postCommentReply(comment.id, classification.reply, creds);
+    saveProcessedComment({
+      commentId: comment.id,
+      customerId: customer.id,
+      mediaId,
+      commentText: comment.text,
+      authorUsername: comment.username,
+      commentType: classification.type,
+      generatedReply: classification.reply,
+      status: "answered",
+    });
+    return "answered";
+  } catch (err) {
+    console.error(`[comments] ${customer.id}/${comment.id}: Antwort-Versand fehlgeschlagen:`, err instanceof Error ? err.message : err);
+    return "error";
+  }
+}
+
+function tallyOutcome(result: CustomerCommentResult, outcome: ClassifyOutcome): void {
+  if (outcome === "answered") result.answered++;
+  else if (outcome === "skipped") result.skipped++;
+  else if (outcome === "pending_approval") result.pendingApproval++;
+  else if (outcome === "error") result.errors++;
+  // "rate_limited" zaehlt bewusst nirgends mit - kein Fehler, nur ein spaeterer Versuch.
+}
+
 async function processCustomerComments(customer: CustomerRow): Promise<CustomerCommentResult> {
   const result: CustomerCommentResult = { answered: 0, skipped: 0, pendingApproval: 0, errors: 0 };
 
@@ -217,85 +332,77 @@ async function processCustomerComments(customer: CustomerRow): Promise<CustomerC
       if (isCommentProcessed(comment.id)) continue;
       if (comment.username && ownUsername && stripAt(comment.username) === ownUsername) continue; // eigener Kommentar/eigene Antwort
 
-      let classification;
-      try {
-        classification = await classifyAndAnswerComment({
-          commentText: comment.text,
-          company: customer.company,
-          industry: customer.industry ?? "",
-          about: customer.about ?? "",
-          tone: customer.tone ?? "sachlich",
-          language: customer.language ?? "de",
-          postHeadline: post.headline,
-          postCaption: post.caption,
-        });
-        logUsageCost(customer.id, "comment-reply", classification.costUsd);
-      } catch (err) {
-        // Keine Zeile gespeichert - wird beim naechsten Lauf erneut versucht (kein Anthropic-
-        // Verbrauch, wenn dieser Aufruf selbst schon fehlgeschlagen ist).
-        console.error(`[comments] ${customer.id}/${comment.id}: Klassifizierung fehlgeschlagen:`, err instanceof Error ? err.message : err);
-        result.errors++;
-        continue;
-      }
-
-      if (classification.type !== "question" || !classification.reply) {
-        saveProcessedComment({
-          commentId: comment.id,
-          customerId: customer.id,
-          mediaId: post.external_post_id as string,
-          commentText: comment.text,
-          authorUsername: comment.username,
-          commentType: classification.type,
-          generatedReply: null,
-          status: "skipped",
-        });
-        result.skipped++;
-        continue;
-      }
-
-      if (customer.comment_automation_mode !== "auto") {
-        saveProcessedComment({
-          commentId: comment.id,
-          customerId: customer.id,
-          mediaId: post.external_post_id as string,
-          commentText: comment.text,
-          authorUsername: comment.username,
-          commentType: classification.type,
-          generatedReply: classification.reply,
-          status: "pending_approval",
-        });
-        result.pendingApproval++;
-        continue;
-      }
-
-      // Auto-Modus: sofort senden, aber nie ueber das Stunden-Limit hinaus (Punkt 4) - wird
-      // dieser Kunde in diesem Lauf schon gedrosselt, bleiben die restlichen neuen Kommentare
-      // unverarbeitet (keine Zeile gespeichert) und werden beim naechsten Lauf erneut versucht.
-      if (repliesSentInLastHour(customer.id) >= COMMENT_AUTO_REPLY_MAX_PER_HOUR) {
-        console.error(`[comments] ${customer.id}: Stunden-Limit (${COMMENT_AUTO_REPLY_MAX_PER_HOUR}) erreicht, restliche neue Kommentare folgen im nächsten Lauf.`);
-        return result;
-      }
-      try {
-        await postCommentReply(comment.id, classification.reply, creds);
-        saveProcessedComment({
-          commentId: comment.id,
-          customerId: customer.id,
-          mediaId: post.external_post_id as string,
-          commentText: comment.text,
-          authorUsername: comment.username,
-          commentType: classification.type,
-          generatedReply: classification.reply,
-          status: "answered",
-        });
-        result.answered++;
-      } catch (err) {
-        console.error(`[comments] ${customer.id}/${comment.id}: Antwort-Versand fehlgeschlagen:`, err instanceof Error ? err.message : err);
-        result.errors++;
-      }
+      const outcome = await classifyAndRespondToComment(customer, post, post.external_post_id as string, comment, creds);
+      if (outcome === "rate_limited") return result; // restliche neue Kommentare folgen im naechsten Lauf
+      tallyOutcome(result, outcome);
     }
   }
 
   return result;
+}
+
+/**
+ * Einstiegspunkt für den Webhook-Pfad (webhooks.ts) - ein einzelner `comments`-Change-Event von
+ * Meta, schon auf das Nötigste geparst. Läuft dieselbe Klassifizierungs-/Antwort-Logik wie der
+ * Cron (classifyAndRespondToComment), nur ohne den Umweg über /{media-id}/comments - das Webhook-
+ * Event bringt den Kommentartext bereits mit. Dieselbe Berechtigungs-/Trial-/Pause-/Eigenkommentar-
+ * Prüfung wie im Cron-Pfad, damit ein Kunde nie über den einen Weg beantwortet wird und über den
+ * anderen nicht (oder umgekehrt inkonsistent behandelt wird). isCommentProcessed sorgt zusätzlich
+ * dafür, dass ein Kommentar, der z.B. schon vom Cron-Fallback beantwortet wurde, hier nicht noch
+ * einmal angefasst wird (Meta kann Events auch doppelt zustellen).
+ */
+export async function handleWebhookComment(input: {
+  igAccountId: string;
+  mediaId: string;
+  commentId: string;
+  commentText: string;
+  authorUsername: string | null;
+}): Promise<void> {
+  if (isCommentProcessed(input.commentId)) return;
+
+  const connRow = db
+    .prepare("SELECT customer_id, scopes, account_name FROM connections WHERE provider = 'instagram' AND account_id = ?")
+    .get(input.igAccountId) as { customer_id: string; scopes: string | null; account_name: string | null } | undefined;
+  if (!connRow) {
+    console.error(`[comments-webhook] unbekannte Instagram-Account-ID ${input.igAccountId} - kein Kunde zugeordnet.`);
+    return;
+  }
+
+  const customer = db
+    .prepare(
+      "SELECT * FROM customers WHERE id = ? AND status = 'active' AND customer_paused = 0 AND email_verified = 1 AND comment_automation_enabled = 1",
+    )
+    .get(connRow.customer_id) as CustomerRow | undefined;
+  if (!customer) return; // Automatisierung aus/Kunde nicht bereit - kein Fehler, einfach nichts zu tun
+
+  if (!(connRow.scopes ?? "").includes(REQUIRED_SCOPE)) {
+    console.error(`[comments-webhook] ${customer.id}: Instagram-Verbindung hat noch nicht die Berechtigung ${REQUIRED_SCOPE}.`);
+    return;
+  }
+
+  const ownUsername = connRow.account_name ? stripAt(connRow.account_name) : null;
+  if (input.authorUsername && ownUsername && stripAt(input.authorUsername) === ownUsername) return; // eigener Kommentar/eigene Antwort
+
+  let creds;
+  try {
+    creds = await resolveInstagramCredentials(customer.id);
+  } catch (err) {
+    console.error(`[comments-webhook] ${customer.id}: Zugangsdaten nicht verfügbar (Trial/Pause/Token):`, err instanceof Error ? err.message : err);
+    return;
+  }
+  if (!creds) return;
+
+  const post = db
+    .prepare("SELECT * FROM posts WHERE customer_id = ? AND provider = 'instagram' AND external_post_id = ?")
+    .get(customer.id, input.mediaId) as PostRow | undefined;
+
+  await classifyAndRespondToComment(
+    customer,
+    post,
+    input.mediaId,
+    { id: input.commentId, text: input.commentText, username: input.authorUsername, timestamp: null },
+    creds,
+  );
 }
 
 interface CommentRunSummary {
