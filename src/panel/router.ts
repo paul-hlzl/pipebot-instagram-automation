@@ -55,6 +55,7 @@ import { accessRecoveryEmail, verificationEmail } from "./emails.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, helpChatReply, improveBriefing, suggestPillarsWithSearch, suggestTopics, type HelpChatMessage } from "../anthropic.js";
 import { subscribeToCommentWebhook } from "../instagram-comments.js";
+import { CAROUSEL_MIN_SLIDES, CAROUSEL_MAX_SLIDES } from "../instagram.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 
@@ -168,7 +169,11 @@ interface BriefingInput {
   notifyWeeklyReport: boolean;
   commentAutomationEnabled: boolean;
   commentAutomationMode: string;
+  carouselSlideCount: number;
+  carouselAutoFrequency: string;
 }
+
+const CAROUSEL_AUTO_FREQUENCIES = ["off", "weekly", "always"];
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -228,9 +233,13 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     notifyWeeklyReport: bool(body.notifyWeeklyReport, false),
     commentAutomationEnabled: bool(body.commentAutomationEnabled, false),
     commentAutomationMode: str(body.commentAutomationMode, 20) || "approval",
+    carouselSlideCount: Number.isFinite(Number(body.carouselSlideCount)) ? Math.round(Number(body.carouselSlideCount)) : 5,
+    carouselAutoFrequency: str(body.carouselAutoFrequency, 20) || "off",
   };
   const errors: Record<string, string> = {};
   if (!COMMENT_AUTOMATION_MODES.includes(data.commentAutomationMode)) data.commentAutomationMode = "approval";
+  if (data.carouselSlideCount < CAROUSEL_MIN_SLIDES || data.carouselSlideCount > CAROUSEL_MAX_SLIDES) data.carouselSlideCount = 5;
+  if (!CAROUSEL_AUTO_FREQUENCIES.includes(data.carouselAutoFrequency)) data.carouselAutoFrequency = "off";
   if (data.pauseFrom && !ISO_DATE.test(data.pauseFrom)) data.pauseFrom = "";
   if (data.pauseUntil && !ISO_DATE.test(data.pauseUntil)) data.pauseUntil = "";
   // A pause end before its start makes no sense - drop both rather than silently misbehaving.
@@ -282,6 +291,7 @@ function publicState(c: CustomerRow) {
       igFeedEnabled: Boolean(c.ig_feed_enabled), igStoryEnabled: Boolean(c.ig_story_enabled),
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
+      carouselSlideCount: c.carousel_slide_count, carouselAutoFrequency: c.carousel_auto_frequency || "off",
       customerPaused: Boolean(c.customer_paused),
       contentPillars: listContentPillars(c.id),
       lastPostRequest: lastPostRequestForCustomer(c.id),
@@ -815,14 +825,14 @@ export function createPanelRouter(): Router {
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
          ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
          active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
-         comment_automation_enabled=?, comment_automation_mode=?, updated_at=?
+         comment_automation_enabled=?, comment_automation_mode=?, carousel_slide_count=?, carousel_auto_frequency=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
       data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
-      data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
+      data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode, data.carouselSlideCount, data.carouselAutoFrequency,
       nowIso(), c.id);
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
@@ -1267,7 +1277,14 @@ export function createPanelRouter(): Router {
       return;
     }
     const topic = str(req.body?.topic, 300);
-    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch));
+    // Panel v14: Format nur fuer ig_feed relevant (Karussell/Video-Diashow gibt es nur bei
+    // Instagram Feed) - fuer jeden anderen mitgewaehlten Kanal bleibt es 'single', unabhaengig
+    // davon, was der Client schickt. 'video_slideshow' noch nicht gebaut (siehe Session-Bericht
+    // Teil B) - wird hier schon akzeptiert/gespeichert, damit die Einstellung nicht doppelt
+    // gebaut werden muss, sobald der Rendering-Teil nachkommt.
+    const requestedFormat = str(req.body?.format, 30);
+    const format = ["carousel", "video_slideshow"].includes(requestedFormat) ? requestedFormat : "single";
+    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single"));
     triggerRoutineNow("post-now");
     res.json(publicState(c));
   }));

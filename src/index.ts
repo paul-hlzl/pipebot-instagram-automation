@@ -2,15 +2,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig } from "./config.js";
-import { generateImageUrl, type ImageBranding } from "./fal.js";
+import { generateImageUrl, FAL_IMAGE_COST_USD, type ImageBranding } from "./fal.js";
 import { ensureAdminPassword, ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
 import {
   getPublishingLimit,
   publishImageToInstagram,
+  publishCarouselToInstagram,
   publishStoryToInstagram,
   refreshAccessToken,
+  CAROUSEL_MIN_SLIDES,
+  CAROUSEL_MAX_SLIDES,
 } from "./instagram.js";
+import { logUsageCost } from "./panel/analytics.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 import { startDailyPlanningSchedule } from "./panel/planning.js";
@@ -282,6 +286,184 @@ function createServer(): McpServer {
         });
       } catch (error) {
         console.error("generate_and_publish_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  /**
+   * Panel v14: Karussell-Posts (siehe Session-Bericht). Jeder Slide bekommt sein eigenes
+   * fal.ai-Bild mit demselben Branding wie ein Einzelbild-Post (resolveImageBranding), damit das
+   * Karussell wie aus einem Guss wirkt statt wie zufaellig aneinandergereihte Einzelbilder -
+   * dieselbe generateImageUrl()-Funktion, nur einmal pro Slide statt einmal pro Post. `headline`
+   * pro Slide ist die inhaltliche Sequenz (Hook -> Kernpunkte -> Call-to-Action) - die Caption
+   * bleibt EINE einzelne Caption fuer den ganzen Post (Instagram erlaubt keine Caption pro Slide,
+   * siehe publishCarouselToInstagram in instagram.ts).
+   */
+  const carouselSlidesSchema = z
+    .array(
+      z.object({
+        headline: z
+          .string()
+          .min(1)
+          .max(60)
+          .describe("Short headline for this slide's image, same rules as generate_post_image's `headline` (code-composited, exact spelling guaranteed)."),
+      }),
+    )
+    .min(CAROUSEL_MIN_SLIDES)
+    .max(CAROUSEL_MAX_SLIDES)
+    .describe(
+      `${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES} slides, in display order. Write these as a real sequence - ` +
+        'a hook slide, then 2-4 slides each making one concrete point, then a call-to-action slide - not ' +
+        "unrelated headlines. Use `list_customers`' `carouselSlideCount` for how many slides this customer prefers " +
+        "(clamp your own slide count to it unless the caller explicitly asked for a different count).",
+    );
+
+  const CAROUSEL_COST_NOTE =
+    `Costs ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES}x a single post's fal.ai image cost (one generation per ` +
+    "slide) - logged under usage_costs feature \"carousel-post\", separate from single-image posts so the admin " +
+    "cost estimate stays accurate.";
+
+  server.registerTool(
+    "generate_and_publish_carousel_post",
+    {
+      description:
+        "Generates one branded image per slide with fal.ai FLUX schnell and immediately publishes them as an " +
+        "Instagram carousel (swipeable multi-image post) - no review step in between. Use " +
+        "`save_carousel_pending_approval` instead whenever this customer has `approvalMode: true`. " +
+        HEADLINE_IMAGE_GUIDANCE +
+        " " +
+        CAROUSEL_COST_NOTE,
+      inputSchema: {
+        topic: topicSchema,
+        slides: carouselSlidesSchema,
+        caption: z.string().min(1).max(2200).describe("The single Instagram caption for the whole carousel (Instagram has no per-slide caption)."),
+        customer_id: customerIdSchema,
+        pillar_title: pillarTitleSchema,
+      },
+    },
+    async ({ topic, slides, caption, customer_id, pillar_title }) => {
+      try {
+        assertChannelEnabled(customer_id, "ig_feed");
+        const headlines = slides.map((s) => s.headline);
+        assertNoBannedWords(customer_id, caption, ...headlines);
+        assertRequiredElements(customer_id, caption, ...headlines);
+        const creds = await resolveInstagramCredentials(customer_id);
+        const branding = resolveImageBranding(customer_id);
+        const generated = [];
+        for (const slide of slides) {
+          generated.push(await generateImageUrl(slide.headline, "feed", branding));
+        }
+        if (customer_id) logUsageCost(customer_id, "carousel-post", generated.length * FAL_IMAGE_COST_USD);
+        const imageUrls = generated.map((g) => g.imageUrl);
+        const published = await publishCarouselToInstagram(imageUrls, caption, creds, customer_id);
+        if (customer_id) {
+          logPost(customer_id, "instagram", {
+            externalPostId: published.postId,
+            headline: slides[0]?.headline,
+            caption,
+            imageUrl: imageUrls[0],
+            pillarTitle: pillar_title,
+            channel: "ig_feed",
+            format: "carousel",
+            slides: slides.map((s, i) => ({ imageUrl: imageUrls[i], overlayText: s.headline })),
+          });
+        }
+        return textResult({ postId: published.postId, topic, imageUrls, warning: published.warning });
+      } catch (error) {
+        console.error("generate_and_publish_carousel_post:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "save_carousel_pending_approval",
+    {
+      description:
+        "Generates one branded image per slide AND files the whole carousel away for the customer to review, " +
+        "INSTEAD of publishing it. Use this - never `generate_and_publish_carousel_post` - whenever " +
+        "`list_customers` shows `approvalMode: true` for this customer. Once approved, it shows up in " +
+        "`list_approved_pending_posts` with `format: \"carousel\"` and a full `slides` array - publish it with " +
+        "`publish_approved_carousel_post`, not `publish_generated_post`. " +
+        CAROUSEL_COST_NOTE,
+      inputSchema: {
+        customer_id: z.string().describe("customerId - required, this tool only makes sense for a specific approval_mode customer."),
+        slides: carouselSlidesSchema,
+        caption: z.string().min(1).max(2200).describe("The single Instagram caption for the whole carousel."),
+        pillar_title: pillarTitleSchema,
+      },
+    },
+    async ({ customer_id, slides, caption, pillar_title }) => {
+      try {
+        assertChannelEnabled(customer_id, "ig_feed");
+        const headlines = slides.map((s) => s.headline);
+        assertNoBannedWords(customer_id, caption, ...headlines);
+        assertRequiredElements(customer_id, caption, ...headlines);
+        const branding = resolveImageBranding(customer_id);
+        const generated = [];
+        for (const slide of slides) {
+          generated.push(await generateImageUrl(slide.headline, "feed", branding));
+        }
+        logUsageCost(customer_id, "carousel-post", generated.length * FAL_IMAGE_COST_USD);
+        const imageUrls = generated.map((g) => g.imageUrl);
+        const approval = savePendingApproval({
+          customerId: customer_id,
+          provider: "instagram",
+          channel: "ig_feed",
+          headline: slides[0]?.headline,
+          caption,
+          imageUrl: imageUrls[0],
+          pillarTitle: pillar_title,
+          format: "carousel",
+          slides: slides.map((s, i) => ({ imageUrl: imageUrls[i], overlayText: s.headline })),
+        });
+        return textResult(approval ?? { skipped: "already has an open ig_feed slot today" });
+      } catch (error) {
+        console.error("save_carousel_pending_approval:", toToolMessage(error));
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "publish_approved_carousel_post",
+    {
+      description:
+        "Publishes an already-approved carousel from `list_approved_pending_posts` (an entry with " +
+        "`format: \"carousel\"`) - pass its `slides` array (each entry's `imageUrl`) and `caption` verbatim, no " +
+        "new image generation, no additional fal.ai cost. After a successful publish, call " +
+        "`mark_pending_approval_published` with the entry's `id`, same as for a single-image approval.",
+      inputSchema: {
+        image_urls: z.array(z.string().min(1)).min(CAROUSEL_MIN_SLIDES).max(CAROUSEL_MAX_SLIDES).describe("Each slide's `imageUrl`, from the approved entry's `slides` array, in order."),
+        caption: z.string().min(1).max(2200).describe("The approved entry's `caption`, verbatim."),
+        customer_id: customerIdSchema,
+        headline: z.string().optional().describe("Optional: the first slide's headline, for the customer's post history label only."),
+        pillar_title: pillarTitleSchema,
+      },
+    },
+    async ({ image_urls, caption, customer_id, headline, pillar_title }) => {
+      try {
+        assertChannelEnabled(customer_id, "ig_feed");
+        assertNoBannedWords(customer_id, headline, caption);
+        assertRequiredElements(customer_id, headline, caption);
+        const creds = await resolveInstagramCredentials(customer_id);
+        const published = await publishCarouselToInstagram(image_urls, caption, creds, customer_id);
+        if (customer_id) {
+          logPost(customer_id, "instagram", {
+            externalPostId: published.postId,
+            headline,
+            caption,
+            imageUrl: image_urls[0],
+            pillarTitle: pillar_title,
+            channel: "ig_feed",
+            format: "carousel",
+            slides: image_urls.map((url) => ({ imageUrl: url })),
+          });
+        }
+        return textResult(published);
+      } catch (error) {
+        console.error("publish_approved_carousel_post:", toToolMessage(error));
         return errorResult(error);
       }
     },
@@ -657,7 +839,10 @@ function createServer(): McpServer {
         "customer's usual rules (bannedWords, requiredElements, approval_mode if set, channel toggles). After " +
         "successfully handling one (published, or filed into pending_approvals under approval_mode), call " +
         "`mark_post_request_done` with its id - never leave a handled request pending, and never call a " +
-        "publish tool twice for the same request.",
+        "publish tool twice for the same request. Each entry's `format` ('single', the default, or 'carousel' - " +
+        "only ever set when `channel` is 'ig_feed') tells you which tool family to use: 'carousel' means write " +
+        "`carouselSlideCount` (see `list_customers`) slides yourself and call " +
+        "`generate_and_publish_carousel_post`/`save_carousel_pending_approval` instead of the single-image tools.",
     },
     async () => {
       try {
@@ -751,14 +936,18 @@ function createServer(): McpServer {
     "list_approved_pending_posts",
     {
       description:
-        "Lists posts across all customers that were saved via `save_pending_approval` and have since been " +
-        "approved by the customer in their panel (status 'approved') - these are ready to actually publish. Check " +
-        "each entry's `channel` field (ig_feed / ig_story / linkedin) and call the matching publish tool " +
-        "(`publish_generated_post` for ig_feed, `publish_generated_story` for ig_story, the LinkedIn tools for " +
-        "linkedin) using its `imageUrl`/`caption`/`headline`, with that " +
-        "entry's `customerId` as `customer_id` and `pillarTitle` as `pillar_title`. After a successful publish, " +
-        "call `mark_pending_approval_published` with its `id` so it isn't published again next run. Process " +
-        "these before the regular `list_customers`/`dueNow` loop, same priority as `list_post_requests`.",
+        "Lists posts across all customers that were saved via `save_pending_approval`/`save_carousel_pending_approval` " +
+        "and have since been approved by the customer in their panel (status 'approved') - these are ready to " +
+        "actually publish. Check each entry's `format` field first: `carousel` (or `video_slideshow`, once that " +
+        "format exists) means call `publish_approved_carousel_post` with its `slides` array's `imageUrl`s and its " +
+        "`caption` - never `publish_generated_post` for these, a single-image publish would drop every slide but " +
+        "the first. For `format: \"single\"` (the default, unset on older rows), check `channel` (ig_feed / " +
+        "ig_story / linkedin) and call the matching publish tool (`publish_generated_post` for ig_feed, " +
+        "`publish_generated_story` for ig_story, the LinkedIn tools for linkedin) using its `imageUrl`/`caption`/" +
+        "`headline`, with that entry's `customerId` as `customer_id` and `pillarTitle` as `pillar_title`. After a " +
+        "successful publish, call `mark_pending_approval_published` with its `id` so it isn't published again " +
+        "next run. Process these before the regular `list_customers`/`dueNow` loop, same priority as " +
+        "`list_post_requests`.",
     },
     async () => {
       try {

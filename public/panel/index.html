@@ -743,6 +743,11 @@
     return "werktags";
   };
   const CTAS = { link_bio: "Link in der Bio", anrufen: "Anrufen", nachricht: "Nachricht senden", termin: "Termin buchen", keiner: "Kein Aufruf" };
+  // Panel v14: muss mit CAROUSEL_MIN_SLIDES/CAROUSEL_MAX_SLIDES in instagram.ts uebereinstimmen -
+  // rein informativ hier (Anzeige/Validierung im Formular), die echte Grenze setzt der Server.
+  const CAROUSEL_MIN_SLIDES = 3;
+  const CAROUSEL_MAX_SLIDES = 7;
+  const POST_FORMATS = { single: "Einzelbild", carousel: "Karussell (mehrere Bilder zum Wischen)" };
   const HASHTAGS = { keine: "Keine", wenige: "Wenige (2-3)", viele: "Viele (5+)" };
   const LANGUAGES = { de: "Deutsch", en: "Englisch" };
   const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
@@ -1548,6 +1553,22 @@
                 <label class="check"><input type="checkbox" name="igStoryEnabled" ${c.igStoryEnabled !== false ? "checked" : ""}><span>Instagram Storys</span></label>
                 <label class="check"><input type="checkbox" name="linkedinEnabled" ${c.linkedinEnabled !== false ? "checked" : ""}><span>LinkedIn-Beiträge</span></label>
               </div>
+              <div class="grid2">
+                <div class="field">
+                  <label for="f-carouselSlideCount">Bilder pro Karussell/Video-Diashow</label>
+                  <input id="f-carouselSlideCount" name="carouselSlideCount" type="number" min="${CAROUSEL_MIN_SLIDES}" max="${CAROUSEL_MAX_SLIDES}" step="1" value="${esc(String(c.carouselSlideCount ?? 5))}">
+                  <p class="hint">${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES} Bilder, gilt für "Jetzt posten" und die automatische Routine.</p>
+                </div>
+                <div class="field">
+                  <label for="f-carouselAutoFrequency">Karussell/Video-Diashow in der täglichen Routine</label>
+                  <select id="f-carouselAutoFrequency" name="carouselAutoFrequency">
+                    <option value="off" ${(c.carouselAutoFrequency || "off") === "off" ? "selected" : ""}>Aus - nur Einzelbilder</option>
+                    <option value="weekly" ${c.carouselAutoFrequency === "weekly" ? "selected" : ""}>Etwa einmal pro Woche</option>
+                    <option value="always" ${c.carouselAutoFrequency === "always" ? "selected" : ""}>Immer statt Einzelbild</option>
+                  </select>
+                  <p class="hint">Nur für die automatische Instagram-Feed-Routine - "Jetzt posten" wählt das Format jedes Mal einzeln.</p>
+                </div>
+              </div>
               <fieldset class="field">
                 <legend>An welchen Tagen posten - Instagram?</legend>
                 <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
@@ -1911,10 +1932,19 @@
       return `<p class="hint">Aktivieren Sie mindestens einen Kanal unter „Kanäle &amp; Formate“ in Ihren Einstellungen, um sofort zu posten.</p>`;
     }
     const open = postNowOpenChannels(c);
+    // Panel v14: Format nur fuer Instagram Feed relevant (Karussell gibt es nicht bei Story/
+    // LinkedIn) - trotzdem immer sichtbar mit erklaerendem Hinweis, statt sich dynamisch je nach
+    // Kanalauswahl ein-/auszublenden (einfacher zu verstehen als ein Feld, das verschwindet).
     return `<fieldset class="field post-now-channels">
       <legend>Kanäle</legend>
       ${available.map((o) => `
         <label class="check"><input type="checkbox" name="postNowChannel" value="${o.id}" ${open.has(o.id) ? "disabled" : "checked"}><span>${esc(o.label)}${open.has(o.id) ? " (schon angefragt)" : ""}</span></label>`).join("")}
+    </fieldset>
+    <fieldset class="field post-now-format">
+      <legend>Format (nur für Instagram Feed)</legend>
+      ${Object.entries(POST_FORMATS).map(([k, label]) => `
+        <label class="check"><input type="radio" name="postNowFormat" value="${k}" ${k === "single" ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}
+      <p class="hint">Karussell verbraucht ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES}× die Bildkosten eines Einzelbild-Posts (aktuell ${esc(String(c.carouselSlideCount ?? 5))} Bilder, einstellbar unter „Kanäle &amp; Zeitplan“).</p>
     </fieldset>`;
   }
 
@@ -2204,11 +2234,19 @@
   function approvalCardHtml(a) {
     const badge = channelBadgeLabel(a);
     const pillarPart = a.pillarTitle ? `, basierend auf Ihrer Content-Säule „${esc(a.pillarTitle)}“` : "";
-    const context = `Erstellt ${esc(fmtCreated(a.createdAt))} für ${esc(badge || "Ihren Kanal")} (${esc(originLabel(a.source))})${pillarPart}. Prüfen Sie Text und Bild, dann geben Sie frei oder lehnen Sie ab.`;
+    const isCarousel = a.format === "carousel" && Array.isArray(a.slides) && a.slides.length > 0;
+    const formatNote = isCarousel ? ` Karussell mit ${a.slides.length} Bildern - wischen Sie im veröffentlichten Post durch alle Slides.` : "";
+    const context = `Erstellt ${esc(fmtCreated(a.createdAt))} für ${esc(badge || "Ihren Kanal")} (${esc(originLabel(a.source))})${pillarPart}.${formatNote} Prüfen Sie Text und Bild${isCarousel ? "er" : ""}, dann geben Sie frei oder lehnen Sie ab.`;
+    // Karussell: alle Slides als kleine Bild-Reihe (gleiche .post-grid-Optik wie der Verlauf),
+    // nicht nur die erste - der Kunde muss vor der Freigabe jedes einzelne Bild sehen koennen.
+    const mediaHtml = isCarousel
+      ? `<div class="post-grid" style="flex:none;width:220px">${a.slides.map((s) => `<img src="${esc(s.imageUrl)}" alt="" data-lightbox>`).join("")}</div>`
+      : (a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`);
     return `<div class="approval-card" data-approval-id="${esc(a.id)}">
-      ${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`}
+      ${mediaHtml}
       <div class="approval-body">
         ${badge ? `<span class="channel-badge">${esc(badge)}</span>` : ""}
+        ${isCarousel ? `<span class="channel-badge">Karussell</span>` : ""}
         <p class="hint" style="margin:2px 0 10px">${context}</p>
         ${a.headline ? `<strong>${esc(a.headline)}</strong>` : ""}
         ${a.caption ? `<p>${esc(a.caption)}</p>` : ""}
@@ -3340,9 +3378,10 @@
         showError("Bitte wählen Sie mindestens einen Kanal aus.");
         return;
       }
+      const format = document.querySelector('input[name="postNowFormat"]:checked')?.value || "single";
       btn.classList.add("busy");
       try {
-        applyState(await api("POST", "/api/post-now", { topic, channels }));
+        applyState(await api("POST", "/api/post-now", { topic, channels, format }));
         S.banner = { kind: "ok", text: "Angefragt - wir kümmern uns beim nächsten Lauf darum." };
         render(true);
       } catch (err) {

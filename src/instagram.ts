@@ -220,6 +220,54 @@ async function createStoryMediaContainer(imageUrl: string, creds?: InstagramCred
   return data.id;
 }
 
+/**
+ * Panel v14: ein einzelner Karussell-Slide-Container (Kind-Container) - `is_carousel_item: true`
+ * ist der einzige Unterschied zu einem normalen Feed-Container, siehe createMediaContainer oben.
+ * KEINE eigene Caption pro Slide - Instagram erlaubt Captions nur auf dem Karussell-Container
+ * selbst (bestaetigt gegen die aktuelle Meta Content-Publishing-Doku, 2026-09), die inhaltliche
+ * Sequenz der Slides steckt stattdessen in den ins Bild eingebrannten Text-Overlays.
+ */
+async function createCarouselChildContainer(imageUrl: string, creds?: InstagramCredentials): Promise<string> {
+  const igUserId = await resolveIgUserId(creds);
+  const { data } = await client().post<GraphIdResponse>(
+    `${GRAPH_BASE}/${igUserId}/media`,
+    null,
+    {
+      params: {
+        ...tokenParams(creds),
+        image_url: imageUrl,
+        is_carousel_item: true,
+      },
+    },
+  );
+  if (!data.id) {
+    throw new ToolError("Instagram hat keinen Karussell-Kind-Container angelegt (keine ID in der Antwort).");
+  }
+  return data.id;
+}
+
+/** Der eigentliche Karussell-Container, der auf die bereits erstellten Kind-Container verweist -
+ *  `children` ist eine kommagetrennte Liste von Container-IDs (Meta-Doku, max. 10). */
+async function createCarouselContainer(childIds: string[], caption: string, creds?: InstagramCredentials): Promise<string> {
+  const igUserId = await resolveIgUserId(creds);
+  const { data } = await client().post<GraphIdResponse>(
+    `${GRAPH_BASE}/${igUserId}/media`,
+    null,
+    {
+      params: {
+        ...tokenParams(creds),
+        media_type: "CAROUSEL",
+        children: childIds.join(","),
+        caption,
+      },
+    },
+  );
+  if (!data.id) {
+    throw new ToolError("Instagram hat keinen Karussell-Container angelegt (keine ID in der Antwort).");
+  }
+  return data.id;
+}
+
 async function getContainerStatus(containerId: string, creds?: InstagramCredentials): Promise<string> {
   const { data } = await client().get<GraphStatusResponse>(`${GRAPH_BASE}/${containerId}`, {
     params: {
@@ -301,6 +349,56 @@ export async function publishImageToInstagram(
     },
     2,
     "Instagram publish",
+  );
+
+  writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);
+
+  return duplicateWarning ? { ...result, warning: duplicateWarning } : result;
+}
+
+export const CAROUSEL_MIN_SLIDES = 3;
+export const CAROUSEL_MAX_SLIDES = 7; // Meta erlaubt bis zu 10 - 7 ist unsere eigene, engere Produktgrenze (siehe Session-Bericht)
+
+/**
+ * Publishes a carousel (multiple images swiped through in one post). Each image becomes its own
+ * child container first (is_carousel_item, no caption - see createCarouselChildContainer), then
+ * one carousel container referencing all of them, then that gets published like any other
+ * container. Every child container is waited-for individually before the carousel container is
+ * created - Meta's own examples create the carousel container immediately after the children
+ * return an id, but in practice an unprocessed child can make the carousel container itself fail,
+ * so this waits for each child's own FINISHED status first (same safety margin as the existing
+ * single-image flow, just once per slide).
+ */
+export async function publishCarouselToInstagram(
+  imageUrls: string[],
+  caption: string,
+  creds?: InstagramCredentials,
+  customerId?: string,
+): Promise<PublishResult & { childContainerIds: string[] }> {
+  if (imageUrls.length < CAROUSEL_MIN_SLIDES || imageUrls.length > CAROUSEL_MAX_SLIDES) {
+    throw new ToolError(
+      `Karussell braucht ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES} Bilder, bekommen: ${imageUrls.length}.`,
+    );
+  }
+
+  const duplicateWarning = checkRecentDuplicate(customerId);
+  await assertPublishingQuota(creds);
+
+  const result = await withRetry(
+    async () => {
+      const childContainerIds: string[] = [];
+      for (const imageUrl of imageUrls) {
+        const childId = await createCarouselChildContainer(imageUrl, creds);
+        await waitForContainer(childId, creds);
+        childContainerIds.push(childId);
+      }
+      const containerId = await createCarouselContainer(childContainerIds, caption, creds);
+      await waitForContainer(containerId, creds);
+      const postId = await publishContainer(containerId, creds);
+      return { postId, containerId, hostedImageUrl: imageUrls[0], childContainerIds };
+    },
+    2,
+    "Instagram carousel publish",
   );
 
   writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);

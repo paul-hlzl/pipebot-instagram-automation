@@ -247,6 +247,26 @@ CREATE TABLE IF NOT EXISTS processed_comments (
 );
 CREATE INDEX IF NOT EXISTS processed_comments_customer ON processed_comments(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS processed_comments_status ON processed_comments(customer_id, status);
+
+-- Panel v14: Karussell-/Video-Diashow-Posts (siehe Session-Bericht). Bisher gingen posts/
+-- pending_approvals/planned_posts von genau einem Bild pro Post aus (image_url-Spalte) - das
+-- bleibt für Einzelbild-Posts unveraendert (image_url = das eine Bild bzw. bei Karussell/Video
+-- das erste Slide als Vorschau/Cover). Ein Mehrbild-Post (format='carousel'|'video_slideshow')
+-- bekommt zusaetzlich seine vollstaendige Slide-Liste hier, generisch ueber alle drei
+-- Eigentuemer-Tabellen hinweg (owner_type unterscheidet sie) statt drei fast identischer
+-- Zuordnungstabellen. Kein Fremdschluessel auf eine bestimmte Eigentuemer-Tabelle - kann nicht
+-- sauber ueber drei mögliche Tabellen hinweg ausgedrueckt werden, Aufraeumen bei Post-Loeschung
+-- laeuft deshalb explizit im Anwendungscode (siehe credentials.ts).
+CREATE TABLE IF NOT EXISTS post_media (
+  id TEXT PRIMARY KEY,
+  owner_type TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  image_url TEXT NOT NULL,
+  overlay_text TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS post_media_owner ON post_media(owner_type, owner_id, position);
 `);
 
 // Migration: add columns to a table that existed before this version. SQLite has no
@@ -378,6 +398,28 @@ migrateColumns("posts", [
   // repeating the same pillar twice in a row. Nullable: posts made before pillars existed, or
   // for customers without pillars, simply have no pillar.
   ["pillar_title", "TEXT"],
+  // Panel v14: 'single' (default, unchanged behavior) | 'carousel' | 'video_slideshow'. Every
+  // pre-existing row has no value here - DEFAULT 'single' backfills them correctly (they were
+  // always single-image posts), no separate UPDATE needed.
+  ["format", "TEXT NOT NULL DEFAULT 'single'"],
+]);
+
+migrateColumns("pending_approvals", [["format", "TEXT NOT NULL DEFAULT 'single'"]]);
+migrateColumns("planned_posts", [["format", "TEXT NOT NULL DEFAULT 'single'"]]);
+// Nur fuer channel='ig_feed' relevant (Karussell/Video-Diashow gibt es nur bei Instagram Feed,
+// siehe Session-Bericht Teil C) - der Kunde waehlt es trotzdem pro Anfrage, nicht global, falls
+// er z.B. gleichzeitig Instagram UND LinkedIn anfragt.
+migrateColumns("post_requests", [["format", "TEXT NOT NULL DEFAULT 'single'"]]);
+
+migrateColumns("customers", [
+  // Panel v14: wie viele Slides ein Karussell/eine Video-Diashow fuer diesen Kunden bekommt -
+  // vom Kunden einstellbar innerhalb der technischen Grenze (3-7, siehe carousel.ts). Default 5.
+  ["carousel_slide_count", "INTEGER NOT NULL DEFAULT 5"],
+  // Wie oft die taegliche Routine statt eines Einzelbilds ein Karussell/eine Video-Diashow
+  // waehlen soll - 'off' (Standard, nur Einzelbild, neue Formate muessen aktiv gewaehlt werden),
+  // 'weekly' (einmal pro Woche) oder 'always'. Steuert nur die AUTOMATISCHE taegliche Routine -
+  // manuelles "Jetzt posten" waehlt das Format ohnehin explizit pro Post.
+  ["carousel_auto_frequency", "TEXT NOT NULL DEFAULT 'off'"],
 ]);
 
 export interface CustomerRow {
@@ -429,6 +471,8 @@ export interface CustomerRow {
   consent_at: string;
   created_at: string;
   updated_at: string;
+  carousel_slide_count: number;
+  carousel_auto_frequency: string;
 }
 
 export interface ConnectionRow {
@@ -454,6 +498,19 @@ export interface PostRow {
   image_url: string | null;
   posted_at: string;
   pillar_title: string | null;
+  format: string;
+}
+
+/** Panel v14: eine Zeile pro Slide eines Mehrbild-Posts (Karussell/Video-Diashow), siehe db.ts
+ *  Schema-Kommentar bei post_media. `owner_type` ist 'post' | 'pending_approval' | 'planned_post'. */
+export interface PostMediaRow {
+  id: string;
+  owner_type: string;
+  owner_id: string;
+  position: number;
+  image_url: string;
+  overlay_text: string | null;
+  created_at: string;
 }
 
 export interface AnalyticsAccountSnapshotRow {
@@ -527,6 +584,7 @@ export interface PendingApprovalRow {
   status: string;
   created_at: string;
   updated_at: string;
+  format: string;
 }
 
 export interface PostRequestRow {
@@ -537,6 +595,7 @@ export interface PostRequestRow {
   status: string;
   created_at: string;
   updated_at: string;
+  format: string;
 }
 
 export interface PlannedPostRow {
@@ -553,6 +612,7 @@ export interface PlannedPostRow {
   regenerate_count: number;
   created_at: string;
   updated_at: string;
+  format: string;
 }
 
 export interface PlanningErrorRow {

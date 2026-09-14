@@ -12,6 +12,7 @@ import {
   type PendingApprovalRow,
   type PlannedPostRow,
   type PlanningErrorRow,
+  type PostMediaRow,
   type PostRequestRow,
   type PostRow,
   type SavedThemeRow,
@@ -111,6 +112,15 @@ export interface CustomerOverview {
   /** Absolute local file path to this customer's uploaded logo, or null. Not a public URL - only meaningful server-side (image generation). */
   logoUrl: string | null;
   channels: ChannelOverview[];
+  /** Panel v14: how many slides a carousel/video-slideshow should have for this customer (3-7,
+   *  see instagram.ts CAROUSEL_MIN_SLIDES/CAROUSEL_MAX_SLIDES) - pass this many `slides` to
+   *  generate_and_publish_carousel_post. */
+  carouselSlideCount: number;
+  /** Panel v14: whether/how often the DAILY routine should pick carousel/video-slideshow instead
+   *  of a single image - 'off' (default, single-image only unless a customer/routine explicitly
+   *  requests otherwise), 'weekly' (about once a week), or 'always'. Manual "Jetzt posten" always
+   *  picks its format explicitly regardless of this setting. */
+  carouselAutoFrequency: "off" | "weekly" | "always";
 }
 
 function channelsFor(customerId: string): ChannelOverview[] {
@@ -185,6 +195,8 @@ function overview(c: CustomerRow): CustomerOverview {
     approvalMode: Boolean(c.approval_mode),
     logoUrl: c.logo_url,
     channels: channelsFor(c.id),
+    carouselSlideCount: c.carousel_slide_count,
+    carouselAutoFrequency: (c.carousel_auto_frequency as CustomerOverview["carouselAutoFrequency"]) || "off",
   };
 }
 
@@ -382,6 +394,40 @@ export interface LoggedPost {
   caption: string | null;
   imageUrl: string | null;
   postedAt: string;
+  format: string;
+  slides: PostMediaSlide[];
+}
+
+/** One slide of a carousel/video-slideshow post - see db.ts's post_media table comment. */
+export interface PostMediaSlide {
+  position: number;
+  imageUrl: string;
+  overlayText: string | null;
+}
+
+/**
+ * Writes a Mehrbild-Post's full slide list (Panel v14) - shared by logPost, savePendingApproval
+ * and createPlannedPost so all three owner tables use the exact same post_media shape/insert
+ * logic. No-op for an empty/undefined slide list (the ordinary single-image case).
+ */
+function savePostMedia(ownerType: "post" | "pending_approval" | "planned_post", ownerId: string, slides?: { imageUrl: string; overlayText?: string }[]): void {
+  if (!slides || slides.length === 0) return;
+  const now = nowIso();
+  const insert = db.prepare(
+    `INSERT INTO post_media (id, owner_type, owner_id, position, image_url, overlay_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  slides.forEach((slide, i) => {
+    insert.run(`pm_${randomToken(9)}`, ownerType, ownerId, i, slide.imageUrl, slide.overlayText ?? null, now);
+  });
+}
+
+/** Reads back a Mehrbild-Post's slides, oldest position first - empty array for an ordinary
+ *  single-image post (nothing was ever written for it). */
+function getPostMedia(ownerType: "post" | "pending_approval" | "planned_post", ownerId: string): PostMediaSlide[] {
+  const rows = db
+    .prepare("SELECT * FROM post_media WHERE owner_type = ? AND owner_id = ? ORDER BY position")
+    .all(ownerType, ownerId) as PostMediaRow[];
+  return rows.map((r) => ({ position: r.position, imageUrl: r.image_url, overlayText: r.overlay_text }));
 }
 
 /**
@@ -407,16 +453,28 @@ const EMAIL_CHANNEL_LABEL: Record<string, string> = {
 export function logPost(
   customerId: string,
   provider: string,
-  post: { externalPostId?: string; headline?: string; caption?: string; imageUrl?: string; pillarTitle?: string; channel?: string },
+  post: {
+    externalPostId?: string;
+    headline?: string;
+    caption?: string;
+    imageUrl?: string;
+    pillarTitle?: string;
+    channel?: string;
+    /** Panel v14: 'carousel' | 'video_slideshow' - omit/undefined for the ordinary single-image case. */
+    format?: string;
+    /** Full slide list for a carousel/video-slideshow post - `imageUrl` above stays the cover/first slide either way. */
+    slides?: { imageUrl: string; overlayText?: string }[];
+  },
 ): void {
   // Panel v6 Aufgabe 4d: vor dem Insert geprueft, damit "war das der allererste Post" korrekt
   // ist - danach waere die neue Zeile selbst schon mitgezaehlt.
   const isFirstPost = (db.prepare("SELECT COUNT(*) as n FROM posts WHERE customer_id = ?").get(customerId) as { n: number }).n === 0;
+  const id = `post_${randomToken(9)}`;
   db.prepare(
-    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title, format)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    `post_${randomToken(9)}`,
+    id,
     customerId,
     provider,
     post.externalPostId ?? null,
@@ -425,7 +483,9 @@ export function logPost(
     post.imageUrl ?? null,
     nowIso(),
     post.pillarTitle ?? null,
+    post.format ?? "single",
   );
+  savePostMedia("post", id, post.slides);
   if (isFirstPost) maybeSendFirstPostEmail(customerId);
   maybeSendPostPublishedEmail(customerId, post.channel ?? provider);
 }
@@ -469,6 +529,8 @@ export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost
     caption: r.caption,
     imageUrl: r.image_url,
     postedAt: r.posted_at,
+    format: r.format,
+    slides: r.format === "single" ? [] : getPostMedia("post", r.id),
   }));
 }
 
@@ -634,10 +696,13 @@ export interface PostRequest {
   status: string;
   createdAt: string;
   updatedAt: string;
+  /** Panel v14: 'single' (default) | 'carousel' | 'video_slideshow' - only meaningful for
+   *  channel='ig_feed', see Session-Bericht Teil C. Ignore for ig_story/linkedin requests. */
+  format: string;
 }
 
 function toPostRequest(r: PostRequestRow): PostRequest {
-  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at };
+  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at, format: r.format };
 }
 
 /** Panel v8: per CHANNEL, not per customer overall - a customer may now have up to one open
@@ -679,13 +744,13 @@ export function postRequestCountToday(customerId: string): number {
  * whole point is that the routine decides how to fulfil it). Caller must check
  * openPostRequestCount/postRequestCountToday against POST_REQUEST_MAX_OPEN/_PER_DAY first.
  */
-export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null): PostRequest {
+export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null, format: string = "single"): PostRequest {
   const id = `preq_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
-  ).run(id, customerId, topic || null, channel, now, now);
-  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now };
+    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
+  ).run(id, customerId, topic || null, channel, now, now, format);
+  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now, format };
 }
 
 /** Most recent request for one customer (any status), for the panel's own status display. Null if they never asked. */
@@ -738,6 +803,10 @@ export interface PendingApproval {
   status: string;
   createdAt: string;
   updatedAt: string;
+  format: string;
+  /** Panel v14: full slide list for a carousel/video-slideshow approval - empty for 'single'. The
+   *  customer's approval-card preview needs every slide, not just the cover `imageUrl`. */
+  slides: PostMediaSlide[];
 }
 
 function toPendingApproval(r: PendingApprovalRow): PendingApproval {
@@ -754,6 +823,8 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    format: r.format,
+    slides: r.format === "single" ? [] : getPostMedia("pending_approval", r.id),
   };
 }
 
@@ -802,14 +873,32 @@ export function savePendingApproval(input: {
   /** Panel v7: defaults to 'routine' (the MCP tool wrapper never passes this - every call through
    *  it IS a spontaneous generation). submitPlannedPostForApproval passes 'planning' explicitly. */
   source?: string;
+  /** Panel v14: 'carousel' | 'video_slideshow' - omit/undefined for the ordinary single-image case. */
+  format?: string;
+  /** Full slide list for a carousel/video-slideshow approval - `imageUrl` above stays the cover/first slide. */
+  slides?: { imageUrl: string; overlayText?: string }[];
 }): PendingApproval | null {
   if (hasPendingOrApprovedToday(input.customerId, input.channel)) return null;
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-  ).run(id, input.customerId, input.provider, input.channel, input.headline ?? null, input.caption ?? null, input.imageUrl ?? null, input.pillarTitle ?? null, input.source ?? "routine", now, now);
+    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at, format)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+  ).run(
+    id,
+    input.customerId,
+    input.provider,
+    input.channel,
+    input.headline ?? null,
+    input.caption ?? null,
+    input.imageUrl ?? null,
+    input.pillarTitle ?? null,
+    input.source ?? "routine",
+    now,
+    now,
+    input.format ?? "single",
+  );
+  savePostMedia("pending_approval", id, input.slides);
   maybeSendApprovalsSummaryEmail(input.customerId);
   maybeSendApprovalNeededEmail(input.customerId, input.channel);
   return toPendingApproval(

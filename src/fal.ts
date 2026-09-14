@@ -241,6 +241,11 @@ async function requestFalImage(prompt: string, format: PostFormat): Promise<stri
  * proxy) can view it via the MCP tool result itself, without needing direct access to
  * fal.media or R2.
  */
+/** fal.ai FLUX schnell Preisstand 2026-09: ~$0.003/Megapixel, unsere Formate (square_hd ~1.05MP,
+ *  Story-Format ~1.03MP) liegen beide nahe genug an 1MP, dass ein einzelner Schätzwert pro Bild
+ *  reicht - siehe Session-Bericht (Panel v14, Karussell/Video-Diashow-Kosten-Logging). */
+export const FAL_IMAGE_COST_USD = 0.003;
+
 export interface ImageBranding {
   /** Validated hex color, e.g. from a customer's accentColor. Falls back to the default navy tone when absent. */
   accentColor?: string;
