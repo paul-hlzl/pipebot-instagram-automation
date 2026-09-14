@@ -422,6 +422,18 @@ migrateColumns("customers", [
   ["carousel_auto_frequency", "TEXT NOT NULL DEFAULT 'off'"],
 ]);
 
+// Panel v15: Farbverlauf + Schriftart (siehe Session-Bericht) - Teil derselben "Aussehen"-Gruppe
+// wie accent_color/watermark_text, deshalb direkte Kunden-Spalten statt einer eigenen Tabelle
+// (wie schon accent_color selbst). font_choice referenziert eine id aus fonts.ts's FONT_OPTIONS,
+// nicht validiert auf DB-Ebene (getFontOption() faellt bei unbekannter id auf den Standard
+// zurueck statt zu werfen - alte/kaputte Werte koennen so nie einen Bild-Render blockieren).
+migrateColumns("customers", [
+  ["font_choice", "TEXT NOT NULL DEFAULT 'inter'"],
+  ["gradient_enabled", "INTEGER NOT NULL DEFAULT 0"],
+  ["gradient_color2", "TEXT"],
+  ["gradient_direction", "TEXT NOT NULL DEFAULT 'diagonal'"],
+]);
+
 export interface CustomerRow {
   id: string;
   company: string;
@@ -473,6 +485,10 @@ export interface CustomerRow {
   updated_at: string;
   carousel_slide_count: number;
   carousel_auto_frequency: string;
+  font_choice: string;
+  gradient_enabled: number;
+  gradient_color2: string | null;
+  gradient_direction: string;
 }
 
 export interface ConnectionRow {

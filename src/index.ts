@@ -15,6 +15,7 @@ import {
   CAROUSEL_MAX_SLIDES,
 } from "./instagram.js";
 import { logUsageCost } from "./panel/analytics.js";
+import { installFontsOnce } from "./fonts.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
 import { startDailyPlanningSchedule } from "./panel/planning.js";
@@ -1130,6 +1131,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Panel v15: Marken-Schriften fuer die Bild-Rendering-Pipeline (siehe fonts.ts) - vor dem
+  // ersten Request installiert, damit auch der allererste generierte Post auf einem frischen
+  // Server schon die richtige Schrift bekommt statt kurzzeitig auf die System-Standardschrift
+  // zurueckzufallen. Wirft nie, blockiert den Serverstart also nie.
+  installFontsOnce();
   const app = createHttpApp(createServer);
   startTokenRefreshSchedule();
   startDailyPlanningSchedule();

@@ -36,14 +36,16 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-// Panel v7 fix (Teil 6): approximate average glyph width for this serif font at 1x font-size -
-// used both to decide where to wrap and, as a last-resort safety net, as the `textLength`
-// clamp on each rendered line (see addHeadlineText). Kept as one named constant so the wrap
-// estimate and the render-time safety net can never drift apart from each other.
-const AVG_GLYPH_WIDTH_FACTOR = 0.56;
+// Panel v7 fix (Teil 6): approximate average glyph width at 1x font-size - used both to decide
+// where to wrap and, as a last-resort safety net, as the `textLength` clamp on each rendered
+// line (see addHeadlineText). Panel v15: now per-font (fonts.ts glyphWidthFactor) instead of one
+// constant calibrated only for Liberation Serif - a condensed font like Bebas Neue or a script
+// font like Caveat has a very different average glyph width, and the estimate feeds directly
+// into how many lines a headline wraps onto.
+const DEFAULT_GLYPH_WIDTH_FACTOR = 0.56;
 
-function estimateTextWidth(text: string, fontSize: number): number {
-  return text.length * fontSize * AVG_GLYPH_WIDTH_FACTOR;
+function estimateTextWidth(text: string, fontSize: number, glyphWidthFactor: number = DEFAULT_GLYPH_WIDTH_FACTOR): number {
+  return text.length * fontSize * glyphWidthFactor;
 }
 
 /**
@@ -57,14 +59,14 @@ function estimateTextWidth(text: string, fontSize: number): number {
  * to break it on) - the render-time `textLength` safety net in addHeadlineText still keeps it
  * from actually overflowing the image.
  */
-function wrapHeadline(headline: string, fontSize: number, maxWidth: number): string[] {
+function wrapHeadline(headline: string, fontSize: number, maxWidth: number, glyphWidthFactor: number): string[] {
   const words = headline.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return [""];
   const lines: string[] = [];
   let current = "";
   for (const word of words) {
     const candidate = current ? `${current} ${word}` : word;
-    if (current && estimateTextWidth(candidate, fontSize) > maxWidth) {
+    if (current && estimateTextWidth(candidate, fontSize, glyphWidthFactor) > maxWidth) {
       lines.push(current);
       current = word;
     } else {
@@ -90,6 +92,10 @@ export async function addHeadlineText(
   imageBuffer: Buffer,
   headline: string,
   format: PostFormat = "feed",
+  /** Panel v15: fontconfig-Familienname + Gewicht + Breiten-Schaetzfaktor (siehe fonts.ts) -
+   *  Standard bleibt die bisherige "Liberation Serif, serif"/normal-Kombination fuer Aufrufer,
+   *  die noch keine Kundenwahl mitgeben (unveraendertes Verhalten). */
+  font: { family: string; weight: number; glyphWidthFactor?: number } = { family: "Liberation Serif, serif", weight: 400 },
 ): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
@@ -116,16 +122,17 @@ export async function addHeadlineText(
   // confirmed by a customer (Andrea Hölzl). Fixed by iterating: wrap at the current font size,
   // check the actual widest resulting line (not a pre-wrap guess) AND the total block height,
   // shrink and re-wrap if either is still too big, down to a sane minimum font size.
+  const glyphWidthFactor = font.glyphWidthFactor ?? DEFAULT_GLYPH_WIDTH_FACTOR;
   let fontSize = MAX_FONT_SIZE;
-  let lines = wrapHeadline(headline, fontSize, maxTextWidth);
+  let lines = wrapHeadline(headline, fontSize, maxTextWidth, glyphWidthFactor);
   for (;;) {
     const lineHeight = fontSize * 1.15;
     const totalTextHeight = lineHeight * lines.length;
-    const widestLine = Math.max(...lines.map((line) => estimateTextWidth(line, fontSize)));
+    const widestLine = Math.max(...lines.map((line) => estimateTextWidth(line, fontSize, glyphWidthFactor)));
     const fits = widestLine <= maxTextWidth && totalTextHeight <= maxTextHeight && lines.length <= MAX_LINES;
     if (fits || fontSize <= MIN_FONT_SIZE) break;
     fontSize = Math.max(MIN_FONT_SIZE, fontSize - Math.max(1, Math.round(fontSize * 0.08)));
-    lines = wrapHeadline(headline, fontSize, maxTextWidth);
+    lines = wrapHeadline(headline, fontSize, maxTextWidth, glyphWidthFactor);
   }
 
   const lineHeight = fontSize * 1.15;
@@ -142,13 +149,13 @@ export async function addHeadlineText(
       // glyphs so the line is rendered at EXACTLY this width - never wider than the safe zone,
       // no matter what the estimate got wrong. Clamped to maxTextWidth even in the (should be
       // unreachable after the loop above, except at the MIN_FONT_SIZE floor) worst case.
-      const clampedWidth = Math.min(estimateTextWidth(line, fontSize), maxTextWidth);
+      const clampedWidth = Math.min(estimateTextWidth(line, fontSize, glyphWidthFactor), maxTextWidth);
       return `<tspan x="${startX}" y="${Math.round(firstBaselineY + i * lineHeight)}" textLength="${Math.round(clampedWidth)}" lengthAdjust="spacingAndGlyphs">${escapeXml(line)}</tspan>`;
     })
     .join("");
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <text font-family="Liberation Serif, serif" font-size="${fontSize}" font-weight="normal" font-style="normal" fill="#ffffff">${tspans}</text>
+    <text font-family="${escapeXml(font.family)}" font-size="${fontSize}" font-weight="${font.weight}" font-style="normal" fill="#ffffff">${tspans}</text>
   </svg>`;
 
   return sharp(imageBuffer)
@@ -193,6 +200,9 @@ export async function addPipelineWatermark(
   format: PostFormat = "feed",
   watermarkText: string = "Pipeline",
   logoPath?: string | null,
+  /** Panel v15: dieselbe Kundenschrift wie die Headline (siehe fonts.ts) - Standard unveraendert
+   *  "Liberation Serif, serif" fuer Aufrufer ohne Kundenwahl. */
+  font: { family: string; weight: number } = { family: "Liberation Serif, serif", weight: 400 },
 ): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
@@ -217,7 +227,8 @@ export async function addPipelineWatermark(
     <text
       x="${cx}"
       y="${cy}"
-      font-family="Liberation Serif, serif"
+      font-family="${escapeXml(font.family)}"
+      font-weight="${font.weight}"
       font-size="${fontSize}"
       fill="#ffffff"
       fill-opacity="0.18"

@@ -752,6 +752,60 @@
   const LANGUAGES = { de: "Deutsch", en: "Englisch" };
   const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
 
+  // Panel v15: muss inhaltlich mit fonts.ts's FONT_OPTIONS uebereinstimmen (id/label/cssFamily) -
+  // gleiches Duplizierungs-Muster wie PALETTE oben (kein Server-Roundtrip fuer eine kleine,
+  // statische Liste). "file" nur hier im Frontend noetig, fuer die @font-face-Quelle.
+  const FONT_OPTIONS = [
+    { id: "inter", label: "Inter", cssFamily: "Inter", file: "Inter.ttf", styleNote: "Modern, klar, serifenlos" },
+    { id: "poppins", label: "Poppins", cssFamily: "Poppins", file: "Poppins.ttf", styleNote: "Rund, freundlich, serifenlos" },
+    { id: "playfair", label: "Playfair Display", cssFamily: "Playfair Display", file: "PlayfairDisplay.ttf", styleNote: "Elegant, klassische Serifenschrift" },
+    { id: "merriweather", label: "Merriweather", cssFamily: "Merriweather", file: "Merriweather.ttf", styleNote: "Ruhig, gut lesbare Serifenschrift" },
+    { id: "bebas", label: "Bebas Neue", cssFamily: "Bebas Neue", file: "BebasNeue.ttf", styleNote: "Schmal, kraftvoll, in Großbuchstaben" },
+    { id: "anton", label: "Anton", cssFamily: "Anton", file: "Anton.ttf", styleNote: "Sehr kräftige Display-Schrift" },
+    { id: "caveat", label: "Caveat", cssFamily: "Caveat", file: "Caveat.ttf", styleNote: "Dezente Handschrift-Optik" },
+    { id: "pacifico", label: "Pacifico", cssFamily: "Pacifico", file: "Pacifico.ttf", styleNote: "Verspielte Schreibschrift" },
+  ];
+  const fontOption = (id) => FONT_OPTIONS.find((f) => f.id === id) || FONT_OPTIONS[0];
+
+  const GRADIENT_DIRECTIONS = { diagonal: "Diagonal", horizontal: "Horizontal", vertical: "Vertikal" };
+
+  // Reine HSL-Rotation/-Verschiebung, IDENTISCHE Logik wie suggestGradientPartners() in
+  // gradient.ts (server-seitig) - hier dupliziert fuers sofortige Vorschau ohne Server-Roundtrip,
+  // gleiches Duplizierungs-Muster wie PALETTE/FONT_OPTIONS oben. Server validiert die gespeicherte
+  // Farbe beim Absenden ohnehin selbst (parseBriefing), diese Kopie hier ist rein fuer die
+  // Live-Vorschlaege im Formular.
+  function suggestGradientPartners(hex) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return [];
+    const n = parseInt(hex.slice(1), 16);
+    const [r0, g0, b0] = [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+    const max = Math.max(r0, g0, b0), min = Math.min(r0, g0, b0);
+    const l = (max + min) / 2;
+    const d = max - min;
+    let h = 0, s = 0;
+    if (d !== 0) {
+      s = d / (1 - Math.abs(2 * l - 1));
+      if (max === r0) h = ((g0 - b0) / d) % 6;
+      else if (max === g0) h = (b0 - r0) / d + 2;
+      else h = (r0 - g0) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    const clampedS = Math.max(s, 0.35);
+    const hueRotatedLightness = l + (0.5 - l) * 0.45;
+    const hsl = (hh, ss, ll) => {
+      hh = ((hh % 360) + 360) % 360; ss = Math.min(1, Math.max(0, ss)); ll = Math.min(1, Math.max(0, ll));
+      const c = (1 - Math.abs(2 * ll - 1)) * ss;
+      const x = c * (1 - Math.abs((hh / 60) % 2 - 1));
+      const m = ll - c / 2;
+      let [r, g, b] = [0, 0, 0];
+      if (hh < 60) [r, g, b] = [c, x, 0]; else if (hh < 120) [r, g, b] = [x, c, 0];
+      else if (hh < 180) [r, g, b] = [0, c, x]; else if (hh < 240) [r, g, b] = [0, x, c];
+      else if (hh < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+      const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    };
+    return [hsl(h + 35, clampedS, hueRotatedLightness), hsl(h + 180, clampedS, hueRotatedLightness), hsl(h, clampedS, Math.min(0.92, l + 0.28)), hsl(h, clampedS, Math.max(0.08, l - 0.28))];
+  }
+
   const ERRORS = {
     cancelled: (n) => `Sie haben die Verbindung mit ${n} abgebrochen. Sie können es jederzeit erneut versuchen.`,
     state: () => "Die Anfrage ist abgelaufen. Bitte klicken Sie noch einmal auf Verbinden.",
@@ -1487,7 +1541,7 @@
                 <select id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
               </div>`)}
 
-            ${group("aussehen", "Wie Ihre generierten Bilder aussehen: Farbe, Beschriftung, Logo.", `
+            ${group("aussehen", "Wie Ihre generierten Bilder aussehen: Farbe, Verlauf, Schriftart, Beschriftung, Logo.", `
               <div class="grid2">
                 <div class="field">
                   <label for="f-accentColor">Akzentfarbe für Ihre Bilder <span class="opt">(optional)</span></label>
@@ -1505,10 +1559,40 @@
                   ${withDictate(`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`)}
                   <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
                   <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
-                    <span class="lp-headline" id="lp-headline">Ihr Beitrag</span>
-                    <span class="lp-watermark" id="lp-watermark">${esc(c.watermarkText || c.company || "Pipeline")}</span>
+                    <span class="lp-headline" id="lp-headline" style="font-family:'${esc(fontOption(c.fontChoice).cssFamily)}'">Ihr Beitrag</span>
+                    <span class="lp-watermark" id="lp-watermark" style="font-family:'${esc(fontOption(c.fontChoice).cssFamily)}'">${esc(c.watermarkText || c.company || "Pipeline")}</span>
                   </div>
                 </div>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="f-gradientEnabled" name="gradientEnabled" ${c.gradientEnabled ? "checked" : ""}><span>Farbverlauf statt Einzelfarbe verwenden</span></label>
+                <div id="gradient-options" ${c.gradientEnabled ? "" : "hidden"}>
+                  <div class="grid2">
+                    <div class="field">
+                      <label for="f-gradientColor2">Zweite Farbe</label>
+                      <div class="colorrow">
+                        <input id="f-gradientColor2" name="gradientColor2" type="color" value="${esc(c.gradientColor2 || "#137A3F")}">
+                        <input type="text" value="${esc(c.gradientColor2 || "")}" placeholder="Wählen" readonly aria-hidden="true" tabindex="-1">
+                      </div>
+                      <div class="swatches" id="gradient-suggestions" role="group" aria-label="Passende Verlauf-Vorschläge"></div>
+                      <p class="hint">Automatische Vorschläge passend zu Ihrer Akzentfarbe - oder frei wählen.</p>
+                    </div>
+                    <div class="field">
+                      <label for="f-gradientDirection">Richtung</label>
+                      <select id="f-gradientDirection" name="gradientDirection">
+                        ${Object.entries(GRADIENT_DIRECTIONS).map(([k, v]) => `<option value="${k}" ${(c.gradientDirection || "diagonal") === k ? "selected" : ""}>${v}</option>`).join("")}
+                      </select>
+                      <p class="hint">Wirkt überall dort, wo bisher die Akzentfarbe stand: Bild-Hintergründe, Wasserzeichen-Fläche, Karussell-Slides.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label for="f-fontChoice">Schriftart für Text auf Bildern</label>
+                <select id="f-fontChoice" name="fontChoice">
+                  ${FONT_OPTIONS.map((f) => `<option value="${f.id}" ${(c.fontChoice || "inter") === f.id ? "selected" : ""}>${esc(f.label)} — ${esc(f.styleNote)}</option>`).join("")}
+                </select>
+                <p class="hint">Gilt für Headline, Wasserzeichen und Karussell-Texte. Vorschau oben im Kasten rechts.</p>
               </div>
               <div class="field" id="themes-section">${themesSectionHtml(c)}</div>
               <div class="field" id="logo-section">${logoSectionHtml(c)}</div>`)}
@@ -2618,6 +2702,8 @@
       // Einstellungen.
       if (S.settingsQuery) applySettingsFilter(S.settingsQuery);
       if (S.settingsTarget) { jumpToSettingsGroup(S.settingsTarget); S.settingsTarget = null; }
+      updateGradientSuggestions();
+      updateLivePreview();
     }
     maybeStartTour();
   }
@@ -2712,21 +2798,46 @@
     return open ? open.id : "done";
   }
 
+  const GRADIENT_CSS_ANGLE = { horizontal: "90deg", vertical: "180deg", diagonal: "135deg" };
+
+  /** Panel v15: zeigt zur aktuellen Akzentfarbe passende Verlauf-Vorschlaege als klickbare
+   *  Farbfelder (gleiches .swatch-Muster wie die Akzentfarben-Palette) - neu berechnet, sobald
+   *  sich die Akzentfarbe aendert, damit die Vorschlaege nie zu einer inzwischen anderen
+   *  Grundfarbe passen. */
+  function updateGradientSuggestions() {
+    const box = document.getElementById("gradient-suggestions");
+    if (!box) return;
+    const hex = document.getElementById("f-accentColor")?.value || "#0a0e1a";
+    const current = document.getElementById("f-gradientColor2")?.value || "";
+    box.innerHTML = suggestGradientPartners(hex).map((s) => `<button type="button" class="swatch" data-gradient-swatch="${s}" aria-pressed="${current.toLowerCase() === s.toLowerCase()}" style="background:${s}" aria-label="${s}"></button>`).join("");
+  }
+
   function updateLivePreview() {
     const square = document.getElementById("lp-square");
     if (!square) return;
     const hex = document.getElementById("f-accentColor")?.value || "#0a0e1a";
-    square.style.background = hex;
+    const gradientOn = document.getElementById("f-gradientEnabled")?.checked;
+    const color2 = document.getElementById("f-gradientColor2")?.value;
+    const direction = document.getElementById("f-gradientDirection")?.value || "diagonal";
+    square.style.background = gradientOn && color2
+      ? `linear-gradient(${GRADIENT_CSS_ANGLE[direction] || GRADIENT_CSS_ANGLE.diagonal}, ${hex}, ${color2})`
+      : hex;
     const wm = document.getElementById("lp-watermark");
     const company = document.querySelector('#formpart-a [name=company]')?.value || document.querySelector('[name=company]')?.value || "";
     const watermarkText = document.getElementById("f-watermarkText")?.value || "";
     if (wm) wm.textContent = watermarkText || company || "Pipeline";
+    const family = fontOption(document.getElementById("f-fontChoice")?.value).cssFamily;
+    const headlineEl = document.getElementById("lp-headline");
+    if (headlineEl) headlineEl.style.fontFamily = `'${family}'`;
+    if (wm) wm.style.fontFamily = `'${family}'`;
   }
 
   document.addEventListener("input", (e) => {
-    if (e.target.id === "f-accentColor" || e.target.id === "f-watermarkText" || e.target.name === "company") {
+    if (e.target.id === "f-accentColor" || e.target.id === "f-watermarkText" || e.target.name === "company" ||
+        e.target.id === "f-gradientColor2" || e.target.id === "f-gradientDirection" || e.target.id === "f-fontChoice") {
       updateLivePreview();
     }
+    if (e.target.id === "f-accentColor") updateGradientSuggestions();
     if (e.target.id === "f-pillar-keywords") {
       S.pillarAiKeywords = e.target.value;
     }
@@ -2735,6 +2846,15 @@
     if (e.target.id === "set-search-input") {
       S.settingsQuery = e.target.value;
       applySettingsFilter(S.settingsQuery);
+    }
+  });
+
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "f-gradientEnabled") {
+      const box = document.getElementById("gradient-options");
+      if (box) box.hidden = !e.target.checked;
+      if (e.target.checked) updateGradientSuggestions();
+      updateLivePreview();
     }
   });
 
@@ -3086,6 +3206,16 @@
       const picker = document.getElementById("f-accentColor");
       if (picker) picker.value = hex;
       document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === swatch)));
+      updateGradientSuggestions();
+      updateLivePreview();
+      return;
+    }
+    const gradientSwatch = e.target.closest("[data-gradient-swatch]");
+    if (gradientSwatch) {
+      const hex = gradientSwatch.dataset.gradientSwatch;
+      const picker = document.getElementById("f-gradientColor2");
+      if (picker) picker.value = hex;
+      document.querySelectorAll("[data-gradient-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === gradientSwatch)));
       updateLivePreview();
       return;
     }
@@ -3555,6 +3685,7 @@
     body.notifyOnPublish = checked("notifyOnPublish");
     body.notifyWeeklyReport = checked("notifyWeeklyReport");
     body.commentAutomationEnabled = checked("commentAutomationEnabled");
+    body.gradientEnabled = checked("gradientEnabled");
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
@@ -3625,7 +3756,21 @@
   }
 
   /* ================= Start ================= */
+  /** Panel v15: @font-face fuer alle acht Marken-Schriften, einmalig injiziert (CONFIG.mount
+   *  erst zur Laufzeit bekannt, deshalb hier statt im statischen <style> oben) - dieselben
+   *  Dateien, die die Bild-Rendering-Pipeline serverseitig nutzt (fonts.ts), ueber die neue
+   *  /fonts-Route ausgeliefert. font-display:swap, damit ein langsamer Font-Ladevorgang nie
+   *  Text unsichtbar macht (nur kurz die System-Schrift zeigt, bis der echte Font da ist). */
+  function injectFontFaces() {
+    const style = document.createElement("style");
+    style.textContent = FONT_OPTIONS.map((f) => `
+      @font-face { font-family: "${f.cssFamily}"; src: url("${CONFIG.mount}/fonts/${f.file}") format("truetype"); font-weight: 100 900; font-display: swap; }
+    `).join("");
+    document.head.appendChild(style);
+  }
+
   async function init() {
+    injectFontFaces();
     // #help-chat-input ist statisches HTML (existiert schon vor diesem Script), nicht Teil des
     // render()-Kreislaufs - einmalig durch dieselbe withDictate()-Umhuellung ersetzen wie jedes
     // andere Feld, statt die Button-/Icon-Auszeichnung hier separat zu duplizieren.

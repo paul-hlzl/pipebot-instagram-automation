@@ -56,6 +56,8 @@ import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js
 import { anthropicAvailable, helpChatReply, improveBriefing, suggestPillarsWithSearch, suggestTopics, type HelpChatMessage } from "../anthropic.js";
 import { subscribeToCommentWebhook } from "../instagram-comments.js";
 import { CAROUSEL_MIN_SLIDES, CAROUSEL_MAX_SLIDES } from "../instagram.js";
+import { FONT_OPTIONS, DEFAULT_FONT_ID } from "../fonts.js";
+import { suggestGradientPartners } from "../gradient.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 
@@ -171,9 +173,14 @@ interface BriefingInput {
   commentAutomationMode: string;
   carouselSlideCount: number;
   carouselAutoFrequency: string;
+  fontChoice: string;
+  gradientEnabled: boolean;
+  gradientColor2: string;
+  gradientDirection: string;
 }
 
 const CAROUSEL_AUTO_FREQUENCIES = ["off", "weekly", "always"];
+const GRADIENT_DIRECTIONS = ["horizontal", "vertical", "diagonal"];
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -235,11 +242,21 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     commentAutomationMode: str(body.commentAutomationMode, 20) || "approval",
     carouselSlideCount: Number.isFinite(Number(body.carouselSlideCount)) ? Math.round(Number(body.carouselSlideCount)) : 5,
     carouselAutoFrequency: str(body.carouselAutoFrequency, 20) || "off",
+    fontChoice: str(body.fontChoice, 20) || "inter",
+    gradientEnabled: bool(body.gradientEnabled, false),
+    gradientColor2: str(body.gradientColor2, 7),
+    gradientDirection: str(body.gradientDirection, 20) || "diagonal",
   };
   const errors: Record<string, string> = {};
   if (!COMMENT_AUTOMATION_MODES.includes(data.commentAutomationMode)) data.commentAutomationMode = "approval";
   if (data.carouselSlideCount < CAROUSEL_MIN_SLIDES || data.carouselSlideCount > CAROUSEL_MAX_SLIDES) data.carouselSlideCount = 5;
   if (!CAROUSEL_AUTO_FREQUENCIES.includes(data.carouselAutoFrequency)) data.carouselAutoFrequency = "off";
+  if (!FONT_OPTIONS.some((f) => f.id === data.fontChoice)) data.fontChoice = DEFAULT_FONT_ID;
+  if (!GRADIENT_DIRECTIONS.includes(data.gradientDirection)) data.gradientDirection = "diagonal";
+  if (data.gradientColor2 && !HEX_COLOR.test(data.gradientColor2)) data.gradientColor2 = "";
+  // Farbverlauf braucht zwingend eine zweite Farbe - ohne die bleibt er einfach aus (fuellt sich
+  // nicht selbst auf, damit nie versehentlich mit einer leeren/kaputten zweiten Farbe gerendert wird).
+  if (!data.gradientColor2) data.gradientEnabled = false;
   if (data.pauseFrom && !ISO_DATE.test(data.pauseFrom)) data.pauseFrom = "";
   if (data.pauseUntil && !ISO_DATE.test(data.pauseUntil)) data.pauseUntil = "";
   // A pause end before its start makes no sense - drop both rather than silently misbehaving.
@@ -292,6 +309,8 @@ function publicState(c: CustomerRow) {
       linkedinEnabled: Boolean(c.linkedin_enabled), hashtagPreference: c.hashtag_pref || "wenige",
       emojisEnabled: Boolean(c.emojis_enabled), language: c.language || "de",
       carouselSlideCount: c.carousel_slide_count, carouselAutoFrequency: c.carousel_auto_frequency || "off",
+      fontChoice: c.font_choice || "inter",
+      gradientEnabled: Boolean(c.gradient_enabled), gradientColor2: c.gradient_color2 ?? "", gradientDirection: c.gradient_direction || "diagonal",
       customerPaused: Boolean(c.customer_paused),
       contentPillars: listContentPillars(c.id),
       lastPostRequest: lastPostRequestForCustomer(c.id),
@@ -451,6 +470,11 @@ export function createPanelRouter(): Router {
   router.use(express.json({ limit: "50kb" }));
 
   router.use("/admin", createAdminRouter());
+
+  // Panel v15: dieselben Schriftdateien, die die Bild-Rendering-Pipeline serverseitig nutzt
+  // (fonts.ts/assets/fonts) - hier oeffentlich servierbar, damit das Panel per @font-face eine
+  // echte Live-Vorschau zeigen kann, statt die Schrift nur beim Namen zu nennen.
+  router.use("/fonts", express.static(path.join(PACKAGE_ROOT, "assets/fonts"), { maxAge: "7d" }));
 
   router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
@@ -825,7 +849,8 @@ export function createPanelRouter(): Router {
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
          ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
          active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
-         comment_automation_enabled=?, comment_automation_mode=?, carousel_slide_count=?, carousel_auto_frequency=?, updated_at=?
+         comment_automation_enabled=?, comment_automation_mode=?, carousel_slide_count=?, carousel_auto_frequency=?,
+         font_choice=?, gradient_enabled=?, gradient_color2=?, gradient_direction=?, updated_at=?
        WHERE id=?`,
     ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
@@ -833,6 +858,7 @@ export function createPanelRouter(): Router {
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
       data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
       data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode, data.carouselSlideCount, data.carouselAutoFrequency,
+      data.fontChoice, data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection,
       nowIso(), c.id);
     setContentPillars(c.id, data.contentPillars);
     res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));

@@ -4,6 +4,8 @@ import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
 import { addHeadlineText, addPipelineWatermark, type PostFormat } from "./watermark.js";
 import { uploadImageBase64 } from "./r2.js";
+import { getFontOption, DEFAULT_FONT_ID } from "./fonts.js";
+import { renderGradientBackground, type GradientDirection } from "./gradient.js";
 
 const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
 
@@ -27,6 +29,15 @@ const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
  */
 const FAL_IMAGE_SIZE: Record<PostFormat, string | { width: number; height: number }> = {
   feed: "square_hd",
+  story: { width: 768, height: 1344 },
+};
+
+/** Panel v15: gleiche Zielaufloesung wie FAL_IMAGE_SIZE, aber als konkrete Pixelmasse - fuer den
+ *  Farbverlauf-Pfad, der KEIN fal.ai-Bild anfordert (siehe generateImageUrl) und die Groesse
+ *  deshalb selbst kennen muss statt sie aus der heruntergeladenen Antwort abzulesen. "square_hd"
+ *  ist 1024x1024 (siehe Kommentar oben). */
+const GRADIENT_IMAGE_SIZE: Record<PostFormat, { width: number; height: number }> = {
+  feed: { width: 1024, height: 1024 },
   story: { width: 768, height: 1344 },
 };
 
@@ -253,6 +264,12 @@ export interface ImageBranding {
   watermarkText?: string;
   /** Local file path to a customer's uploaded logo - shown small in the corner instead of the text watermark. */
   logoPath?: string | null;
+  /** Panel v15: id from fonts.ts's FONT_OPTIONS - falls back to DEFAULT_FONT_ID when absent/unknown. */
+  fontId?: string;
+  /** Panel v15: when set, REPLACES the fal.ai-generated background with a deterministic two-color
+   *  gradient (see gradient.ts for why) - `accentColor` above still applies elsewhere (e.g. this
+   *  customer's saved-theme UI swatch) but is not sent to fal.ai in this case. */
+  gradient?: { color2: string; direction: GradientDirection };
 }
 
 export async function generateImageUrl(
@@ -265,17 +282,30 @@ export async function generateImageUrl(
     throw new ToolError("headline darf nicht leer sein.");
   }
 
-  const prompt = buildImageStylePrompt(branding?.accentColor);
-  const rawImageUrl = await withRetry(() => requestFalImage(prompt, format), 3, "fal.ai generate");
+  let backgroundBuffer: Buffer;
+  let prompt: string;
+  if (branding?.gradient && branding.accentColor && HEX_COLOR.test(branding.accentColor) && HEX_COLOR.test(branding.gradient.color2)) {
+    // Farbverlauf-Kunde: kein fal.ai-Aufruf fuer den Hintergrund (siehe gradient.ts Dateikopf) -
+    // spart sogar Kosten gegenueber dem Einzelfarben-Pfad, ausser den Slide-Bildkosten faellt hier
+    // nichts an.
+    const { width, height } = GRADIENT_IMAGE_SIZE[format];
+    backgroundBuffer = await renderGradientBackground(branding.accentColor, branding.gradient.color2, branding.gradient.direction, width, height);
+    prompt = `Farbverlauf ${branding.accentColor} -> ${branding.gradient.color2} (${branding.gradient.direction}), kein fal.ai-Aufruf`;
+  } else {
+    prompt = buildImageStylePrompt(branding?.accentColor);
+    const rawImageUrl = await withRetry(() => requestFalImage(prompt, format), 3, "fal.ai generate");
+    const { data } = await withRetry(
+      () => axios.get<ArrayBuffer>(rawImageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
+      3,
+      "fal.ai image download",
+    );
+    backgroundBuffer = Buffer.from(data);
+  }
 
-  const { data } = await withRetry(
-    () => axios.get<ArrayBuffer>(rawImageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
-    3,
-    "fal.ai image download",
-  );
-
-  const withHeadline = await addHeadlineText(Buffer.from(data), trimmedHeadline, format);
-  const finished = await addPipelineWatermark(withHeadline, format, branding?.watermarkText || "Pipeline", branding?.logoPath);
+  const fontOption = getFontOption(branding?.fontId ?? DEFAULT_FONT_ID);
+  const font = { family: fontOption.cssFamily, weight: fontOption.weight, glyphWidthFactor: fontOption.glyphWidthFactor };
+  const withHeadline = await addHeadlineText(backgroundBuffer, trimmedHeadline, format, font);
+  const finished = await addPipelineWatermark(withHeadline, format, branding?.watermarkText || "Pipeline", branding?.logoPath, font);
   const imageBase64 = finished.toString("base64");
   const imageUrl = await withRetry(
     () => uploadImageBase64(`data:image/jpeg;base64,${imageBase64}`),

@@ -121,6 +121,14 @@ export interface CustomerOverview {
    *  requests otherwise), 'weekly' (about once a week), or 'always'. Manual "Jetzt posten" always
    *  picks its format explicitly regardless of this setting. */
   carouselAutoFrequency: "off" | "weekly" | "always";
+  /** Panel v15: id aus fonts.ts's FONT_OPTIONS - wirkt auf Headline/Wasserzeichen/Karussell-Text
+   *  ueberall dort, wo Bilder generiert werden (siehe resolveImageBranding). */
+  fontChoice: string;
+  /** Panel v15: wenn true UND gradientColor2 gesetzt ist, ersetzt ein Zwei-Farben-Verlauf (accentColor -> gradientColor2)
+   *  den bisherigen Einzelfarben-Hintergrund - siehe gradient.ts. */
+  gradientEnabled: boolean;
+  gradientColor2: string | null;
+  gradientDirection: "horizontal" | "vertical" | "diagonal";
 }
 
 function channelsFor(customerId: string): ChannelOverview[] {
@@ -197,6 +205,10 @@ function overview(c: CustomerRow): CustomerOverview {
     channels: channelsFor(c.id),
     carouselSlideCount: c.carousel_slide_count,
     carouselAutoFrequency: (c.carousel_auto_frequency as CustomerOverview["carouselAutoFrequency"]) || "off",
+    fontChoice: c.font_choice || "inter",
+    gradientEnabled: Boolean(c.gradient_enabled),
+    gradientColor2: c.gradient_color2,
+    gradientDirection: (c.gradient_direction as CustomerOverview["gradientDirection"]) || "diagonal",
   };
 }
 
@@ -362,6 +374,11 @@ export function resolveImageBranding(customerId?: string): ImageBranding {
     accentColor: customer.accentColor ?? undefined,
     watermarkText: customer.watermarkText || customer.company || undefined,
     logoPath: customer.logoUrl,
+    fontId: customer.fontChoice,
+    gradient:
+      customer.gradientEnabled && customer.gradientColor2
+        ? { color2: customer.gradientColor2, direction: customer.gradientDirection }
+        : undefined,
   };
 }
 
