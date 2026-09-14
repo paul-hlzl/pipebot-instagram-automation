@@ -119,12 +119,8 @@
   .ai-box button.ghost { background: var(--paper); color: var(--ink); }
   .ai-box button[disabled] { opacity: .6; pointer-events: none; }
 
-  .intro { margin: 0 0 40px; padding: 24px 0 32px; border-bottom: 1px solid var(--rule); }
-  .intro-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 0 0 20px; }
-  .intro-steps div { font-size: 14.5px; line-height: 1.4; }
-  .intro-steps .n { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-bottom: 10px; border: 2px solid var(--ink); font-weight: 700; font-size: 13px; }
+  .intro { margin: 0 0 32px; padding: 0 0 28px; border-bottom: 1px solid var(--rule); }
   .intro-trial { margin: 0; font-size: 15px; font-weight: 500; }
-  @media (max-width: 640px) { .intro-steps { grid-template-columns: 1fr; } }
 
   .lp-square { width: 140px; height: 140px; border-radius: var(--r-sm); position: relative; overflow: hidden; margin: 10px 0; background: #0a0e1a; }
   .lp-headline { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); max-width: 68%; color: #fff; font-family: Georgia, "Times New Roman", serif; font-size: 13px; line-height: 1.3; }
@@ -1283,13 +1279,16 @@
         <input id="f-${name}" name="${name}" type="${type}" value="${esc(c[name])}" ${opts.optional ? "" : "required"} autocomplete="${opts.ac || "off"}" ${opts.ph ? `placeholder="${esc(opts.ph)}"` : ""}>
       </div>`;
 
+    // Panel v16 Fix: der fruehere 1/2/3-Erklaerblock hier wiederholte wortgleich, was die Schritt-
+    // Kette (.rail) links bzw. auf Mobil als Text ueber #rail-current bereits zeigt ("Schritt 1 von
+    // 4 · Unternehmen" + die 4 Knoten Unternehmen/Instagram/LinkedIn/Fertig). Auf Desktop steht die
+    // Kette in einer eigenen Spalte, faellt aber auf schmalen Screens (<=820px) in dieselbe
+    // einspaltige Fliessreihenfolge wie dieser Block - zwei fast identische Schritt-Aufzaehlungen
+    // direkt untereinander sahen dann wie zwei verschiedene Onboarding-Versionen aus (Screenshot-
+    // Beweis von Paul, 2026-09-14). Es gab nie zwei Code-Pfade, nur diese eine echte inhaltliche
+    // Dopplung - deshalb hier entfernt statt per CSS versteckt; die Test-Info bleibt einzig unten.
     const introHtml = !edit ? `
       <div class="intro" id="intro-block" ${part !== 1 ? "hidden" : ""}>
-        <div class="intro-steps">
-          <div><span class="n">1</span>Angaben zu Ihrem Unternehmen machen</div>
-          <div><span class="n">2</span>Instagram und/oder LinkedIn verbinden</div>
-          <div><span class="n">3</span>Fertig - Beiträge erscheinen von selbst</div>
-        </div>
         <p class="intro-trial">${S.trialDays} Tage kostenlos testen. Keine Kreditkarte nötig.</p>
       </div>` : "";
 
