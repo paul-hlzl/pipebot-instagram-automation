@@ -282,8 +282,15 @@
      Schlagen, sonst gewinnt dessen display:block und das Grid greift nie - genau das war die
      tatsaechliche Ursache des gemeldeten "sieht unstylt aus"-Bugs (Checkbox und Text lagen ohne
      Grid-Abstand aneinander), nicht ein fehlendes Icon. Per echtem Sandbox-Screenshot gefunden,
-     nicht nur per Code-Lesen - siehe Session-Bericht. */
-  label.check { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; cursor: pointer; }
+     nicht nur per Code-Lesen - siehe Session-Bericht.
+     align-items: start statt center (Panel v16 Fix): bei kurzen einzeiligen Labels macht center
+     keinen sichtbaren Unterschied, aber bei mehrzeiligem Text (z. B. die Zustimmungs-Checkbox
+     mit Datenschutz-Link, 5 Zeilen) zentrierte center die Box in der Mitte des GESAMTEN
+     Absatzes statt an der ersten Zeile - die Checkbox schien dann freischwebend irgendwo im
+     Text zu stehen statt zum Satzanfang zu gehoeren. .check input hatte schon vorher ein
+     "margin: 1px 0 0" fuer genau diesen Fall, das durch align-items:center wirkungslos war.
+     Per echtem Sandbox-Screenshot gefunden (Bug-Meldung von Paul zu Schritt 1 "Unternehmen"). */
+  label.check { display: grid; grid-template-columns: 22px 1fr; align-items: start; gap: 12px; min-height: 44px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; cursor: pointer; }
   .check input { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 1px 0 0; padding: 0; border: 1.5px solid #C9C9C9; background: var(--paper); cursor: pointer; position: relative; flex: none; }
   .check input[type=checkbox] { border-radius: 6px; }
   .check input[type=radio] { border-radius: 50%; }
