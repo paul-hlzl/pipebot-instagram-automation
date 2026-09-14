@@ -42,7 +42,10 @@ import {
   updatePlannedPostImage,
   updatePlannedPostText,
 } from "./credentials.js";
-import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache } from "./analytics.js";
+import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache, logUsageCost } from "./analytics.js";
+import { deleteObject, uploadAudioBase64 } from "../r2.js";
+import { estimateTranscriptionCostUsd, transcribeAudioUrl } from "../audio-transcribe.js";
+import { ToolError } from "../errors.js";
 import { approveCommentReply, CommentRateLimitError, listPendingCommentApprovals, rejectCommentReply } from "./comments.js";
 import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
@@ -499,6 +502,59 @@ export function createPanelRouter(): Router {
       } catch (err) {
         console.error("[panel] improve-briefing fehlgeschlagen:", err);
         res.status(502).json({ error: "Der Vorschlag konnte gerade nicht erstellt werden. Bitte später erneut versuchen." });
+      }
+    }),
+  );
+
+  // Panel v13, Diktierfunktion-Fallback (siehe Session-Bericht): server-seitige Transkription fuer
+  // Browser ohne Web Speech API (v.a. iOS Safari) - der Client nimmt per MediaRecorder auf und
+  // schickt die fertige Aufnahme hier als Base64 hoch. Gleiche Absicherung wie /api/improve-briefing
+  // (auch waehrend des Signups nutzbar, kein erzwungener Login), aber zusaetzlich mit einer harten
+  // Laengen-Grenze (90s) - laenger waere sowohl teurer als auch kein "kurzes Diktat" mehr.
+  router.post(
+    "/api/transcribe-audio",
+    express.json({ limit: "12mb" }), // Basis64-Sprachaufnahme, groesser als der globale 10kb/50kb-Parser unten erlaubt
+    safe(async (req, res) => {
+      if (rateLimited(`transcribe:${clientIp(req)}`, 20, 60 * 60_000)) {
+        res.status(429).json({ error: "Zu viele Diktier-Anfragen. Bitte in einer Stunde erneut versuchen." });
+        return;
+      }
+      const c = currentCustomer(req);
+      if (c && !c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
+      const audioBase64 = typeof req.body?.audioBase64 === "string" ? req.body.audioBase64 : "";
+      const durationSeconds = Number(req.body?.durationSeconds) || 0;
+      if (!audioBase64) {
+        res.status(400).json({ error: "Keine Aufnahme erhalten." });
+        return;
+      }
+      if (durationSeconds > 90) {
+        res.status(400).json({ error: "Aufnahme zu lang - bitte maximal 90 Sekunden am Stück diktieren." });
+        return;
+      }
+      let uploaded: { url: string; key: string } | undefined;
+      try {
+        uploaded = await uploadAudioBase64(audioBase64);
+        const { text } = await transcribeAudioUrl(uploaded.url, c?.language || "de");
+        // Wird geloggt, sobald der fal.ai-Aufruf selbst durchgelaufen ist - unabhaengig davon, ob
+        // ein Text erkannt wurde. Ein leeres Ergebnis (stille/unverstaendliche Aufnahme) hat fal.ai
+        // trotzdem in Rechnung gestellt; das erst NACH der leer-Pruefung zu loggen wuerde genau
+        // diese Kosten unsichtbar machen (siehe audio-transcribe.ts Dateikopf).
+        logUsageCost(c ? c.id : null, "voice-dictation", estimateTranscriptionCostUsd(durationSeconds));
+        if (!text) {
+          res.status(502).json({ error: "Die Aufnahme enthielt keinen erkennbaren Text. Bitte erneut versuchen oder selbst eintippen." });
+          return;
+        }
+        res.json({ text });
+      } catch (err) {
+        console.error(`[panel] ${c ? c.id : clientIp(req)}: Diktier-Transkription fehlgeschlagen:`, err instanceof Error ? err.message : err);
+        res.status(502).json({ error: err instanceof ToolError ? err.message : "Transkription gerade nicht möglich. Bitte erneut versuchen oder selbst eintippen." });
+      } finally {
+        // Aufraeumen laeuft unabhaengig davon, ob die Transkription geklappt hat - eine
+        // Sprachaufnahme wird nie dauerhaft gespeichert (siehe r2.ts uploadAudioBase64).
+        if (uploaded) deleteObject(uploaded.key).catch(() => {});
       }
     }),
   );

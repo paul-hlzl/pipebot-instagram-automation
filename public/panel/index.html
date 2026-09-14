@@ -257,7 +257,13 @@
   .dictate-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
   .dictate-btn[disabled] { opacity: .35; cursor: not-allowed; }
   .dictate-btn.dictating { background: var(--stop); color: var(--paper); animation: dictate-pulse 1.1s ease-in-out infinite; }
+  /* Server-Transkription laeuft (Panel v13, iOS-Fallback) - bewusst NICHT rot (das bedeutet
+     "nimmt gerade auf"), ruhiger Dreh statt Puls, damit sichtbar ist: anderer Zustand, "wird
+     verarbeitet", kein haengender Button. */
+  .dictate-btn.transcribing { background: var(--wash); color: var(--stone); cursor: wait; }
+  .dictate-btn.transcribing svg { animation: dictate-spin .9s linear infinite; }
   @keyframes dictate-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+  @keyframes dictate-spin { to { transform: rotate(360deg); } }
   #help-chat-form .dictate-wrap { flex: 1; min-width: 0; }
   .err { color: var(--stop); font-size: 13px; margin: 6px 0 0; }
   fieldset { border: 0; padding: 0; margin: 0; }
@@ -270,8 +276,32 @@
   .seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
   .seg.wd span { padding: 10px 4px; font-size: 13.5px; }
   @media (max-width: 480px) { .seg.wd { flex-wrap: wrap; } .seg.wd label { flex: 1 1 40px; } }
-  .check { display: grid; grid-template-columns: 22px 1fr; gap: 12px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; }
-  .check input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--ink); }
+  /* Eigene Checkbox-/Radio-Optik statt der nativen Browser-Darstellung (die "accent-color" davor
+     nur eingefaerbt, nie wirklich ersetzt hat - dadurch sah z. B. der Kanäle-Schritt im Onboarding
+     weiter nach unstyltem System-Standard aus, siehe Session-Bericht). appearance:none plus
+     selbst gezeichnetem Haekchen/Punkt, gleiche Rundung/Farben wie der Rest des Panels - reine
+     CSS-Aenderung, wirkt automatisch ueberall, wo schon `.check` verwendet wird (kein Markup-,
+     kein JS-Unterschied zwischen den Feldern). */
+  /* label.check (nicht nur .check): braucht die Spezifitaet von ".field label" oben (0,1,1) zum
+     Schlagen, sonst gewinnt dessen display:block und das Grid greift nie - genau das war die
+     tatsaechliche Ursache des gemeldeten "sieht unstylt aus"-Bugs (Checkbox und Text lagen ohne
+     Grid-Abstand aneinander), nicht ein fehlendes Icon. Per echtem Sandbox-Screenshot gefunden,
+     nicht nur per Code-Lesen - siehe Session-Bericht. */
+  label.check { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; color: var(--stone); margin: 8px 0 32px; cursor: pointer; }
+  .check input { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 1px 0 0; padding: 0; border: 1.5px solid #C9C9C9; background: var(--paper); cursor: pointer; position: relative; flex: none; }
+  .check input[type=checkbox] { border-radius: 6px; }
+  .check input[type=radio] { border-radius: 50%; }
+  .check input:hover:not(:disabled) { border-color: var(--ink); }
+  .check input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .check input:checked { background: var(--ink); border-color: var(--ink); }
+  .check input[type=checkbox]:checked::after {
+    content: ""; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px;
+    border: solid var(--paper); border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .check input[type=radio]:checked::after {
+    content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--paper);
+  }
+  .check input:disabled { opacity: .5; cursor: not-allowed; }
 
   /* Buttons */
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-top: 32px; }
@@ -580,6 +610,7 @@
     .pipe i { transition: none; }
     .splash-panel, .splash-content { animation: none; }
     .splash-content { opacity: 1; transform: translate(-50%, -50%); }
+    .dictate-btn.dictating, .dictate-btn.transcribing svg { animation: none; }
   }
 </style>
 </head>
@@ -737,15 +768,21 @@
   const prov = (id) => S.providers.find((p) => p.id === id);
 
   /**
-   * Diktierfunktion (Web Speech API), zentrales Bauteil fuer ALLE Text-/Textarea-Felder im
-   * Kunden-Panel - siehe Session-Bericht. Kein Server-Roundtrip, keine Zusatzkosten: nutzt
-   * ausschliesslich die browsereigene SpeechRecognition, komplett clientseitig.
+   * Diktierfunktion, zentrales Bauteil fuer ALLE Text-/Textarea-Felder im Kunden-Panel - siehe
+   * Session-Berichte. Zwei Wege, automatisch gewaehlt, kein manuelles Umschalten:
    *
-   * Browser-Unterstuetzung ist lueckenhaft (v.a. iOS Safari kaum/nicht, Firefox unzuverlaessig -
-   * siehe MDN-Kompatibilitaetstabelle) - deshalb wird das Mikrofon-Icon dort von vornherein
-   * DEAKTIVIERT gerendert (disabled-Attribut + erklaerender Titel/aria-label), nie als
-   * funktionsloser Button, der bei Klick einfach nichts tut oder wirft. `dictateSupported()` wird
-   * einmal beim Laden ausgewertet (Browser-Support aendert sich nicht waehrend einer Sitzung).
+   * 1. Web Speech API (kostenlos, komplett clientseitig): wo verfuegbar (Desktop-/Android-Chrome)
+   *    immer bevorzugt - kein Server-Roundtrip, keine Zusatzkosten.
+   * 2. Server-seitige Transkription (Panel v13, Fallback): iOS Safari unterstuetzt Web Speech
+   *    grundsaetzlich nicht (Apple-Plattform-Einschraenkung, kein Bug), hat aber MediaRecorder -
+   *    dort wird stattdessen aufgenommen, die fertige Aufnahme an /api/transcribe-audio geschickt
+   *    (fal.ai Whisper ueber audio-transcribe.ts, Kosten pro Aufruf in usage_costs geloggt) und der
+   *    zurueckgelieferte Text eingefuegt. Kostet echtes Geld pro Nutzung - deshalb NUR der
+   *    Fallback, nie der bevorzugte Weg, selbst wenn beides verfuegbar waere.
+   *
+   * Nur wenn WEDER 1 NOCH 2 verfuegbar ist (sehr alte Browser), wird das Mikrofon-Icon von
+   * vornherein DEAKTIVIERT gerendert (disabled-Attribut + erklaerender Titel/aria-label), nie als
+   * funktionsloser Button, der bei Klick einfach nichts tut oder wirft.
    *
    * `withDictate(fieldHtml)` wickelt ein bereits gerendertes <input>/<textarea> in einen
    * `.dictate-wrap` mit angehaengtem Mikrofon-Button - das ist die einzige Stelle, die jedes
@@ -757,12 +794,15 @@
    * zwei Stellen parallel existieren (Einrichtungs-Assistent vs. Einstellungen).
    */
   const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
-  const dictateSupported = () => Boolean(SpeechRecognitionCtor);
-  let activeDictation = null; // { recognition, btn } - immer hoechstens eine laufende Aufnahme gleichzeitig
+  const dictateSupported = () => Boolean(SpeechRecognitionCtor); // kostenloser Web-Speech-Pfad
+  const mediaRecorderSupported = () =>
+    Boolean(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); // Server-Fallback-Pfad
+  const dictateAvailable = () => dictateSupported() || mediaRecorderSupported();
+  let activeDictation = null; // { mode: "speech"|"record", btn, target, ... } - immer hoechstens eine laufende Aufnahme gleichzeitig
 
   function dictateBtnHtml(forceDisabled) {
-    const disabled = forceDisabled || !dictateSupported();
-    const label = dictateSupported() ? "Diktieren" : "Diktieren wird von diesem Browser nicht unterstützt";
+    const disabled = forceDisabled || !dictateAvailable();
+    const label = dictateAvailable() ? "Diktieren" : "Diktieren wird von diesem Browser nicht unterstützt";
     return `<button type="button" class="dictate-btn" data-dictate ${disabled ? "disabled" : ""} aria-label="${label}" title="${label}">` +
       `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
       `<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>` +
@@ -774,13 +814,24 @@
    *  Vorausplanungs-Karten) - der Mikrofon-Button darf dann nie aktiv wirken. */
   const withDictate = (fieldHtml, forceDisabled = false) => `<div class="dictate-wrap">${fieldHtml}${dictateBtnHtml(forceDisabled)}</div>`;
 
+  /**
+   * Bricht eine laufende Diktier-Sitzung sofort und OHNE Transkription ab (beide Modi) - der
+   * richtige Aufruf, wenn das Zielfeld gerade verschwindet (Re-Render, siehe render()/
+   * renderPillarsSection()) oder eine neue Sitzung eine alte ersetzt. Zum bewussten Beenden EINER
+   * Aufnahme mit anschliessender Transkription siehe finishRecording() unten - das ist ein
+   * eigener Pfad, weil Stoppen im Aufnahme-Modus ("record") eben NICHT automatisch verwerfen soll.
+   */
   function stopActiveDictation() {
     if (!activeDictation) return;
     const state = activeDictation;
     activeDictation = null;
     state.listening = false;
-    state.btn.classList.remove("dictating");
+    clearTimeout(state.autoStopTimer);
+    state.btn.classList.remove("dictating", "transcribing");
+    state.btn.disabled = false;
     try { state.recognition?.stop(); } catch {}
+    if (state.recorder && state.recorder.state !== "inactive") { try { state.recorder.stop(); } catch {} }
+    if (state.stream) { try { state.stream.getTracks().forEach((t) => t.stop()); } catch {} }
   }
 
   /**
@@ -839,16 +890,106 @@
     try { recognition.start(); } catch { stopActiveDictation(); }
   }
 
+  /**
+   * Liest eine Blob (die Aufnahme) als data:-URL ein, fuer den Base64-Upload an
+   * /api/transcribe-audio (gleiches Format wie der bestehende Logo-Upload, siehe router.ts).
+   */
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Aufnahme konnte nicht gelesen werden."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Server-Fallback-Pfad (Panel v13, iOS Safari): nimmt per MediaRecorder auf, bis der Nutzer
+   * erneut auf den Button tippt (finishRecording) oder 90s vergehen (Sicherheitsnetz gegen eine
+   * vergessene laufende Aufnahme). `mimeCandidates` in Praeferenz-Reihenfolge - iOS Safari liefert
+   * nur "audio/mp4" (kein WebM-Support), Chrome/Firefox typischerweise "audio/webm;codecs=opus".
+   */
+  function startServerRecording(btn, target) {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      if (activeDictation) { stream.getTracks().forEach((t) => t.stop()); return; } // inzwischen ueberholt
+      const mimeCandidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+      const mimeType = mimeCandidates.find((t) => window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(t)) || "";
+      let recorder;
+      try {
+        recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      } catch (err) {
+        stream.getTracks().forEach((t) => t.stop());
+        showError("Aufnahme konnte auf diesem Gerät nicht gestartet werden.");
+        return;
+      }
+      const chunks = [];
+      recorder.addEventListener("dataavailable", (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); });
+      const state = { mode: "record", btn, target, listening: true, stream, recorder, chunks, startedAt: Date.now() };
+      state.stoppedPromise = new Promise((resolve) => recorder.addEventListener("stop", resolve, { once: true }));
+      activeDictation = state;
+      btn.classList.add("dictating");
+      recorder.start();
+      state.autoStopTimer = setTimeout(() => { if (activeDictation === state) finishRecording(state); }, 90_000);
+    }).catch((err) => {
+      console.error("[dictate] Mikrofonzugriff verweigert/fehlgeschlagen:", err);
+      showError("Für das Diktieren wird Mikrofon-Zugriff benötigt. Bitte erlauben Sie den Zugriff in den Browser-/Geräteeinstellungen und versuchen Sie es erneut.");
+    });
+  }
+
+  /**
+   * Beendet eine laufende Aufnahme UND schickt sie zur Transkription - der bewusste "Stopp"-Klick
+   * des Nutzers (anders als stopActiveDictation, das verwirft). Drei sichtbare Zustaende fuer den
+   * Nutzer: aufnehmend (.dictating, rot pulsierend) -> wird transkribiert (.transcribing, Button
+   * gesperrt) -> Text erscheint im Feld. Zu kurze/leere Aufnahmen (z. B. versehentlicher Doppel-Tap)
+   * werden verworfen, ohne einen Server-Aufruf (und damit Kosten) auszuloesen.
+   */
+  async function finishRecording(state) {
+    if (activeDictation !== state) return;
+    clearTimeout(state.autoStopTimer);
+    activeDictation = null;
+    state.btn.classList.remove("dictating");
+    state.btn.classList.add("transcribing");
+    state.btn.disabled = true;
+
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    if (state.recorder.state !== "inactive") { try { state.recorder.stop(); } catch {} }
+    await state.stoppedPromise;
+    state.stream.getTracks().forEach((t) => { try { t.stop(); } catch {} });
+
+    const cleanup = () => { state.btn.classList.remove("transcribing"); state.btn.disabled = false; };
+    if (!state.chunks.length || durationSeconds < 0.4) { cleanup(); return; }
+
+    try {
+      const blob = new Blob(state.chunks, { type: state.recorder.mimeType || "audio/webm" });
+      const audioBase64 = await blobToDataUrl(blob);
+      const data = await api("POST", "/api/transcribe-audio", { audioBase64, durationSeconds });
+      if (data.text) insertDictatedText(state.target, data.text);
+    } catch (err) {
+      console.error("[dictate] Transkription fehlgeschlagen:", err);
+      showError(err.message || "Transkription ist gerade nicht möglich. Bitte erneut versuchen oder selbst eintippen.");
+    } finally {
+      cleanup();
+    }
+  }
+
   function toggleDictation(btn) {
-    if (!dictateSupported() || btn.disabled) return;
-    if (activeDictation && activeDictation.btn === btn) { stopActiveDictation(); return; }
+    if (!dictateAvailable() || btn.disabled) return;
+    if (activeDictation && activeDictation.btn === btn) {
+      if (activeDictation.mode === "record") finishRecording(activeDictation);
+      else stopActiveDictation();
+      return;
+    }
     stopActiveDictation();
     const target = btn.closest(".dictate-wrap")?.querySelector("input, textarea");
     if (!target) return;
-    const state = { btn, target, listening: true, recognition: null };
-    activeDictation = state;
-    btn.classList.add("dictating");
-    startRecognitionCycle(state);
+    if (dictateSupported()) {
+      const state = { mode: "speech", btn, target, listening: true, recognition: null };
+      activeDictation = state;
+      btn.classList.add("dictating");
+      startRecognitionCycle(state);
+    } else if (mediaRecorderSupported()) {
+      startServerRecording(btn, target);
+    }
   }
   // Panel v9 Punkt 7: die Erstanmeldungs-Kette (Rail) besteht nur noch aus Unternehmen/Kanaelen/
   // Fertig - Vorschau/Verlauf/Analytics sind eigene Dashboard-Unteransichten (siehe DETAIL_VIEWS),
