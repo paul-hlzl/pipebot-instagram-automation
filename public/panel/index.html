@@ -217,6 +217,23 @@
   textarea { height: auto; min-height: 120px; padding: 12px 14px; resize: vertical; line-height: 1.5; }
   input:focus, select:focus, textarea:focus { border-color: var(--ink); outline: 2px solid var(--ink); outline-offset: 0; }
   [aria-invalid=true] { border-color: var(--stop) !important; }
+
+  /* ---------- Diktierfunktion (Web Speech API) - ein Bauteil fuer alle Text-/Textarea-Felder ---------- */
+  .dictate-wrap { position: relative; }
+  .dictate-wrap textarea, .dictate-wrap input[type=text], .dictate-wrap input[type=search] { padding-right: 52px; }
+  .dictate-wrap:has(input) .dictate-btn { top: 50%; transform: translateY(-50%); }
+  .dictate-wrap:has(textarea) .dictate-btn { top: 8px; transform: none; }
+  .dictate-btn {
+    position: absolute; right: 4px; width: 44px; height: 44px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid #C9C9C9; border-radius: 50%; background: var(--paper); color: var(--ink); cursor: pointer;
+  }
+  .dictate-btn:hover:not([disabled]) { border-color: var(--ink); }
+  .dictate-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .dictate-btn[disabled] { opacity: .3; cursor: not-allowed; }
+  .dictate-btn.dictating { background: var(--stop); border-color: var(--stop); color: var(--paper); animation: dictate-pulse 1.1s ease-in-out infinite; }
+  @keyframes dictate-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+  #help-chat-form .dictate-wrap { flex: 1; min-width: 0; }
   .err { color: var(--stop); font-size: 13px; margin: 6px 0 0; }
   fieldset { border: 0; padding: 0; margin: 0; }
   .seg { display: flex; gap: 8px; }
@@ -693,6 +710,99 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const conn = (id) => S.connections.find((c) => c.provider === id);
   const prov = (id) => S.providers.find((p) => p.id === id);
+
+  /**
+   * Diktierfunktion (Web Speech API), zentrales Bauteil fuer ALLE Text-/Textarea-Felder im
+   * Kunden-Panel - siehe Session-Bericht. Kein Server-Roundtrip, keine Zusatzkosten: nutzt
+   * ausschliesslich die browsereigene SpeechRecognition, komplett clientseitig.
+   *
+   * Browser-Unterstuetzung ist lueckenhaft (v.a. iOS Safari kaum/nicht, Firefox unzuverlaessig -
+   * siehe MDN-Kompatibilitaetstabelle) - deshalb wird das Mikrofon-Icon dort von vornherein
+   * DEAKTIVIERT gerendert (disabled-Attribut + erklaerender Titel/aria-label), nie als
+   * funktionsloser Button, der bei Klick einfach nichts tut oder wirft. `dictateSupported()` wird
+   * einmal beim Laden ausgewertet (Browser-Support aendert sich nicht waehrend einer Sitzung).
+   *
+   * `withDictate(fieldHtml)` wickelt ein bereits gerendertes <input>/<textarea> in einen
+   * `.dictate-wrap` mit angehaengtem Mikrofon-Button - das ist die einzige Stelle, die jedes
+   * Feld beim Rendern aufruft, keine Kopien der Button-/Icon-Auszeichnung an den einzelnen
+   * Feld-Stellen. Der Klick-Handler (siehe zentraler document-Click-Listener) findet das
+   * Zielfeld ueber `.closest(".dictate-wrap")` + `querySelector("input, textarea")` - bewusst
+   * NICHT ueber eine id, weil manche Felder (Content-Saeulen-Zeilen, Vorausplanungs-Karten pro
+   * Beitrag) mehrfach auf derselben Seite vorkommen bzw. Formulare mit identischer Feld-id an
+   * zwei Stellen parallel existieren (Einrichtungs-Assistent vs. Einstellungen).
+   */
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  const dictateSupported = () => Boolean(SpeechRecognitionCtor);
+  let activeDictation = null; // { recognition, btn } - immer hoechstens eine laufende Aufnahme gleichzeitig
+
+  function dictateBtnHtml(forceDisabled) {
+    const disabled = forceDisabled || !dictateSupported();
+    const label = dictateSupported() ? "Diktieren" : "Diktieren wird von diesem Browser nicht unterstützt";
+    return `<button type="button" class="dictate-btn" data-dictate ${disabled ? "disabled" : ""} aria-label="${label}" title="${label}">` +
+      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>` +
+      `</svg></button>`;
+  }
+
+  /** Die einzige Stelle, die ein Text-/Textarea-Feld dictier-faehig macht - siehe Dateikopf-Kommentar.
+   *  `forceDisabled` fuer Felder, die selbst gerade disabled sind (z. B. nicht editierbare
+   *  Vorausplanungs-Karten) - der Mikrofon-Button darf dann nie aktiv wirken. */
+  const withDictate = (fieldHtml, forceDisabled = false) => `<div class="dictate-wrap">${fieldHtml}${dictateBtnHtml(forceDisabled)}</div>`;
+
+  function stopActiveDictation() {
+    if (!activeDictation) return;
+    const { recognition, btn } = activeDictation;
+    activeDictation = null;
+    btn.classList.remove("dictating");
+    try { recognition.stop(); } catch {}
+  }
+
+  /**
+   * Schreibt diktierten Text an der Cursor-Position ins Zielfeld (haengt an, ueberschreibt nie
+   * vorhandenen Inhalt) und feuert danach ein echtes "input"-Event - diktierter Text durchlaeuft
+   * dadurch exakt dieselbe Validierung/State-Anbindung wie getippter Text, kein Sonderpfad.
+   * Bricht sauber ab (schreibt nichts), wenn das Zielfeld inzwischen durch einen Re-Render
+   * ersetzt/entfernt wurde (document.body.contains) - sonst wuerde das Ergebnis unsichtbar in
+   * ein verwaistes DOM-Element geschrieben.
+   */
+  function insertDictatedText(target, text) {
+    if (!text || !document.body.contains(target)) return;
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? target.value.length;
+    const before = target.value.slice(0, start);
+    const after = target.value.slice(end);
+    const needsSpace = before && !/\s$/.test(before);
+    const inserted = (needsSpace ? " " : "") + text;
+    const max = target.maxLength && target.maxLength > 0 ? target.maxLength : Infinity;
+    target.value = (before + inserted + after).slice(0, max);
+    const caret = Math.min(before.length + inserted.length, max);
+    target.setSelectionRange(caret, caret);
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function toggleDictation(btn) {
+    if (!dictateSupported() || btn.disabled) return;
+    if (activeDictation && activeDictation.btn === btn) { stopActiveDictation(); return; }
+    stopActiveDictation();
+    const target = btn.closest(".dictate-wrap")?.querySelector("input, textarea");
+    if (!target) return;
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = "de-DE";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      let finalChunk = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalChunk += event.results[i][0].transcript;
+      }
+      if (finalChunk.trim()) insertDictatedText(target, finalChunk.trim());
+    };
+    recognition.onerror = () => stopActiveDictation();
+    recognition.onend = () => { if (activeDictation && activeDictation.btn === btn) stopActiveDictation(); };
+    activeDictation = { recognition, btn };
+    btn.classList.add("dictating");
+    try { recognition.start(); } catch { stopActiveDictation(); }
+  }
   // Panel v9 Punkt 7: die Erstanmeldungs-Kette (Rail) besteht nur noch aus Unternehmen/Kanaelen/
   // Fertig - Vorschau/Verlauf/Analytics sind eigene Dashboard-Unteransichten (siehe DETAIL_VIEWS),
   // kein Rail-Schritt mehr, werden ausschliesslich ueber die Dashboard-/Fertig-Buttons erreicht.
@@ -846,10 +956,11 @@
   }
 
   function renderPillarsSection() {
+    stopActiveDictation(); // wird bei Hinzufuegen/Entfernen/Uebernehmen neu gerendert
     const rows = S.pillarsDraft.map((p, i) => `
       <div class="pillar-row" data-pillar-index="${i}">
-        <input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">
-        <input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">
+        ${withDictate(`<input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">`)}
+        ${withDictate(`<input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">`)}
         <select data-pillar-weight aria-label="Gewichtung">${[1, 2, 3, 4, 5].map((w) => `<option value="${w}" ${p.weight === w ? "selected" : ""}>${w}×</option>`).join("")}</select>
         <button type="button" class="link" data-pillar-remove="${i}">Entfernen</button>
       </div>`).join("");
@@ -863,7 +974,7 @@
       <div id="pillar-ai-block" ${S.pillarAiOpen ? "" : "hidden"}>
         <div class="field">
           <label for="f-pillar-keywords" class="vh">Stichworte für Themen-Ideen</label>
-          <input id="f-pillar-keywords" type="text" placeholder="Stichworte für Themen-Ideen (optional, z. B. Osteopressur, Faszientherapie, Mühlviertel)" maxlength="300" value="${esc(S.pillarAiKeywords)}">
+          ${withDictate(`<input id="f-pillar-keywords" type="text" placeholder="Stichworte für Themen-Ideen (optional, z. B. Osteopressur, Faszientherapie, Mühlviertel)" maxlength="300" value="${esc(S.pillarAiKeywords)}">`)}
         </div>
         <div class="actions">
           <button type="button" class="link" id="pillar-ai-fetch">Vorschläge holen</button>
@@ -950,7 +1061,7 @@
         ${f("industry", "Branche", "text", { optional: true, ph: "z. B. Physiotherapie, Tischlerei, Steuerberatung" })}
         <div class="field">
           <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
-          <textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>
+          ${withDictate(`<textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>`)}
           <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
           <div id="ai-suggestion" hidden></div>
         </div>
@@ -975,7 +1086,7 @@
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-            <input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">
+            ${withDictate(`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`)}
             <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
             <p class="hint">So ungefähr sehen Ihre Bilder aus (Beispiel, kein echtes Bild):</p>
             <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
@@ -1016,18 +1127,18 @@
           </div>
           <div class="field">
             <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-            <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
+            ${withDictate(`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`)}
             <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
           </div>
         </div>
         <div class="field">
           <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
-          <input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">
+          ${withDictate(`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`)}
           <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
         </div>
         <div class="field">
           <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
-          <input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">
+          ${withDictate(`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`)}
           <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
         </div>
         <div class="field">
@@ -1143,7 +1254,7 @@
         <div>
           <div class="set-search">
             <label class="vh" for="set-search-input">Einstellung suchen</label>
-            <input id="set-search-input" type="search" placeholder="Einstellung suchen, z. B. Kommentar, Farbe, Hashtag" autocomplete="off" value="${esc(S.settingsQuery)}">
+            ${withDictate(`<input id="set-search-input" type="search" placeholder="Einstellung suchen, z. B. Kommentar, Farbe, Hashtag" autocomplete="off" value="${esc(S.settingsQuery)}">`)}
             <p class="hint" id="set-search-hint">Zeigt sofort nur die passenden Einstellungen an.</p>
           </div>
           <form id="company" novalidate>
@@ -1151,7 +1262,7 @@
               <div class="grid2">
                 <div class="field">
                   <label for="f-company">Firmenname</label>
-                  <input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization">
+                  ${withDictate(`<input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization">`)}
                 </div>
                 <div class="field">
                   <label for="f-website">Website <span class="opt">(optional)</span></label>
@@ -1160,7 +1271,7 @@
                 </div>
                 <div class="field">
                   <label for="f-contactName">Ihr Name</label>
-                  <input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name">
+                  ${withDictate(`<input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name">`)}
                 </div>
                 <div class="field">
                   <label for="f-email">E-Mail</label>
@@ -1170,11 +1281,11 @@
               <div id="website-suggestion" hidden></div>
               <div class="field">
                 <label for="f-industry">Branche <span class="opt">(optional)</span></label>
-                <input id="f-industry" name="industry" type="text" value="${esc(c.industry)}" placeholder="z. B. Physiotherapie, Tischlerei, Steuerberatung">
+                ${withDictate(`<input id="f-industry" name="industry" type="text" value="${esc(c.industry)}" placeholder="z. B. Physiotherapie, Tischlerei, Steuerberatung">`)}
               </div>
               <div class="field">
                 <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
-                <textarea id="f-about" name="about" placeholder="Stichworte reichen.">${esc(c.about)}</textarea>
+                ${withDictate(`<textarea id="f-about" name="about" placeholder="Stichworte reichen.">${esc(c.about)}</textarea>`)}
                 <p class="hint">Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
                 <div id="ai-suggestion" hidden></div>
               </div>
@@ -1198,7 +1309,7 @@
                 </div>
                 <div class="field">
                   <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-                  <input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">
+                  ${withDictate(`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`)}
                   <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
                   <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
                     <span class="lp-headline" id="lp-headline">Ihr Beitrag</span>
@@ -1228,17 +1339,17 @@
               <label class="check"><input type="checkbox" name="emojisEnabled" ${c.emojisEnabled !== false ? "checked" : ""}><span>Emojis in Beiträgen verwenden</span></label>
               <div class="field" style="margin-top:22px">
                 <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
-                <input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">
+                ${withDictate(`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`)}
                 <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
               </div>
               <div class="field">
                 <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
-                <input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">
+                ${withDictate(`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`)}
                 <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
               </div>
               <div class="field">
                 <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-                <input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">
+                ${withDictate(`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`)}
                 <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
               </div>`)}
 
@@ -1669,7 +1780,7 @@
       ${postNowStatusHtml(c)}
       <div class="field">
         <label for="f-postNowTopic">Thema <span class="opt">(optional)</span></label>
-        <textarea id="f-postNowTopic" rows="3" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>
+        ${withDictate(`<textarea id="f-postNowTopic" rows="3" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>`, postNowAllBusy(c))}
       </div>
       ${S.aiAvailable && !postNowAllBusy(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
       <div id="topic-suggestions" class="chips" hidden></div>` : ""}
@@ -1785,7 +1896,7 @@
             ${postNowStatusHtml(c)}
             <div class="field">
               <label for="f-postNowTopic">Thema <span class="opt">(optional)</span></label>
-              <textarea id="f-postNowTopic" rows="2" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>
+              ${withDictate(`<textarea id="f-postNowTopic" rows="2" placeholder="Worum soll es gehen? (optional)" maxlength="300" ${postNowAllBusy(c) ? "disabled" : ""}></textarea>`, postNowAllBusy(c))}
             </div>
             ${S.aiAvailable && !postNowAllBusy(c) ? `<p class="hint"><button type="button" class="link" id="suggest-topics">Ideen vorschlagen</button></p>
             <div id="topic-suggestions" class="chips" hidden></div>` : ""}
@@ -1930,7 +2041,7 @@
         <span class="channel-badge">Instagram-Kommentar</span>
         <p class="hint" style="margin:2px 0 10px">${esc(a.authorUsername ? `@${a.authorUsername}` : "Jemand")} schrieb: „${esc(a.commentText)}“</p>
         <label style="display:block;margin-bottom:4px">Ihre Antwort</label>
-        <textarea class="comment-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>
+        ${withDictate(`<textarea class="comment-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>`)}
         <div class="actions">
           <button class="btn" data-comment-approve="${esc(a.id)}">Freigeben</button>
           <button class="link" data-comment-reject="${esc(a.id)}">Ablehnen</button>
@@ -2157,9 +2268,9 @@
         </div>
         <p class="hint" style="margin:2px 0 8px">Erstellt ${esc(fmtCreated(p.createdAt))} (Vorausplanung).</p>
         <label class="vh" for="pp-headline-${esc(p.id)}">Headline</label>
-        <input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Headline" ${editable ? "" : "disabled"}>
+        ${withDictate(`<input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Headline" ${editable ? "" : "disabled"}>`, !editable)}
         ${p.channel !== "ig_story" ? `<label class="vh" for="pp-caption-${esc(p.id)}">Caption</label>
-        <textarea id="pp-caption-${esc(p.id)}" maxlength="2200" placeholder="Caption" ${editable ? "" : "disabled"}>${esc(p.caption || "")}</textarea>` : ""}
+        ${withDictate(`<textarea id="pp-caption-${esc(p.id)}" maxlength="2200" placeholder="Caption" ${editable ? "" : "disabled"}>${esc(p.caption || "")}</textarea>`, !editable)}` : ""}
         <p class="pp-save-status" data-pp-save-status="${esc(p.id)}" aria-live="polite"></p>
         ${editable ? `<div class="actions"><button type="button" class="link" data-pp-save="${esc(p.id)}">Speichern</button></div>` : ""}
 
@@ -2255,6 +2366,7 @@
   }
 
   function render(focus) {
+    stopActiveDictation(); // #stage wird gleich komplett neu gerendert - eine laufende Aufnahme haette sonst kein gueltiges Zielfeld mehr
     renderTrialBar();
     renderRail();
     renderMainNav();
@@ -2722,6 +2834,8 @@
   });
 
   document.addEventListener("click", async (e) => {
+    const dictateBtn = e.target.closest("[data-dictate]");
+    if (dictateBtn) { toggleDictation(dictateBtn); return; }
     const lightboxTrigger = e.target.closest("[data-lightbox]");
     if (lightboxTrigger && lightboxTrigger.tagName === "IMG") {
       openLightbox(lightboxTrigger.currentSrc || lightboxTrigger.src, lightboxTrigger.alt);
@@ -3285,6 +3399,11 @@
 
   /* ================= Start ================= */
   async function init() {
+    // #help-chat-input ist statisches HTML (existiert schon vor diesem Script), nicht Teil des
+    // render()-Kreislaufs - einmalig durch dieselbe withDictate()-Umhuellung ersetzen wie jedes
+    // andere Feld, statt die Button-/Icon-Auszeichnung hier separat zu duplizieren.
+    const helpChatInput = $("#help-chat-input");
+    if (helpChatInput) helpChatInput.outerHTML = withDictate(helpChatInput.outerHTML);
     if (DEMO) $("#demo").hidden = false;
     try {
       const p = await api("GET", "/api/providers");
