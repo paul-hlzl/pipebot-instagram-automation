@@ -1101,8 +1101,18 @@ export function savePendingApproval(input: {
    *  passes the SOURCE planned_post's own timestamp instead, since it's copying existing content
    *  verbatim, not generating anything new - see its call site. */
   brandingVersionAtGeneration?: string;
+  /**
+   * Hebt den Tagesplatz-Schutz fuer DIESEN einen Aufruf auf (15.09.2026).
+   *
+   * Nur fuer eine ausdrueckliche "Jetzt posten"-Anfrage gedacht: runVideoPass laesst solche
+   * Anfragen bewusst am Tagesplatz-Schutz vorbei, der hier aber ein zweites Mal griff - das
+   * Video wurde komplett erzeugt (Drehbuch, Sprachausgabe, Bild, ffmpeg-Rendering, Upload) und
+   * dann verworfen, die Anfrage als erledigt markiert, und im Panel passierte sichtbar nichts.
+   * Der automatische Wochenplan setzt diesen Schalter NICHT.
+   */
+  allowSecondToday?: boolean;
 }): PendingApproval | null {
-  if (hasPendingOrApprovedToday(input.customerId, input.channel)) return null;
+  if (!input.allowSecondToday && hasPendingOrApprovedToday(input.customerId, input.channel)) return null;
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(

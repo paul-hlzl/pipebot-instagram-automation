@@ -42,7 +42,15 @@
   // rein informativ hier (Anzeige/Validierung im Formular), die echte Grenze setzt der Server.
   const CAROUSEL_MIN_SLIDES = 3;
   const CAROUSEL_MAX_SLIDES = 7;
-  const POST_FORMATS = { single: "Einzelbild", carousel: "Karussell (mehrere Bilder zum Wischen)" };
+  /* Beim Redesign "Flow" ging die dritte Option verloren: Panel v22 hatte sie in die damals noch
+     einteilige public/panel/index.html eingetragen, und diese Datei wurde vom neuen Panel
+     ersetzt. Server, Rendering und Veroeffentlichung waren die ganze Zeit fertig - nur waehlbar
+     war das Format nirgends. Kurzform fuer die Kachel, Langform fuer Vorlese-/Hilfetexte. */
+  const POST_FORMATS = {
+    single: { kurz: "Einzelbild", lang: "Einzelbild", symbol: "feed" },
+    carousel: { kurz: "Karussell", lang: "Karussell (mehrere Bilder zum Wischen)", symbol: "beitraege" },
+    video_slideshow: { kurz: "Video-Diashow", lang: "Video-Diashow (Reel mit Sprachausgabe)", symbol: "video" },
+  };
   const HASHTAGS = { keine: "Keine", wenige: "Wenige (2-3)", viele: "Viele (5+)" };
   const LANGUAGES = { de: "Deutsch", en: "Englisch" };
   const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
@@ -475,6 +483,7 @@
     linkedin: '<rect x="0" y="0" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="2" y="2" width="2" height="2"/><rect x="2" y="5" width="2" height="4"/><rect x="5" y="5" width="4" height="4"/>',
     chevron: '<rect x="3" y="1" width="2" height="2"/><rect x="5" y="3" width="2" height="2"/><rect x="7" y="5" width="2" height="1"/><rect x="5" y="6" width="2" height="2"/><rect x="3" y="8" width="2" height="2"/>',
     undo: '<rect x="0" y="4" width="3" height="3"/><rect x="2" y="2" width="2" height="2"/><rect x="2" y="7" width="2" height="2"/><rect x="4" y="4" width="7" height="3"/>',
+    video: '<rect x="0" y="1" width="8" height="9" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="9" y="3" width="2" height="2"/><rect x="9" y="6" width="2" height="2"/>',
   };
   /** @param {string} name @param {number} size */
   const icon = (name, size = 16) =>
@@ -1653,6 +1662,30 @@
     return lines.join("");
   }
 
+  /**
+   * Kostenhinweis fuer die Video-Diashow, analog zum Karussell-Hinweis darueber.
+   *
+   * Die Zahlen stammen aus der eigenen Kostenerfassung (usage_costs), nicht aus einer Schaetzung:
+   * zwei vollstaendige Video-Laeufe in der Sandbox ergaben $0.0066 und $0.0068 je Video
+   * (Hintergrundbild $0.0030 + Drehbuch $0.0025 + Sprachausgabe $0.0013). Ein Einzelbild-Beitrag
+   * liegt bei $0.0064 (Bild $0.0030 + Text $0.0034, gerechnet aus 9 protokollierten Beitraegen),
+   * ein Karussell mit 5 Bildern bei $0.018.
+   *
+   * Das Ueberraschende daran, und der Grund fuer die Formulierung: eine Video-Diashow erzeugt nur
+   * EIN Bild - den Hintergrund, ueber den die Textkarten laufen. Sie ist damit nicht teurer als
+   * ein Einzelbild-Beitrag. Teuer ist sie in Rechenzeit, nicht in Geld.
+   */
+  function postNowVideoHintHtml(c) {
+    const ton = c.videoVoiceEnabled === false
+      ? "Sprachausgabe ist in Ihren Einstellungen aus - das Video entsteht stumm, der Text steht im Bild."
+      : "dazu kommt die Sprachausgabe.";
+    return `Die Video-Diashow erzeugt nur <strong>ein</strong> Bild (den bewegten Hintergrund) und kostet damit
+      ungefähr so viel wie ein Einzelbild-Beitrag - ${ton}
+      Ein Karussell ist rund dreimal so teuer. Dafür braucht das Rendern etwa eine Minute:
+      das Video erscheint nicht sofort. Länge, Stimme und Zoomrichtung stellen Sie unter
+      „Video-Diashow“ in den Einstellungen ein.`;
+  }
+
   function postNowChannelsHtml(c) {
     const available = postNowAvailableChannels(c);
     if (!available.length) {
@@ -1679,13 +1712,14 @@
     <fieldset class="field post-now-format">
       <legend class="lbl">Format <span class="opt">(nur für Instagram Feed)</span></legend>
       <div class="tiles">
-        ${Object.entries(POST_FORMATS).map(([k, label]) => `
+        ${Object.entries(POST_FORMATS).map(([k, f]) => `
           <label class="tile">
             <input type="radio" name="postNowFormat" value="${k}" ${k === "single" ? "checked" : ""}>
-            <span class="tile-face">${icon(k === "carousel" ? "beitraege" : "feed", 18)}<span>${esc(k === "carousel" ? "Karussell" : label)}</span></span>
+            <span class="tile-face">${icon(f.symbol, 18)}<span>${esc(f.kurz)}</span></span>
           </label>`).join("")}
       </div>
       <p class="hint">Karussell verbraucht ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES}× die Bildkosten eines Einzelbild-Beitrags (aktuell ${esc(String(c.carouselSlideCount ?? 5))} Bilder, einstellbar unter „Kanäle &amp; Zeitplan“).</p>
+      <p class="hint">${postNowVideoHintHtml(c)}</p>
     </fieldset>`;
   }
 

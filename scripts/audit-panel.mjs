@@ -145,5 +145,36 @@ const adminUnstyled = [...adminClasses].filter((c) => !adminCssClasses.has(c) &&
 if (adminUnstyled.length) fail(`Admin-Seite: ${adminUnstyled.length} Klasse(n) ohne CSS`, [adminUnstyled.join("  ")]);
 else pass("Admin-Seite: jede Klasse hat CSS");
 
+/* ---------- 5. Vom Server angebotene Formate, die das Panel nie zur Wahl stellt ----------
+ *
+ * Eigene Fehlerklasse, die die Prüfungen 1-4 nicht sehen: dort geht es immer um etwas, das im
+ * Panel REFERENZIERT wird und ins Leere zeigt. Hier ist es umgekehrt - der Server kann etwas,
+ * das im Panel gar nicht erst angeboten wird, und genau deshalb fällt es niemandem auf.
+ *
+ * Anlass: die Video-Diashow. Server, Rendering und Veröffentlichung waren seit Panel v22 fertig,
+ * `/api/post-now` nahm das Format entgegen - aber beim Redesign "Flow" wurde die Datei ersetzt,
+ * in der die dritte Auswahlmöglichkeit stand, und damit war die Funktion monatelang unerreichbar,
+ * ohne dass irgendein Test oder eine Prüfung angeschlagen hätte.
+ */
+const serverFormate = new Set();
+const formatWhitelist = /\[([^\]]*)\]\.includes\(requestedFormat\)/.exec(routerTs);
+if (formatWhitelist) for (const m of formatWhitelist[1].matchAll(/"([a-z_]+)"/g)) serverFormate.add(m[1]);
+const panelFormate = new Set();
+const formatKonstante = /const POST_FORMATS\s*=\s*\{([\s\S]*?)\n\s*\};/.exec(panelJs);
+if (formatKonstante) for (const m of formatKonstante[1].matchAll(/^\s*([a-z_]+):/gm)) panelFormate.add(m[1]);
+
+if (!serverFormate.size || !panelFormate.size) {
+  fail("Formatliste nicht gefunden - die Prüfung greift ins Leere und muss angepasst werden", [
+    `Server: ${serverFormate.size} Werte, Panel: ${panelFormate.size} Werte`,
+  ]);
+} else {
+  const nichtWaehlbar = [...serverFormate].filter((f) => !panelFormate.has(f)).sort();
+  if (nichtWaehlbar.length) {
+    fail(`${nichtWaehlbar.length} Beitragsformat(e) nimmt der Server an, das Panel bietet sie nicht an`, nichtWaehlbar);
+  } else {
+    pass(`alle ${serverFormate.size} vom Server akzeptierten Beitragsformate sind im Panel wählbar`);
+  }
+}
+
 console.log(problems ? `\n${problems} Bruchstelle(n)` : "\nkeine Bruchstellen gefunden");
 process.exit(problems ? 1 : 0);

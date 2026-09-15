@@ -103,7 +103,13 @@ export interface VideoProductionResult {
  *
  * `topic` kommt von "Jetzt posten", sonst null (automatischer Lauf).
  */
-export async function produceVideoPost(customer: CustomerRow, topic: string | null = null): Promise<VideoProductionResult> {
+export async function produceVideoPost(
+  customer: CustomerRow,
+  topic: string | null = null,
+  /** true = der Kunde hat es ausdruecklich ueber "Jetzt posten" angefordert (nicht der Wochenplan).
+   *  Eine solche Anfrage ueberstimmt den Tagesplatz-Schutz, siehe savePendingApproval. */
+  aufAnfrage = false,
+): Promise<VideoProductionResult> {
   const result: VideoProductionResult = { status: "skipped", hasAudio: false, costUsd: 0 };
 
   if (!(await videoRenderingAvailable())) {
@@ -238,6 +244,7 @@ export async function produceVideoPost(customer: CustomerRow, topic: string | nu
         pillarTitle: pillar?.title,
         source: topic ? "routine" : "planning",
         format: "video_slideshow",
+        allowSecondToday: aufAnfrage,
       });
       if (!approval) {
         result.status = "skipped";
@@ -341,13 +348,29 @@ export interface VideoRunSummary {
 
 /** Ein Kunde ist für die Video-Automatik überhaupt nur dann ein Kandidat, wenn er sie aktiviert
  *  hat, Instagram Feed nutzt und Instagram verbunden ist. */
+/**
+ * Wer kommt fuer einen Video-Lauf ueberhaupt in Frage.
+ *
+ * `video_enabled` steuert den AUTOMATISCHEN Wochenplan. Eine ausdrueckliche "Jetzt posten"-Anfrage
+ * mit Format Video-Diashow ueberstimmt ihn (15.09.2026): sonst legt der Kunde eine Anfrage an,
+ * die hier nie aufgegriffen wird - sie bliebe fuer immer offen, wuerde den Kanal blockieren
+ * (openPostRequestCount) und im Panel dauerhaft als "angefragt" stehen. Dieselbe Logik gilt in
+ * runVideoPass schon fuer den Wochentag und den Tagesplatz: was der Kunde ausdruecklich anfordert,
+ * schlaegt die Automatik-Einstellungen.
+ *
+ * Instagram-Verbindung und ig_feed_enabled bleiben Pflicht - ohne die kann ein Reel nicht
+ * entstehen, und /api/post-now laesst eine Anfrage fuer einen abgeschalteten Kanal ohnehin nicht zu.
+ */
 function videoCandidates(): CustomerRow[] {
   return db
     .prepare(
       `SELECT c.* FROM customers c
        JOIN connections k ON k.customer_id = c.id AND k.provider = 'instagram'
        WHERE c.status = 'active' AND c.customer_paused = 0 AND c.email_verified = 1
-         AND c.video_enabled = 1 AND c.ig_feed_enabled = 1`,
+         AND c.ig_feed_enabled = 1
+         AND (c.video_enabled = 1
+              OR EXISTS (SELECT 1 FROM post_requests r
+                         WHERE r.customer_id = c.id AND r.status = 'pending' AND r.format = 'video_slideshow'))`,
     )
     .all() as CustomerRow[];
 }
@@ -390,7 +413,7 @@ export async function runVideoPass(): Promise<VideoRunSummary> {
     // klickt ein Kunde auf den Knopf und es passiert sichtbar nichts.
     if (!request && customer.approval_mode && hasPendingOrApprovedToday(customer.id, "ig_feed")) continue;
 
-      const produced = await produceVideoPost(customer, request?.topic ?? null);
+      const produced = await produceVideoPost(customer, request?.topic ?? null, Boolean(request));
       if (request) markPostRequestDone(request.id);
       if (produced.status === "published") summary.produced++;
       else if (produced.status === "pending_approval") summary.pendingApproval++;

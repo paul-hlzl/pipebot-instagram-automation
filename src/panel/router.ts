@@ -1612,9 +1612,8 @@ export function createPanelRouter(): Router {
     const topic = str(req.body?.topic, 300);
     // Panel v14: Format nur fuer ig_feed relevant (Karussell/Video-Diashow gibt es nur bei
     // Instagram Feed) - fuer jeden anderen mitgewaehlten Kanal bleibt es 'single', unabhaengig
-    // davon, was der Client schickt. 'video_slideshow' noch nicht gebaut (siehe Session-Bericht
-    // Teil B) - wird hier schon akzeptiert/gespeichert, damit die Einstellung nicht doppelt
-    // gebaut werden muss, sobald der Rendering-Teil nachkommt.
+    // davon, was der Client schickt. Die Video-Diashow ist seit Panel v22 fertig (videos.ts);
+    // waehlbar im Panel ist sie seit 15.09.2026 (beim Redesign war die Option verlorengegangen).
     const requestedFormat = str(req.body?.format, 30);
     const format = ["carousel", "video_slideshow"].includes(requestedFormat) ? requestedFormat : "single";
     channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single"));
