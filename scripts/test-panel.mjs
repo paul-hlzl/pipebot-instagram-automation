@@ -11,6 +11,17 @@
  */
 
 const BASE = process.env.STAGING_URL ?? "http://127.0.0.1:3100";
+/** Der Server laedt seine Schluessel aus der .env - die Umgebung des Testlaufs kennt sie nicht.
+ *  Ohne diese Bruecke prueft der Hoerproben-Test gegen den falschen Zweig (erwartet 503, der
+ *  konfigurierte Server antwortet aber korrekt mit 200). */
+let TTS_CONFIGURED = Boolean(process.env.GOOGLE_TTS_API_KEY);
+if (!TTS_CONFIGURED) {
+  try {
+    const { readFileSync } = await import("node:fs");
+    TTS_CONFIGURED = /^GOOGLE_TTS_API_KEY=.+$/m.test(readFileSync(".env", "utf8"));
+  } catch { /* .env von hier nicht lesbar - dann gilt: nicht konfiguriert */ }
+}
+const ttsConfigured = () => TTS_CONFIGURED;
 const MOUNT = process.env.STAGING_MOUNT ?? "/panel";
 const STAGING_DB = process.env.STAGING_DB ?? "data/panel-staging.db";
 
@@ -1257,6 +1268,11 @@ async function main() {
 
     const off = await patch({});
     ok("Video-Diashow ist ohne Angabe aus", off?.videoEnabled === false, JSON.stringify(off?.videoEnabled));
+    // PATCH /api/me ersetzt IMMER das ganze Briefing: die leeren patch({}) in diesem und im
+    // Bewertungs-Block haben damit auch die Kommentar-Automatik abgeschaltet, die der
+    // Admin-Abschnitt weiter unten erwartet. Hier einmal wiederherstellen, statt die Reihenfolge
+    // der beiden zusammengefuehrten Suiten zu verschraenken.
+    await patch({ commentAutomationEnabled: true, commentAutomationMode: "auto" });
   }
   {
     const res = await fetch(`${BASE}${MOUNT}/api/voice-preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voice: "de-DE-Wavenet-H" }) });
@@ -1268,7 +1284,7 @@ async function main() {
       headers: { "content-type": "application/json", cookie: sessionCookie },
       body: JSON.stringify({ voice: "de-DE-Wavenet-H" }),
     });
-    if (process.env.GOOGLE_TTS_API_KEY) {
+    if (ttsConfigured()) {
       const body = await res.json();
       ok("/api/voice-preview liefert abspielbares Audio", res.status === 200 && String(body.audioDataUrl || "").startsWith("data:audio/"), `status=${res.status}`);
     } else {
