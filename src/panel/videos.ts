@@ -371,6 +371,11 @@ export async function runVideoPass(): Promise<VideoRunSummary> {
   for (const customer of videoCandidates()) {
     summary.customersChecked++;
 
+    // Fehlerisolation: alles, was pro Kunde passiert, liegt in EINEM try. Vorher standen die
+    // Vorpruefungen (offene Anfrage, Faelligkeit, Tagesplatz) davor - wirft dort etwas, bricht
+    // der ganze Lauf ab und jeder spaetere Kunde bekommt in dieser Stunde nichts. Die anderen
+    // vier Routine-Schleifen (Analytics, Bewertungen, Kommentare) machen es bereits so.
+    try {
     // "Jetzt posten"-Anfragen zuerst - der Kunde wartet darauf, der Wochenplan nicht.
     const request = db
       .prepare(
@@ -385,7 +390,6 @@ export async function runVideoPass(): Promise<VideoRunSummary> {
     // klickt ein Kunde auf den Knopf und es passiert sichtbar nichts.
     if (!request && customer.approval_mode && hasPendingOrApprovedToday(customer.id, "ig_feed")) continue;
 
-    try {
       const produced = await produceVideoPost(customer, request?.topic ?? null);
       if (request) markPostRequestDone(request.id);
       if (produced.status === "published") summary.produced++;
