@@ -1165,7 +1165,10 @@ export function createPanelRouter(): Router {
 
   router.get("/login", (req, res) => {
     const key = str(req.query.key, 100);
-    if (!key || rateLimited(`login:${clientIp(req)}`, 20, 3_600_000)) return backTo(res, { error: "login" });
+    // Sperre und falscher Schluessel wurden bisher gleich gemeldet ("Link ungueltig") - wer sich
+    // ausgesperrt hat, sucht dann am falschen Ende. Eigener Fehlercode dafuer.
+    if (!key) return backTo(res, { error: "login" });
+    if (rateLimited(`login:${clientIp(req)}`, 20, 3_600_000)) return backTo(res, { error: "login-limit" });
     const c = db.prepare("SELECT * FROM customers WHERE login_key_hash = ? AND status = 'active'").get(sha256(key)) as CustomerRow | undefined;
     if (!c) return backTo(res, { error: "login" });
     startSession(res, c.id);

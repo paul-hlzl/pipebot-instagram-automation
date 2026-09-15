@@ -109,6 +109,7 @@
     not_configured: (n) => `Die Verbindung mit ${n} ist gerade nicht verfügbar. Schreiben Sie uns kurz, wir kümmern uns darum.`,
     failed: (n) => `Die Verbindung mit ${n || "der Plattform"} hat nicht geklappt. Bitte versuchen Sie es erneut oder schreiben Sie uns.`,
     login: () => "Dieser Zugangslink ist ungültig oder wurde durch einen neueren ersetzt.",
+    "login-limit": () => "Zu viele Anmeldeversuche von dieser Verbindung. Bitte in einer Stunde erneut probieren.",
     session: () => "Bitte geben Sie zuerst Ihre Unternehmensdaten ein.",
     verify: () => "Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.",
   };
