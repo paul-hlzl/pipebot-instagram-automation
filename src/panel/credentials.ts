@@ -26,7 +26,7 @@ import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
 import type { LinkedInCredentials } from "../linkedin.js";
 import type { ImageBranding } from "../fal.js";
 import { sendMailBestEffort } from "./mailer.js";
-import { approvalNeededEmail, firstPostLiveEmail, pendingApprovalsSummaryEmail, postPublishedEmail } from "./emails.js";
+import { approvalNeededEmail, firstPostLiveEmail, pendingApprovalsSummaryEmail, postPublishedEmail, tokenExpiringEmail } from "./emails.js";
 
 const DAY = 86_400_000;
 
@@ -39,12 +39,16 @@ function canAutoRefresh(provider: Provider, row: ConnectionRow): boolean {
   return false;
 }
 
+/** Panel v20: 14 Tage statt vorher 7 - genug Vorlauf, dass eine E-Mail-Warnung (siehe
+ *  sendExpiryWarnings) den Kunden vor einem stillen Ausfall erreicht, nicht erst kurz davor. */
+export const RENEW_SOON_WINDOW_DAYS = 14;
+
 export function connectionStatus(row: ConnectionRow): ConnectionStatus {
   if (!row.expires_at) return "ok";
   const left = new Date(row.expires_at).getTime() - Date.now();
   if (left <= 0) return "expired";
   const provider = getProvider(row.provider);
-  if (provider && !canAutoRefresh(provider, row) && left < 7 * DAY) return "renew-soon";
+  if (provider && !canAutoRefresh(provider, row) && left < RENEW_SOON_WINDOW_DAYS * DAY) return "renew-soon";
   return "ok";
 }
 
@@ -278,7 +282,7 @@ async function refreshRow(provider: Provider, row: ConnectionRow): Promise<Token
   };
   const next = await provider.refresh!(current);
   db.prepare(
-    `UPDATE connections SET access_token_enc = ?, refresh_token_enc = ?, expires_at = ?, updated_at = ?
+    `UPDATE connections SET access_token_enc = ?, refresh_token_enc = ?, expires_at = ?, updated_at = ?, expiry_warning_sent_at = NULL
      WHERE customer_id = ? AND provider = ?`,
   ).run(
     encrypt(next.accessToken),
@@ -400,7 +404,48 @@ export async function refreshExpiringTokens(): Promise<{ refreshed: string[]; fa
       failed.push(label);
     }
   }
+  sendExpiryWarnings();
   return { refreshed, failed };
+}
+
+/**
+ * Panel v20: E-Mail-Warnung für Verbindungen, die NICHT automatisch verlängert werden können
+ * (heute: LinkedIn - kein Refresh-Token ohne separaten "Programmatic refresh tokens"-Antrag, läuft
+ * nach 60 Tagen still ab). Ohne diese Mail merkt niemand einen abgelaufenen Zugang, bis einfach
+ * nichts mehr gepostet wird - genau der stille Ausfall, den dieses Feature verhindern soll.
+ * Läuft best-effort direkt nach jedem refreshExpiringTokens-Intervall (alle 12h, siehe
+ * startTokenRefreshSchedule) - ein Fehlschlag hier darf den Refresh-Lauf selbst nie stören.
+ * Höchstens einmal PRO Ablauf: expiry_warning_sent_at wird bei jedem erfolgreichen Refresh/
+ * Neu-Verbinden zurückgesetzt (siehe refreshRow/router.ts's OAuth-Callback), ein neuer Ablauf
+ * bekommt also wieder eine eigene Warnung.
+ */
+function sendExpiryWarnings(): void {
+  const rows = db
+    .prepare(
+      `SELECT c.*, cu.email as customer_email, cu.company as customer_company
+       FROM connections c JOIN customers cu ON cu.id = c.customer_id
+       WHERE c.expires_at IS NOT NULL AND c.expiry_warning_sent_at IS NULL AND cu.status = 'active'`,
+    )
+    .all() as (ConnectionRow & { customer_email: string; customer_company: string })[];
+  for (const row of rows) {
+    const provider = getProvider(row.provider);
+    if (!provider || canAutoRefresh(provider, row)) continue; // auto-refresh handles these, no warning needed
+    const left = new Date(row.expires_at!).getTime() - Date.now();
+    if (left <= 0 || left >= RENEW_SOON_WINDOW_DAYS * DAY) continue;
+    try {
+      sendMailBestEffort(
+        tokenExpiringEmail({
+          to: row.customer_email,
+          company: row.customer_company,
+          channelLabel: provider.name,
+          expiresAt: row.expires_at!,
+        }),
+      );
+      db.prepare("UPDATE connections SET expiry_warning_sent_at = ? WHERE customer_id = ? AND provider = ?").run(nowIso(), row.customer_id, row.provider);
+    } catch (err) {
+      console.error(`[panel] Ablauf-Warnung für ${row.customer_id}/${row.provider} fehlgeschlagen:`, err instanceof Error ? err.message : err);
+    }
+  }
 }
 
 export interface LoggedPost {

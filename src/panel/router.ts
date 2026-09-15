@@ -43,7 +43,7 @@ import {
   updatePlannedPostImage,
   updatePlannedPostText,
 } from "./credentials.js";
-import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache, logUsageCost } from "./analytics.js";
+import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache, logUsageCost, type AnalyticsChannel } from "./analytics.js";
 import { regeneratePlannedPostsForBranding } from "./planning.js";
 import { deleteObject, uploadAudioBase64 } from "../r2.js";
 import { estimateTranscriptionCostUsd, transcribeAudioUrl } from "../audio-transcribe.js";
@@ -305,6 +305,14 @@ function brandingFieldsChanged(before: CustomerRow, data: BriefingInput): string
   if ((before.about ?? "") !== data.about) changed.push("about");
   if (before.tone !== data.tone) changed.push("tone");
   return changed;
+}
+
+/** Panel v20: which analytics channel a request is for - accepts `?channel=` (GET) or a JSON
+ *  body's `channel` (POST), falls back to 'instagram' for any unrecognized/missing value so an
+ *  old cached frontend or a stray value never 400s, it just gets the pre-v20 default behavior. */
+function analyticsChannelParam(req: Request): AnalyticsChannel {
+  const raw = str(req.query.channel, 20) || str(req.body?.channel, 20);
+  return raw === "linkedin" ? "linkedin" : "instagram";
 }
 
 function publicState(c: CustomerRow) {
@@ -1107,7 +1115,8 @@ export function createPanelRouter(): Router {
       res.status(401).json({ error: "Nicht angemeldet" });
       return;
     }
-    res.json({ ...getAnalyticsSummary(c.id), aiSummary: getSummaryCache(c.id) });
+    const channel = analyticsChannelParam(req);
+    res.json({ ...getAnalyticsSummary(c.id, channel), aiSummary: getSummaryCache(c.id, channel) });
   });
 
   // Panel v9 Aufgabe 3: "Zusammenfassung anzeigen" - generiert bei Bedarf eine frische
@@ -1134,12 +1143,13 @@ export function createPanelRouter(): Router {
         res.status(503).json({ error: "Die KI-Zusammenfassung ist gerade nicht verfügbar." });
         return;
       }
-      if (!getAnalyticsSummary(c.id).hasData) {
+      const channel = analyticsChannelParam(req);
+      if (!getAnalyticsSummary(c.id, channel).hasData) {
         res.status(409).json({ error: "Noch keine Analytics-Daten vorhanden." });
         return;
       }
       try {
-        const result = await generateAndCacheSummary(c);
+        const result = await generateAndCacheSummary(c, channel);
         res.json(result);
       } catch (err) {
         console.error("[panel] analytics-summary fehlgeschlagen:", err);
@@ -1580,13 +1590,13 @@ export function createPanelRouter(): Router {
       const result = await provider.exchangeCode(code, redirectUri(pid));
       const now = nowIso();
       db.prepare(
-        `INSERT INTO connections (customer_id, provider, account_id, account_name, access_token_enc, refresh_token_enc, expires_at, scopes, connected_at, updated_at)
-         VALUES (@customer_id, @provider, @account_id, @account_name, @access, @refresh, @expires, @scopes, @now, @now)
+        `INSERT INTO connections (customer_id, provider, account_id, account_name, access_token_enc, refresh_token_enc, expires_at, scopes, connected_at, updated_at, expiry_warning_sent_at)
+         VALUES (@customer_id, @provider, @account_id, @account_name, @access, @refresh, @expires, @scopes, @now, @now, NULL)
          ON CONFLICT(customer_id, provider) DO UPDATE SET
            account_id = excluded.account_id, account_name = excluded.account_name,
            access_token_enc = excluded.access_token_enc, refresh_token_enc = excluded.refresh_token_enc,
            expires_at = excluded.expires_at, scopes = excluded.scopes,
-           connected_at = excluded.connected_at, updated_at = excluded.updated_at`,
+           connected_at = excluded.connected_at, updated_at = excluded.updated_at, expiry_warning_sent_at = NULL`,
       ).run({
         customer_id: stored.customer_id,
         provider: pid,

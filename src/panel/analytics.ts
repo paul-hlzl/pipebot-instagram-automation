@@ -1,12 +1,15 @@
 /**
- * Instagram Analytics (Panel v9) - daily account snapshots + per-post engagement snapshots,
- * stored so the panel can show a 30-day trend instead of just "right now". Mirrors planning.ts's
- * shape: a daily cron (startDailyAnalyticsSnapshotSchedule) that loops every active customer,
- * one failure never aborts the run for anyone else (same K9-style isolation as the customer-loop
- * routine and planUpcomingPosts).
+ * Analytics (Panel v9, channel-split in v20) - daily account snapshots + per-post engagement
+ * snapshots, stored so the panel can show a 30-day trend instead of just "right now". Mirrors
+ * planning.ts's shape: a daily cron (startDailyAnalyticsSnapshotSchedule) that loops every active
+ * customer, one failure never aborts the run for anyone else (same K9-style isolation as the
+ * customer-loop routine and planUpcomingPosts).
  *
- * v1 scope: Instagram only (see session report - LinkedIn analytics deliberately out of scope,
- * different API/constraints, can be added later as its own effort).
+ * v20: everything below takes an explicit `channel` instead of assuming Instagram, so LinkedIn
+ * can be wired in later (once the Community Management API partner review clears - see
+ * docs/LINKEDIN_COMMUNITY_API.md) by adding one fetch call to runDailyAnalyticsSnapshot, not by
+ * touching this file's shape again. LinkedIn itself is NOT fetched yet (linkedin-analytics.ts
+ * exists and is tested standalone, but isn't called from the cron - see that file's header).
  */
 import { db, nowIso, type AnalyticsAccountSnapshotRow, type AnalyticsSummaryRow, type CustomerRow, type PostRow } from "./db.js";
 import { resolveInstagramCredentials } from "./credentials.js";
@@ -17,10 +20,13 @@ import { generateAnalyticsSummary } from "../anthropic.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { weeklyAnalyticsReportEmail } from "./emails.js";
 
+export type AnalyticsChannel = "instagram" | "linkedin";
+
 function toAccountSnapshot(r: AnalyticsAccountSnapshotRow) {
   return {
     id: r.id,
     customerId: r.customer_id,
+    channel: r.channel as AnalyticsChannel,
     date: r.snapshot_date,
     followerCount: r.follower_count,
     reach: r.reach,
@@ -31,26 +37,27 @@ function toAccountSnapshot(r: AnalyticsAccountSnapshotRow) {
 }
 export type AccountSnapshot = ReturnType<typeof toAccountSnapshot>;
 
-/** Idempotent per customer/day - a second run on the same Vienna calendar date overwrites, never duplicates. */
+/** Idempotent per customer/channel/day - a second run on the same Vienna calendar date overwrites, never duplicates. */
 export function saveAccountSnapshot(
   customerId: string,
+  channel: AnalyticsChannel,
   dateStr: string,
   data: { followerCount: number | null; reach: number | null; views: number | null; accountsEngaged: number | null; totalInteractions: number | null },
 ): void {
   db.prepare(
-    `INSERT INTO analytics_account_snapshots (id, customer_id, snapshot_date, follower_count, reach, views, accounts_engaged, total_interactions, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(customer_id, snapshot_date) DO UPDATE SET
+    `INSERT INTO analytics_account_snapshots (id, customer_id, channel, snapshot_date, follower_count, reach, views, accounts_engaged, total_interactions, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(customer_id, snapshot_date, channel) DO UPDATE SET
        follower_count = excluded.follower_count, reach = excluded.reach, views = excluded.views,
        accounts_engaged = excluded.accounts_engaged, total_interactions = excluded.total_interactions`,
-  ).run(`ansnap_${randomToken(9)}`, customerId, dateStr, data.followerCount, data.reach, data.views, data.accountsEngaged, data.totalInteractions, nowIso());
+  ).run(`ansnap_${randomToken(9)}`, customerId, channel, dateStr, data.followerCount, data.reach, data.views, data.accountsEngaged, data.totalInteractions, nowIso());
 }
 
-/** Last `days` days of account snapshots for one customer, oldest first (chart-friendly order). */
-export function listAccountSnapshots(customerId: string, days = 30): AccountSnapshot[] {
+/** Last `days` days of account snapshots for one customer/channel, oldest first (chart-friendly order). */
+export function listAccountSnapshots(customerId: string, channel: AnalyticsChannel, days = 30): AccountSnapshot[] {
   const rows = db
-    .prepare("SELECT * FROM analytics_account_snapshots WHERE customer_id = ? ORDER BY snapshot_date DESC LIMIT ?")
-    .all(customerId, days) as AnalyticsAccountSnapshotRow[];
+    .prepare("SELECT * FROM analytics_account_snapshots WHERE customer_id = ? AND channel = ? ORDER BY snapshot_date DESC LIMIT ?")
+    .all(customerId, channel, days) as AnalyticsAccountSnapshotRow[];
   return rows.map(toAccountSnapshot).reverse();
 }
 
@@ -83,7 +90,7 @@ interface TopPost {
  *  each post's MOST RECENT snapshot only (engagement keeps growing after publish, an old snapshot would
  *  understate a post that's still gaining traction). Posts with no snapshot yet are excluded, not
  *  shown with zeroes - a snapshot simply hasn't been fetched for them yet. */
-export function listTopPosts(customerId: string, days = 30, limit = 3): TopPost[] {
+export function listTopPosts(customerId: string, channel: AnalyticsChannel, days = 30, limit = 3): TopPost[] {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const rows = db
     .prepare(
@@ -93,9 +100,9 @@ export function listTopPosts(customerId: string, days = 30, limit = 3): TopPost[
        JOIN analytics_post_snapshots s ON s.id = (
          SELECT id FROM analytics_post_snapshots WHERE post_id = p.id ORDER BY fetched_at DESC LIMIT 1
        )
-       WHERE p.customer_id = ? AND p.provider = 'instagram' AND p.posted_at >= ?`,
+       WHERE p.customer_id = ? AND p.provider = ? AND p.posted_at >= ?`,
     )
-    .all(customerId, since) as {
+    .all(customerId, channel, since) as {
     post_id: string; headline: string | null; caption: string | null; image_url: string | null; posted_at: string;
     likes: number | null; comments: number | null; saved: number | null; reach: number | null;
   }[];
@@ -130,12 +137,25 @@ export interface AnalyticsSummaryWindow {
 
 export interface AnalyticsSummary {
   hasData: boolean;
+  channel: AnalyticsChannel;
+  /** False only for 'linkedin' until the Community Management API partner review clears - see
+   *  docs/LINKEDIN_COMMUNITY_API.md. The panel uses this to show a clear "why" instead of a
+   *  silent empty chart (never leave something non-functional unexplained - see styleguide). */
+  available: boolean;
   current: AnalyticsSummaryWindow;
   previous: AnalyticsSummaryWindow;
   reach30d: number;
   views30d: number;
   trend: AccountSnapshot[];
   topPosts: TopPost[];
+}
+
+/** Whether this channel's analytics can currently produce any data at all - distinct from
+ *  `hasData` (which is about whether a snapshot happens to exist yet). LinkedIn analytics need
+ *  r_member_postAnalytics, which requires Community Management API access (still pending, see
+ *  docs/LINKEDIN_COMMUNITY_API.md) - until then it's not a bug, it's a known, explained gap. */
+export function isAnalyticsChannelAvailable(channel: AnalyticsChannel): boolean {
+  return channel === "instagram";
 }
 
 /**
@@ -145,12 +165,13 @@ export interface AnalyticsSummary {
  * snapshot yet (brand new connection, or account not yet approved for insights - see session
  * report) - the panel shows an honest "noch keine Daten" state instead of a chart full of zeroes.
  */
-export function getAnalyticsSummary(customerId: string): AnalyticsSummary {
-  const snapshots = listAccountSnapshots(customerId, 30);
-  const topPosts = listTopPosts(customerId, 30, 3);
+export function getAnalyticsSummary(customerId: string, channel: AnalyticsChannel = "instagram"): AnalyticsSummary {
+  const available = isAnalyticsChannelAvailable(channel);
+  const snapshots = available ? listAccountSnapshots(customerId, channel, 30) : [];
+  const topPosts = available ? listTopPosts(customerId, channel, 30, 3) : [];
   if (!snapshots.length) {
     const empty: AnalyticsSummaryWindow = { followerCount: null, followerGrowth: null, reach: 0, views: 0, engagementRate: null };
-    return { hasData: false, current: empty, previous: empty, reach30d: 0, views30d: 0, trend: [], topPosts: [] };
+    return { hasData: false, channel, available, current: empty, previous: empty, reach30d: 0, views30d: 0, trend: [], topPosts: [] };
   }
 
   // snapshots is oldest-first (see listAccountSnapshots) - the last 7 are "this week", the 7
@@ -176,6 +197,8 @@ export function getAnalyticsSummary(customerId: string): AnalyticsSummary {
 
   return {
     hasData: true,
+    channel,
+    available,
     current: windowFor(last7),
     previous: windowFor(prev7),
     reach30d: sumField(snapshots, "reach"),
@@ -216,17 +239,17 @@ export interface CachedAnalyticsSummary {
   generatedAt: string;
 }
 
-export function getSummaryCache(customerId: string): CachedAnalyticsSummary | null {
-  const row = db.prepare("SELECT * FROM analytics_summaries WHERE customer_id = ?").get(customerId) as AnalyticsSummaryRow | undefined;
+export function getSummaryCache(customerId: string, channel: AnalyticsChannel = "instagram"): CachedAnalyticsSummary | null {
+  const row = db.prepare("SELECT * FROM analytics_summaries WHERE customer_id = ? AND channel = ?").get(customerId, channel) as AnalyticsSummaryRow | undefined;
   return row ? { summary: row.summary, generatedAt: row.generated_at } : null;
 }
 
-function saveSummaryCache(customerId: string, summary: string): string {
+function saveSummaryCache(customerId: string, channel: AnalyticsChannel, summary: string): string {
   const generatedAt = nowIso();
   db.prepare(
-    `INSERT INTO analytics_summaries (customer_id, summary, generated_at) VALUES (?, ?, ?)
-     ON CONFLICT(customer_id) DO UPDATE SET summary = excluded.summary, generated_at = excluded.generated_at`,
-  ).run(customerId, summary, generatedAt);
+    `INSERT INTO analytics_summaries (customer_id, channel, summary, generated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(customer_id, channel) DO UPDATE SET summary = excluded.summary, generated_at = excluded.generated_at`,
+  ).run(customerId, channel, summary, generatedAt);
   return generatedAt;
 }
 
@@ -237,8 +260,8 @@ function saveSummaryCache(customerId: string, summary: string): string {
  * ToolError (via generateAnalyticsSummary) if there is no data yet or the Anthropic call fails -
  * callers should not call this for a customer whose getAnalyticsSummary().hasData is false.
  */
-export async function generateAndCacheSummary(customer: CustomerRow): Promise<CachedAnalyticsSummary> {
-  const data = getAnalyticsSummary(customer.id);
+export async function generateAndCacheSummary(customer: CustomerRow, channel: AnalyticsChannel = "instagram"): Promise<CachedAnalyticsSummary> {
+  const data = getAnalyticsSummary(customer.id, channel);
   const { text, costUsd } = await generateAnalyticsSummary({
     company: customer.company,
     industry: customer.industry ?? "",
@@ -252,7 +275,7 @@ export async function generateAndCacheSummary(customer: CustomerRow): Promise<Ca
     topPosts: data.topPosts.map((p) => ({ headline: p.headline, caption: p.caption, likes: p.likes, comments: p.comments, saved: p.saved, reach: p.reach })),
   });
   logUsageCost(customer.id, "analytics-summary", costUsd);
-  const generatedAt = saveSummaryCache(customer.id, text);
+  const generatedAt = saveSummaryCache(customer.id, channel, text);
   return { summary: text, generatedAt };
 }
 
@@ -295,7 +318,7 @@ export async function runDailyAnalyticsSnapshot(): Promise<SnapshotRunSummary> {
       if (!creds) continue;
 
       const account = await fetchAccountInsights(creds);
-      saveAccountSnapshot(customer.id, today, account);
+      saveAccountSnapshot(customer.id, "instagram", today, account);
       accountSnapshots++;
 
       const posts = db

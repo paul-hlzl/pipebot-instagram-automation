@@ -822,7 +822,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0 };
+  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram" };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -2415,11 +2415,23 @@
   }
 
   /* ================= Analytics (Panel v9 Aufgabe 2, Instagram v1) ================= */
+  const ANALYTICS_CHANNELS = [
+    { id: "instagram", label: "Instagram" },
+    { id: "linkedin", label: "LinkedIn" },
+  ];
+
+  function analyticsTabsHtml() {
+    const tab = (id, label) =>
+      `<button type="button" class="link" role="tab" aria-selected="${S.analyticsChannel === id}" data-analytics-channel="${id}" ${S.analyticsChannel === id ? 'style="font-weight:700;text-decoration:underline"' : ""}>${esc(label)}</button>`;
+    return `<div class="actions" role="tablist" style="margin:-8px 0 20px">${ANALYTICS_CHANNELS.map((c) => tab(c.id, c.label)).join("")}</div>`;
+  }
+
   function analyticsHtml() {
     return `
       ${bannerHtml()}
       <h1>Analytics</h1>
-      <p class="lede">Instagram-Kennzahlen der letzten 30 Tage, einmal täglich im Hintergrund aktualisiert. Für LinkedIn gibt es diese Zahlen nicht - die Schnittstelle dafür steht uns nicht offen.</p>
+      <p class="lede">Kennzahlen der letzten 30 Tage, einmal täglich im Hintergrund aktualisiert.</p>
+      ${analyticsTabsHtml()}
       <div id="analytics-body"><p class="empty">Wird geladen …</p></div>
       <div class="actions">
         <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
@@ -2474,8 +2486,19 @@
   }
 
   function analyticsBodyHtml(d) {
+    if (!d.available) {
+      // Panel v20: nie stumm leer lassen, was (noch) nicht funktioniert (Styleguide-Regel) -
+      // LinkedIn-Kennzahlen brauchen r_member_postAnalytics, das hinter der Community Management
+      // API steckt (siehe docs/LINKEDIN_COMMUNITY_API.md), eine reine Partnerfreigabe, kein
+      // Code-Problem hier im Panel.
+      return `<div class="needs-action">
+        <strong>LinkedIn-Kennzahlen sind noch nicht verfügbar.</strong>
+        Dafür braucht es eine Partnerfreigabe von LinkedIn (Community Management API), die wir gerade beantragen.
+        Sobald sie da ist, erscheinen hier dieselben Zahlen wie bei Instagram - ohne dass Sie etwas tun müssen.
+      </div>`;
+    }
     if (!d.hasData) {
-      return `<p class="empty">Noch keine Daten. Der tägliche Abgleich mit Instagram läuft im Hintergrund - in ein paar Tagen sehen Sie hier Zahlen.</p>`;
+      return `<p class="empty">Noch keine Daten. Der tägliche Abgleich läuft im Hintergrund - in ein paar Tagen sehen Sie hier Zahlen.</p>`;
     }
     return `
       <div class="an-stats">
@@ -2504,8 +2527,9 @@
   async function loadAnalytics() {
     const box = $("#analytics-body");
     if (!box) return;
+    box.innerHTML = `<p class="empty">Wird geladen …</p>`;
     try {
-      const data = await api("GET", "/api/analytics");
+      const data = await api("GET", `/api/analytics?channel=${S.analyticsChannel}`);
       box.innerHTML = analyticsBodyHtml(data);
     } catch {
       box.innerHTML = `<p class="empty">Analytics konnten gerade nicht geladen werden.</p>`;
@@ -3046,7 +3070,7 @@
     const oldLabel = btn.textContent;
     btn.textContent = "Wird erstellt …";
     try {
-      const result = await api("POST", "/api/analytics-summary", {});
+      const result = await api("POST", "/api/analytics-summary", { channel: S.analyticsChannel });
       box.innerHTML = analyticsSummaryBoxHtml(result);
     } catch (err) {
       box.innerHTML = `<p style="color:var(--stop)">${esc(err.message || "Die Zusammenfassung konnte gerade nicht erstellt werden.")}</p>`;
@@ -3286,6 +3310,12 @@
     if (e.target.closest("#analyze-website")) return analyzeWebsiteSuggestion();
     if (e.target.closest("#suggest-topics")) return suggestTopicsUi();
     if (e.target.closest("#analytics-summary-btn")) return analyticsSummaryUi();
+    const analyticsTabBtn = e.target.closest("[data-analytics-channel]");
+    if (analyticsTabBtn) {
+      S.analyticsChannel = analyticsTabBtn.dataset.analyticsChannel;
+      render(true);
+      return;
+    }
     const topicChip = e.target.closest("[data-topic-chip]");
     if (topicChip) {
       const input = $("#f-postNowTopic");

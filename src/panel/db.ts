@@ -446,6 +446,68 @@ migrateColumns("customers", [
 // bekannt) gilt nie als stale, damit bestehende Kunden ohne je eine Aenderung nicht plötzlich
 // alle als veraltet markiert werden.
 migrateColumns("customers", [["branding_last_changed_at", "TEXT"]]);
+// Panel v20: Token-Ablauf-Warnung (LinkedIn hat keinen Refresh-Token, siehe providers/linkedin.ts
+// - laeuft nach 60 Tagen still ab, wenn niemand rechtzeitig neu verbindet). Verhindert Mehrfach-
+// Mails fuer denselben Ablauf: wird bei jedem erfolgreichen Refresh/Neu-Verbinden zurueckgesetzt
+// (neues expires_at = neue Warn-Chance), siehe credentials.ts's refreshRow/router.ts's OAuth-Callback.
+migrateColumns("connections", [["expiry_warning_sent_at", "TEXT"]]);
+
+/**
+ * Panel v20: Analytics nach Kanal getrennt (Instagram/LinkedIn) statt implizit nur Instagram -
+ * siehe Session-Bericht. Nur analytics_account_snapshots braucht die neue Spalte:
+ * analytics_post_snapshots ist über post_id schon an eine posts-Zeile gebunden, die ihrerseits
+ * ihren provider kennt, also implizit schon kanalgetrennt - ein redundantes channel-Feld dort
+ * wäre nur eine zusätzliche Fehlerquelle (könnte vom eigenen post_id abweichen).
+ *
+ * ALTER TABLE ADD COLUMN kann die bestehende UNIQUE(customer_id, snapshot_date) nicht auf
+ * UNIQUE(customer_id, snapshot_date, channel) erweitern (SQLite unterstützt kein ALTER auf
+ * Constraints) - deshalb hier einmalig die Tabelle neu aufgebaut, wenn die channel-Spalte noch
+ * fehlt. Alle bestehenden Zeilen werden dabei explizit als 'instagram' markiert (der einzige
+ * Kanal, den es vor diesem Feature gab), keine Daten gehen verloren. Getestet gegen eine Kopie
+ * der Produktions-DB vor dem Deploy (siehe Session-Bericht).
+ */
+/** Same reasoning/pattern as analytics_account_snapshots above - the AI-summary cache is also
+ *  one-per-customer today and needs to become one-per-customer-per-channel. Purely a cache (no
+ *  historical/audit value), so the existing row is carried over unchanged as the 'instagram' entry
+ *  rather than discarded - avoids an unnecessary Anthropic re-generation right after deploy. */
+if (!(db.prepare(`PRAGMA table_info(analytics_summaries)`).all() as { name: string }[]).some((c) => c.name === "channel")) {
+  db.exec(`
+    CREATE TABLE analytics_summaries_v20 (
+      customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL DEFAULT 'instagram',
+      summary TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      PRIMARY KEY (customer_id, channel)
+    );
+    INSERT INTO analytics_summaries_v20 (customer_id, channel, summary, generated_at)
+      SELECT customer_id, 'instagram', summary, generated_at FROM analytics_summaries;
+    DROP TABLE analytics_summaries;
+    ALTER TABLE analytics_summaries_v20 RENAME TO analytics_summaries;
+  `);
+}
+
+if (!(db.prepare(`PRAGMA table_info(analytics_account_snapshots)`).all() as { name: string }[]).some((c) => c.name === "channel")) {
+  db.exec(`
+    CREATE TABLE analytics_account_snapshots_v20 (
+      id TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL DEFAULT 'instagram',
+      snapshot_date TEXT NOT NULL,
+      follower_count INTEGER,
+      reach INTEGER,
+      views INTEGER,
+      accounts_engaged INTEGER,
+      total_interactions INTEGER,
+      created_at TEXT NOT NULL,
+      UNIQUE(customer_id, snapshot_date, channel)
+    );
+    INSERT INTO analytics_account_snapshots_v20 (id, customer_id, channel, snapshot_date, follower_count, reach, views, accounts_engaged, total_interactions, created_at)
+      SELECT id, customer_id, 'instagram', snapshot_date, follower_count, reach, views, accounts_engaged, total_interactions, created_at FROM analytics_account_snapshots;
+    DROP TABLE analytics_account_snapshots;
+    ALTER TABLE analytics_account_snapshots_v20 RENAME TO analytics_account_snapshots;
+    CREATE INDEX IF NOT EXISTS analytics_account_snapshots_customer_date ON analytics_account_snapshots(customer_id, channel, snapshot_date DESC);
+  `);
+}
 migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
 migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
 
@@ -518,6 +580,7 @@ export interface ConnectionRow {
   scopes: string | null;
   connected_at: string;
   updated_at: string;
+  expiry_warning_sent_at: string | null;
 }
 
 export interface PostRow {
@@ -548,6 +611,7 @@ export interface PostMediaRow {
 export interface AnalyticsAccountSnapshotRow {
   id: string;
   customer_id: string;
+  channel: string;
   snapshot_date: string;
   follower_count: number | null;
   reach: number | null;
@@ -579,6 +643,7 @@ export interface UsageCostRow {
 
 export interface AnalyticsSummaryRow {
   customer_id: string;
+  channel: string;
   summary: string;
   generated_at: string;
 }

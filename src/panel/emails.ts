@@ -135,6 +135,28 @@ export function stalePostSkippedEmail(input: { to: string; company: string; chan
 }
 
 /**
+ * Panel v20: Ablauf-Warnung für Verbindungen ohne automatische Verlängerung (heute: LinkedIn,
+ * 60 Tage, kein Refresh-Token ohne separaten Partnerantrag). Läuft die Verbindung ab, ohne dass
+ * der Kunde reagiert, postet die Routine für diesen Kanal einfach still nicht mehr weiter - diese
+ * Mail ist der einzige proaktive Hinweis dafür, spätestens 14 Tage vorher.
+ */
+export function tokenExpiringEmail(input: { to: string; company: string; channelLabel: string; expiresAt: string }): MailInput {
+  const date = new Date(input.expiresAt).toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" });
+  return {
+    to: input.to,
+    subject: `Ihre ${input.channelLabel}-Verbindung läuft bald ab - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `die ${input.channelLabel}-Verbindung für "${input.company}" läuft am ${date} ab. Ohne rechtzeitige Erneuerung kann ` +
+      `Pipeflow ab diesem Datum keine ${input.channelLabel}-Beiträge mehr für Sie veröffentlichen - alle anderen Kanäle ` +
+      `sind davon nicht betroffen.\n\n` +
+      `Bitte verbinden Sie ${input.channelLabel} rechtzeitig neu:\n${panelUrl()}\n\n` +
+      `Das dauert nur eine Minute und ist derselbe Schritt wie beim ersten Verbinden.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
+/**
  * Panel v9 Aufgabe 5: wöchentlicher Analytics-Bericht (opt-in, notify_weekly_report - eigener
  * Schalter neben notify_on_publish, siehe styleguide/Session-Bericht). Zahlen + KI-Zusammenfassung
  * kommen fertig vom Aufrufer (runWeeklyAnalyticsSummaries in analytics.ts) - diese Funktion baut

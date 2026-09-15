@@ -984,6 +984,26 @@ async function main() {
     ok("hasData ist false ohne Snapshots", body.hasData === false, JSON.stringify(body));
     ok("topPosts ist ein leeres Array", Array.isArray(body.topPosts) && body.topPosts.length === 0, JSON.stringify(body.topPosts));
     ok("aiSummary ist null ohne Cache", body.aiSummary === null, JSON.stringify(body.aiSummary));
+    ok("channel default ist 'instagram'", body.channel === "instagram", JSON.stringify(body.channel));
+    ok("Instagram ist 'available'", body.available === true, JSON.stringify(body.available));
+  }
+  {
+    // Panel v20: LinkedIn-Analytics-Trennung - solange die Community Management API-Freigabe
+    // fehlt, muss der Kanal klar als NICHT verfügbar markiert sein (nie stumm leer, siehe
+    // analyticsBodyHtml im Frontend), unabhängig davon ob/wie viele Instagram-Snapshots existieren.
+    const res = await fetch(`${BASE}${MOUNT}/api/analytics?channel=linkedin`, { headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("/api/analytics?channel=linkedin -> 200", res.status === 200, `status=${res.status}`);
+    ok("channel ist 'linkedin'", body.channel === "linkedin", JSON.stringify(body.channel));
+    ok("LinkedIn ist NICHT 'available' (Community Management API noch nicht freigegeben)", body.available === false, JSON.stringify(body.available));
+    ok("hasData ist trotzdem sauber false, nicht kaputt/undefined", body.hasData === false, JSON.stringify(body.hasData));
+  }
+  {
+    // Ein unbekannter/kaputter channel-Wert darf nie 400en oder abstürzen - fällt sauber auf
+    // 'instagram' zurück (siehe router.ts's analyticsChannelParam).
+    const res = await fetch(`${BASE}${MOUNT}/api/analytics?channel=does-not-exist`, { headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("Unbekannter channel-Wert fällt zurück auf 'instagram' statt zu fehlern", res.status === 200 && body.channel === "instagram", JSON.stringify(body));
   }
 
   // --- KI-Zusammenfassung (Panel v9 Aufgabe 3) - ohne Snapshots gibt es nichts zu
