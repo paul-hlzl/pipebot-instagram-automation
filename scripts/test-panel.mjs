@@ -888,6 +888,56 @@ async function main() {
     );
   }
 
+  // --- 3e-3. SSRF-Schutz beim Website-Abruf (15.09.2026) ----------------------------------
+  // Seit dem Redirect-Fix folgt fetchTextSafely bis zu drei Weiterleitungen. Diese Prüfung hält
+  // fest, dass dabei JEDER Sprung neu geprüft wird - sonst wäre der Fix eine SSRF-Lücke.
+  // Hermetisch: der Umleitungsserver läuft hier im Test, es geht keine Anfrage nach außen.
+  console.log("\nWebsite-Abruf (SSRF-Schutz bei Weiterleitungen):");
+  {
+    const { fetchTextSafely } = await import("../dist/ssrf-safe-fetch.js");
+    const http = await import("node:http");
+    const ziele = {
+      "/loopback": "http://127.0.0.1:1/",
+      "/metadaten": "http://169.254.169.254/latest/meta-data/",
+      "/kette": "/loopback",
+      "/schleife": "/schleife",
+      "/datei": "file:///etc/passwd",
+    };
+    const srv = http.createServer((req, res) => {
+      const ziel = ziele[req.url];
+      if (ziel) { res.writeHead(302, { Location: ziel }); res.end(); return; }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<title>Testseite</title><p>Inhalt</p>");
+    });
+    await new Promise((r) => srv.listen(0, "0.0.0.0", r));
+    const port = srv.address().port;
+    // Über die öffentliche Adresse des Servers, damit der erste Sprung die IP-Prüfung besteht -
+    // 127.0.0.1 wäre schon als Einstieg verboten und würde nichts über Weiterleitungen aussagen.
+    const { address: eigeneIp } = await import("node:os").then((os) => {
+      const alle = Object.values(os.networkInterfaces()).flat().filter((n) => n && n.family === "IPv4" && !n.internal);
+      return alle[0] ?? { address: null };
+    });
+
+    if (!eigeneIp) {
+      console.log("  skip - keine öffentliche IPv4 gefunden, Weiterleitungs-Prüfung nicht durchführbar");
+    } else {
+      const hole = async (pfad) => {
+        try { return { ok: true, text: await fetchTextSafely(`http://${eigeneIp}:${port}${pfad}`, 4000) }; }
+        catch (e) { return { ok: false, fehler: e.message }; }
+      };
+      ok("normale Seite ohne Weiterleitung wird geladen", (await hole("/")).ok);
+      for (const [pfad, was] of [["/loopback", "127.0.0.1"], ["/metadaten", "169.254.169.254"], ["/kette", "zweistufige Kette auf 127.0.0.1"]]) {
+        const r = await hole(pfad);
+        ok(`Weiterleitung auf ${was} wird abgewiesen`, !r.ok && /nicht erlaubt/.test(r.fehler ?? ""), r.fehler);
+      }
+      const schleife = await hole("/schleife");
+      ok("Weiterleitungs-Schleife wird abgebrochen", !schleife.ok && /Kreis|zu oft/.test(schleife.fehler ?? ""), schleife.fehler);
+      const datei = await hole("/datei");
+      ok("Weiterleitung auf file:// wird abgewiesen", !datei.ok && /http/.test(datei.fehler ?? ""), datei.fehler);
+    }
+    await new Promise((r) => srv.close(r));
+  }
+
   // --- 3f. Mehrere Farbthemen (v4) ---
   console.log("\nFarbthemen:");
   let firstCustomerThemeId = "";

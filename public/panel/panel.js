@@ -453,13 +453,33 @@
   /* ================= API ================= */
   async function api(method, url, body) {
     if (DEMO) return mockApi(method, url, body);
-    const res = await fetch(CONFIG.mount + url, {
-      method, credentials: "same-origin",
-      headers: body ? { "Content-Type": "application/json" } : {},
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(CONFIG.mount + url, {
+        method, credentials: "same-origin",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (netzfehler) {
+      // Bis 15.09.2026 flog hier der rohe Browsertext durch bis in die Oberflaeche - ein
+      // Interessent im Onboarding las woertlich "Failed to fetch". fetch() wirft nur bei einem
+      // Netzwerkproblem (Verbindung weg, Server gerade neu gestartet, Funkloch, Seite im
+      // Hintergrund eingeschlafen); Serverfehler kommen als Antwort mit Statuscode und haben
+      // ihre eigene, deutsche Meldung. Betrifft JEDEN Knopf im Panel, nicht nur einen.
+      throw Object.assign(
+        new Error("Keine Verbindung zum Server. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es noch einmal."),
+        { status: 0, cause: netzfehler },
+      );
+    }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(data.error || "Unbekannter Fehler"), { status: res.status, fields: data.fields });
+    if (!res.ok) {
+      // Ein Statuscode ohne verwertbaren Text (z. B. eine HTML-Fehlerseite vom Proxy) darf nicht
+      // als "Unbekannter Fehler" enden - das sagt niemandem, was zu tun ist.
+      const text = data.error || (res.status >= 500
+        ? "Auf dem Server ist etwas schiefgegangen. Bitte versuchen Sie es in einer Minute noch einmal."
+        : "Das hat gerade nicht geklappt. Bitte laden Sie die Seite neu und versuchen Sie es erneut.");
+      throw Object.assign(new Error(text), { status: res.status, fields: data.fields });
+    }
     return data;
   }
   const applyState = (d) => { S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer?.skippedProviders || []); };

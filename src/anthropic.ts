@@ -98,6 +98,9 @@ export interface WebsiteSuggestion {
   about: string;
   tone: "sachlich" | "locker" | "inspirierend" | "humorvoll";
   hashtags: string[];
+  /** Geschaetzte Kosten dieses einen Aufrufs - landet in usage_costs und begruendet damit das
+   *  Limit auf /api/analyze-website mit echten Zahlen statt mit einer Annahme. */
+  costUsd?: number | null;
 }
 
 const VALID_TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
@@ -176,6 +179,7 @@ export async function suggestFromWebsite(input: { title: string; description: st
     about: typeof obj.about === "string" ? obj.about.trim().slice(0, 600) : "",
     tone,
     hashtags,
+    costUsd: estimateCostUsd(anthropicModel, data.usage),
   };
 }
 

@@ -9,8 +9,14 @@
  * - Connect to the EXACT IP we validated (via a custom `lookup` on the request), so a DNS
  *   record that changes between our check and Node's own resolution (DNS rebinding) can't
  *   bypass the check - Node still uses the original hostname for the Host header/TLS SNI.
- * - No redirect following (a redirect to an internal address would otherwise bypass the checks
- *   above entirely) - a 3xx is treated as a failure.
+ * - Redirects are followed at most MAX_REDIRECTS times, and EVERY hop runs through the exact same
+ *   checks as the first URL (scheme, hostname rules, IP validation, IP pinning). Frueher wurde
+ *   jede 3xx-Antwort als Fehler behandelt. Das war unnoetig streng: praktisch jede Website mit
+ *   www-Variante leitet kanonisch um (gemessen an pipebot.at: www.pipebot.at -> 301 ->
+ *   pipebot.at), und der Kunde bekam "Die Website leitet weiter" fuer eine voellig intakte Seite.
+ *   Sicherheitstechnisch aendert das Folgen nichts, SOLANGE jeder Sprung neu geprueft wird - die
+ *   Gefahr eines Redirects ist ja gerade, dass er ungeprueft auf eine interne Adresse zeigt.
+ *   Genau das faellt hier weiterhin durch dieselbe Pruefung wie eine direkt eingegebene Adresse.
  * - Timeout and a response-size cap.
  */
 import http from "node:http";
@@ -19,6 +25,9 @@ import net from "node:net";
 import dns from "node:dns/promises";
 
 const MAX_RESPONSE_BYTES = 2_000_000;
+/** Reicht fuer die ueblichen Ketten (http->https, www->apex, Slash anhaengen); mehr deutet auf
+ *  eine Schleife oder eine kaputte Seite hin, nicht auf einen legitimen Fall. */
+const MAX_REDIRECTS = 3;
 
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
@@ -78,8 +87,33 @@ async function resolvePinnedIp(rawHostname: string): Promise<string> {
   return (addresses.find((a) => a.family === 4) ?? addresses[0]).address;
 }
 
-/** Fetches a customer-supplied URL and returns its response body as text, or throws a user-facing German error. */
+/** Ergebnis eines einzelnen Abrufs: entweder der Text, oder das Ziel einer Weiterleitung. */
+type HopResult = { kind: "body"; body: string } | { kind: "redirect"; location: string };
+
+/**
+ * Fetches a customer-supplied URL and returns its response body as text, or throws a user-facing
+ * German error. Folgt bis zu MAX_REDIRECTS Weiterleitungen; jeder Sprung wird vollstaendig neu
+ * geprueft (siehe Dateikopf).
+ */
 export async function fetchTextSafely(rawUrl: string, timeoutMs = 8000): Promise<string> {
+  let aktuell = rawUrl;
+  const besucht = new Set<string>();
+  for (let sprung = 0; sprung <= MAX_REDIRECTS; sprung++) {
+    if (besucht.has(aktuell)) throw new Error("Die Website leitet im Kreis - bitte die genaue Adresse eintragen.");
+    besucht.add(aktuell);
+    const ergebnis = await fetchOneHop(aktuell, timeoutMs);
+    if (ergebnis.kind === "body") return ergebnis.body;
+    // Location darf relativ sein ("/de/") - gegen die aktuelle Adresse aufloesen.
+    try {
+      aktuell = new URL(ergebnis.location, aktuell).toString();
+    } catch {
+      throw new Error("Die Website leitet auf eine ungültige Adresse weiter.");
+    }
+  }
+  throw new Error("Die Website leitet zu oft weiter - bitte die genaue Adresse eintragen.");
+}
+
+async function fetchOneHop(rawUrl: string, timeoutMs: number): Promise<HopResult> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -120,8 +154,13 @@ export async function fetchTextSafely(rawUrl: string, timeoutMs = 8000): Promise
       },
       (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
+          const location = res.headers.location;
           res.destroy();
-          reject(new Error("Die Website leitet weiter - das wird nicht unterstützt. Bitte die genaue Adresse eintragen."));
+          if (!location) {
+            reject(new Error("Die Website leitet weiter, nennt aber kein Ziel."));
+            return;
+          }
+          resolve({ kind: "redirect", location });
           return;
         }
         if (res.statusCode !== 200) {
@@ -141,7 +180,7 @@ export async function fetchTextSafely(rawUrl: string, timeoutMs = 8000): Promise
           }
           body += chunk;
         });
-        res.on("end", () => resolve(body));
+        res.on("end", () => resolve({ kind: "body", body }));
       },
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));

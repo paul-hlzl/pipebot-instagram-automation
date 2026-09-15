@@ -179,6 +179,40 @@ function rateLimited(key: string, max: number, windowMs: number): boolean {
 }
 
 /**
+ * Wie rateLimited, aber getrennt in Pruefen und Zaehlen - fuer Aktionen, bei denen nur ein
+ * ERFOLGREICHER Aufruf aufs Konto gehen soll.
+ *
+ * Anlass (15.09.2026): /api/analyze-website zaehlte jeden Versuch, auch den gescheiterten. Wer
+ * seine Adresse zuerst falsch eintippte, war danach eine Minute ausgesperrt - und bekam beim
+ * zweiten, diesmal richtigen Versuch nicht die eigentliche Fehlermeldung zu sehen, sondern die
+ * Sperre. Der Schutz richtete sich damit gegen genau die Leute, die er nicht treffen soll: ein
+ * gescheiterter Abruf kostet uns nichts, nur ein erfolgreicher loest den Anthropic-Aufruf aus.
+ *
+ * Gibt die Restwartezeit in Millisekunden zurueck (0 = frei), damit die Meldung die tatsaechliche
+ * Wartezeit nennen kann statt einer pauschalen Angabe.
+ */
+function rateLimitRetryAfterMs(key: string, max: number, windowMs: number): number {
+  const now = Date.now();
+  const list = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  hits.set(key, list);
+  if (list.length < max) return 0;
+  return Math.max(1, windowMs - (now - Math.min(...list)));
+}
+
+/** Zaehlt einen Aufruf auf das Limit von rateLimitRetryAfterMs. */
+function rateLimitRecord(key: string): void {
+  hits.set(key, [...(hits.get(key) ?? []), Date.now()]);
+}
+
+/** "noch 3 Minuten" / "noch 40 Sekunden" - fuer Sperrmeldungen. */
+function warteText(ms: number): string {
+  const sekunden = Math.ceil(ms / 1000);
+  if (sekunden < 90) return `noch ${sekunden} Sekunde${sekunden === 1 ? "" : "n"}`;
+  const minuten = Math.ceil(sekunden / 60);
+  return `noch ${minuten} Minute${minuten === 1 ? "" : "n"}`;
+}
+
+/**
  * One-line analytics summary for the help-chat's accountContext (Panel v9 Aufgabe 4) - only ever
  * called with the currently logged-in customer's own id (see the /api/help-chat handler), never
  * reachable with another customer's id from client input.
@@ -786,14 +820,27 @@ export function createPanelRouter(): Router {
     }),
   );
 
-  // Gleiche Absicherung wie /api/improve-briefing, aber strenger (1/Minute statt 6/10min) -
-  // ruft eine vom Kunden eingegebene URL ab (SSRF-Schutz in website-analyze.ts/
-  // ssrf-safe-fetch.ts), daher zusaetzlich kostspieliger/riskanter pro Aufruf.
+  /*
+   * Ruft eine vom Kunden eingegebene URL ab (SSRF-Schutz in website-analyze.ts/ssrf-safe-fetch.ts)
+   * und schickt den Text an Anthropic.
+   *
+   * Grenze: 5 ERFOLGREICHE Abrufe pro Stunde und IP (bis 15.09.2026: 1 pro Minute, jeder Versuch
+   * gezaehlt). Begruendung der Zahl: Geld kostet nur der erfolgreiche Abruf, und der liegt mit
+   * rund 1000 Eingabe- und maximal 500 Ausgabe-Token in derselben Groessenordnung wie ein
+   * Beitragstext - gemessen $0.0034. Fuenf Abrufe pro Stunde und IP sind also im schlimmsten Fall
+   * unter zwei Cent, waehrend im Formular realistisch ein bis drei gebraucht werden: einmal
+   * probieren, Adresse korrigieren, nochmal. Die alte Minutensperre traf genau diesen Ablauf.
+   */
+  const ANALYZE_MAX_PRO_STUNDE = 5;
   router.post(
     "/api/analyze-website",
     safe(async (req, res) => {
-      if (rateLimited(`analyze-website:${clientIp(req)}`, 1, 60_000)) {
-        res.status(429).json({ error: "Bitte warten Sie eine Minute, bevor Sie es erneut versuchen." });
+      const limitKey = `analyze-website:${clientIp(req)}`;
+      const wartenMs = rateLimitRetryAfterMs(limitKey, ANALYZE_MAX_PRO_STUNDE, 3_600_000);
+      if (wartenMs > 0) {
+        res.status(429).json({
+          error: `Sie haben die Website-Analyse ${ANALYZE_MAX_PRO_STUNDE}× in der letzten Stunde genutzt. Bitte ${warteText(wartenMs)} warten - oder tragen Sie Branche und Beschreibung einfach selbst ein.`,
+        });
         return;
       }
       const c = currentCustomer(req);
@@ -812,6 +859,9 @@ export function createPanelRouter(): Router {
       }
       try {
         const suggestion = await analyzeWebsite(website);
+        // Erst jetzt zaehlen: nur dieser Weg hat tatsaechlich einen Anthropic-Aufruf verursacht.
+        rateLimitRecord(limitKey);
+        logUsageCost(c?.id ?? null, "analyze-website", suggestion.costUsd ?? null);
         res.json({ suggestion });
       } catch (err) {
         console.error("[panel] analyze-website fehlgeschlagen:", err);
