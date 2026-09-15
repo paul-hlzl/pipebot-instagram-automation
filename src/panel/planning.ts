@@ -39,6 +39,8 @@ import {
   type PublishChannel,
 } from "./credentials.js";
 import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./schedule.js";
+import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
+import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
 import { anthropicAvailable, generatePlannedPostContent } from "../anthropic.js";
 import { FAL_IMAGE_COST_USD, generateImageUrl } from "../fal.js";
 import { logUsageCost } from "./analytics.js";
@@ -55,6 +57,30 @@ const CHANNEL_SCHEDULE: Record<PlannableChannel, PostingChannel> = {
   ig_story: "instagram",
   linkedin: "linkedin",
 };
+
+/**
+ * Wirft, wenn eine Ueberschrift im Zielformat nicht in der einheitlichen Schriftgroesse setzbar
+ * ist. Die Meldung geht als `avoidNote` in den einen erlaubten zweiten Versuch - dieselbe
+ * Mechanik wie bei verbotenen Woertern.
+ *
+ * Bewusst VOR dem Bild geprueft: das Bild kostet Geld, die Pruefung ist reine Rechnerei. Und
+ * bewusst als Neu-Schreiben statt als Verkleinern - eine Ueberschrift, die selbst mit Trennung
+ * nicht in vier Zeilen passt, ist zu lang, und kleinere Schrift macht sie nicht besser, nur
+ * unauffaelliger. Angelegt ist die Grenze grosszuegig (rund 60 Zeichen, gemessene Ueberschriften
+ * liegen im Median bei 35), sie soll nur echte Ausreisser abfangen.
+ */
+function assertHeadlineRenderable(row: CustomerRow, channel: PlannableChannel, headline: string): void {
+  const font = getFontOption(row.font_choice ?? DEFAULT_FONT_ID);
+  const layout = headlineLayoutForFormat(headline, CHANNEL_IMAGE_FORMAT[channel], font);
+  if (layout.tooLong) {
+    throw new ToolError(
+      `Die Überschrift "${headline}" ist für das Bild zu lang (passt auch umbrochen nicht in ${HEADLINE_MAX_LINES_HINT} Zeilen). ` +
+        "Schreibe eine deutlich kürzere Schlagzeile, höchstens 6 Wörter und höchstens 45 Zeichen.",
+    );
+  }
+}
+
+const HEADLINE_MAX_LINES_HINT = HEADLINE_MAX_LINES;
 
 function checkTextsFor(channel: PlannableChannel, headline: string, caption: string): (string | undefined)[] {
   // Mirrors save_pending_approval's fix from the previous session: ig_story is only ever
@@ -117,6 +143,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
   try {
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
+    assertHeadlineRenderable(row, channel, content.headline);
   } catch (err) {
     // One retry, feeding back exactly what was wrong - same "retry ONCE, don't retry forever
     // and don't give up after one attempt either" policy as K7 in the routine.
@@ -126,6 +153,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
     logUsageCost(row.id, feature, content.costUsd);
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
+    assertHeadlineRenderable(row, channel, content.headline);
   }
 
   const branding = resolveImageBranding(row.id);

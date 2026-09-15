@@ -815,6 +815,68 @@ async function main() {
     db.close();
   }
 
+  // --- 3e-2. Einheitliche Headline-Groesse im Bild (15.09.2026) - reine Rechenlogik aus
+  // watermark.ts, kein sharp-Rendern und kein externer Aufruf noetig.
+  console.log("\nSchriftgröße der Bild-Überschriften:");
+  {
+    const { headlineLayoutForFormat, HEADLINE_MAX_LINES, HEADLINE_MIN_FONT_RATIO } = await import("../dist/watermark.js");
+    const headlines = [
+      "Mehr Umsatz",
+      "Jetzt starten",
+      "Konsistenz schlägt Zufall – jeden Tag.",
+      "#Pipeflow: Dein KI-Content-Partner",
+      "KI erstellt deine Social-Media-Posts automatisch",
+    ];
+
+    for (const format of ["feed", "story"]) {
+      const layouts = headlines.map((h) => headlineLayoutForFormat(h, format));
+      const groessen = [...new Set(layouts.map((l) => l.fontSize))];
+      ok(
+        `${format}: alle Überschriften werden in derselben Größe gesetzt`,
+        groessen.length === 1,
+        `Größen: ${groessen.join(", ")}px`,
+      );
+      ok(
+        `${format}: und zwar in der Zielgröße, nicht verkleinert`,
+        layouts.every((l) => l.atTargetSize && !l.tooLong),
+        JSON.stringify(layouts.map((l) => `${l.fontSize}/${l.targetFontSize}`)),
+      );
+      ok(`${format}: keine Überschrift braucht mehr als ${HEADLINE_MAX_LINES} Zeilen`, layouts.every((l) => l.lines.length <= HEADLINE_MAX_LINES));
+    }
+
+    // Der eigentliche alte Fehler: ein einzelnes zu langes Wort zwang die Schrift herunter.
+    const langesWort = headlineLayoutForFormat("#Pipeflow: Dein KI-Content-Partner", "feed");
+    const kurz = headlineLayoutForFormat("Mehr Umsatz", "feed");
+    ok(
+      "ein überlanges Einzelwort ändert die Schriftgröße nicht mehr",
+      langesWort.fontSize === kurz.fontSize,
+      `${langesWort.fontSize}px gegen ${kurz.fontSize}px`,
+    );
+    ok(
+      "das überlange Wort wird stattdessen umbrochen",
+      langesWort.lines.some((l) => l.endsWith("-")),
+      JSON.stringify(langesWort.lines),
+    );
+
+    // Notfallpfad: irgendwann ist eine Überschrift schlicht zu lang - dann wird sie nicht immer
+    // weiter verkleinert, sondern als "neu schreiben" gemeldet.
+    const absurd = headlineLayoutForFormat("Betriebshaftpflichtversicherungsberatung für Handwerksbetriebe in der gesamten Alpenregion", "feed");
+    ok("eine absurd lange Überschrift wird als zu lang gemeldet", absurd.tooLong, JSON.stringify(absurd.lines));
+    ok(
+      "und selbst dann nicht unter die Untergrenze verkleinert",
+      absurd.fontSize >= Math.round(absurd.targetFontSize * HEADLINE_MIN_FONT_RATIO),
+      `${absurd.fontSize}px, Untergrenze ${Math.round(absurd.targetFontSize * HEADLINE_MIN_FONT_RATIO)}px`,
+    );
+
+    // Formate duerfen sich untereinander unterscheiden (andere Bildmasse), muessen aber je
+    // Format stabil sein.
+    ok(
+      "Feed und Story haben jeweils ihre eigene, feste Zielgröße",
+      headlineLayoutForFormat("x", "feed").targetFontSize !== headlineLayoutForFormat("x", "story").targetFontSize,
+      `feed ${headlineLayoutForFormat("x", "feed").targetFontSize}px, story ${headlineLayoutForFormat("x", "story").targetFontSize}px`,
+    );
+  }
+
   // --- 3f. Mehrere Farbthemen (v4) ---
   console.log("\nFarbthemen:");
   let firstCustomerThemeId = "";

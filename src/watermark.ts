@@ -49,6 +49,48 @@ export function estimateTextWidth(text: string, fontSize: number, glyphWidthFact
 }
 
 /**
+ * Zerlegt ein einzelnes Wort, das breiter als die ganze Zeile ist, in Stuecke mit Bindestrich -
+ * "KI-Content-Partner" wird zu "KI-Content-" + "Partner".
+ *
+ * Genau solche Woerter waren die eigentliche Ursache der uneinheitlichen Schriftgroessen: ein
+ * unteilbares Wort zwang die alte Schleife zum Verkleinern, bis es passte, und die Groesse des
+ * ganzen Bildes hing damit am laengsten Wort der Ueberschrift (gemessen: 63px bei
+ * "KI-Content-Partner" gegen 113px bei "Konsistenz schlaegt Zufall - jeden Tag."). Wird zuerst an
+ * vorhandenen Bindestrichen getrennt (liest sich natuerlich), erst danach hart.
+ */
+function splitOverlongWord(word: string, fontSize: number, maxWidth: number, glyphWidthFactor: number): string[] {
+  if (estimateTextWidth(word, fontSize, glyphWidthFactor) <= maxWidth) return [word];
+  const maxChars = Math.max(2, Math.floor(maxWidth / (fontSize * glyphWidthFactor)));
+
+  // Erst an eigenen Bindestrichen: die Trennstelle steht dann dort, wo sie ohnehin hingehoert.
+  if (word.includes("-")) {
+    const teile: string[] = [];
+    let aktuell = "";
+    for (const stueck of word.split("-").filter(Boolean)) {
+      const kandidat = aktuell ? `${aktuell}-${stueck}` : stueck;
+      if (aktuell && kandidat.length > maxChars) {
+        teile.push(`${aktuell}-`);
+        aktuell = stueck;
+      } else {
+        aktuell = kandidat;
+      }
+    }
+    if (aktuell) teile.push(aktuell);
+    if (teile.every((t) => t.length <= maxChars)) return teile;
+  }
+
+  // Sonst hart trennen, mit Bindestrich als Umbruchzeichen.
+  const teile: string[] = [];
+  let rest = word;
+  while (rest.length > maxChars) {
+    teile.push(`${rest.slice(0, maxChars - 1)}-`);
+    rest = rest.slice(maxChars - 1);
+  }
+  if (rest) teile.push(rest);
+  return teile;
+}
+
+/**
  * Greedily wraps a headline into as many lines as actually needed at the given font size, based
  * on estimated rendered width (not a blind word-count split) - a headline with more/longer words
  * than the original short "2-4 words" case (increasingly common with content-pillar-driven
@@ -59,8 +101,19 @@ export function estimateTextWidth(text: string, fontSize: number, glyphWidthFact
  * to break it on) - the render-time `textLength` safety net in addHeadlineText still keeps it
  * from actually overflowing the image.
  */
-export function wrapHeadline(headline: string, fontSize: number, maxWidth: number, glyphWidthFactor: number): string[] {
-  const words = headline.trim().split(/\s+/).filter(Boolean);
+export function wrapHeadline(
+  headline: string,
+  fontSize: number,
+  maxWidth: number,
+  glyphWidthFactor: number,
+  /** Trennt ein Wort, das allein schon breiter als die Zeile ist, mit Bindestrich statt es
+   *  ueberstehen zu lassen. Standard aus, damit die Video-Textkarten (video.ts) ihr bisheriges
+   *  Verhalten behalten; addHeadlineText schaltet es ein - siehe headlineLayout. */
+  breakLongWords = false,
+): string[] {
+  const words = breakLongWords
+    ? headline.trim().split(/\s+/).filter(Boolean).flatMap((w) => splitOverlongWord(w, fontSize, maxWidth, glyphWidthFactor))
+    : headline.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return [""];
   const lines: string[] = [];
   let current = "";
@@ -75,6 +128,116 @@ export function wrapHeadline(headline: string, fontSize: number, maxWidth: numbe
   }
   if (current) lines.push(current);
   return lines;
+}
+
+/* ================= Einheitliche Headline-Groesse (15.09.2026) =================
+ *
+ * Vorher startete die Komposition bei der GROESSTMOEGLICHEN Schrift und verkleinerte, bis der
+ * Text passte. Damit hing die Schriftgroesse an der Ueberschrift - genauer: an ihrem laengsten
+ * unteilbaren Wort, denn ein Wort, das allein zu breit ist, zwingt die Schleife immer weiter
+ * herunter. Gemessen an echten Beitraegen desselben Kunden und Formats (1024x1024):
+ *
+ *   "Jetzt starten"                            123px
+ *   "Konsistenz schlaegt Zufall - jeden Tag."  113px
+ *   "#Pipeflow: Dein KI-Content-Partner"        63px   <- laengstes Wort 18 Zeichen
+ *
+ * Fast Faktor zwei im selben Format, und ausgerechnet die kuerzeste Ueberschrift wurde am
+ * kleinsten gesetzt. Jetzt umgekehrt: eine feste Zielgroesse je Format, Umbruch (notfalls mitten
+ * im Wort) statt Verkleinern, und Verkleinern nur noch als eng begrenzter Notfall.
+ */
+
+/** Zielgroesse, ausgedrueckt als "so viele Zeichen passen in eine Zeile". Nicht als fester
+ *  Pixelwert, denn die Textspalte ist je Format unterschiedlich breit (Feed 655px, Story 614px)
+ *  und eine schmale Schrift passt bei gleicher Pixelgroesse deutlich mehr Zeichen unter. Ueber
+ *  diese Zahl ergibt sich fuer JEDE Kombination aus Format und Schriftart dieselbe optische
+ *  Wirkung: eine volle Zeile fuellt die Textspalte. 13 ergibt Feed ~90px und Story ~84px - eine
+ *  uebliche Ueberschrift (Median 35 Zeichen, laengste gemessene 48) braucht damit hoechstens
+ *  fuenf Zeilen und bleibt in jedem Fall innerhalb der Sicherheitszone. */
+export const HEADLINE_TARGET_CHARS_PER_LINE = 13;
+
+/** Untergrenze der Notfall-Verkleinerung, relativ zur Zielgroesse. 0.85 heisst: im schlimmsten
+ *  Fall 15% kleiner, nicht mehr - vorher konnte die Schrift auf ein Drittel der Ausgangsgroesse
+ *  fallen. Diese Spanne faengt Ueberschriften bis rund 60 Zeichen ab; alles darueber gilt als zu
+ *  lang und wird beim Erzeugen abgefangen (assertHeadlineRenderable in planning.ts), statt es
+ *  durch immer kleinere Schrift zu kaschieren. Von den 95 Ueberschriften in der Produktion
+ *  braucht keine einzige diesen Notfall. */
+export const HEADLINE_MIN_FONT_RATIO = 0.85;
+
+/** Ab hier wird (im Rahmen der Untergrenze) verkleinert statt weiter umbrochen.
+ *
+ *  5 statt 4, empirisch gewaehlt: gegen alle 95 echten Ueberschriften aus der Produktion
+ *  gerechnet, setzt jede einzelne davon bei 5 Zeilen in der Zielgroesse - bei 4 Zeilen waeren 13
+ *  kleiner gesetzt und 6 als zu lang zurueckgewiesen worden, obwohl mit ihnen inhaltlich nichts
+ *  falsch ist. Der Notfallpfad bleibt damit das, was er sein soll: ein Pfad fuer Ausreisser, der
+ *  im Alltag nie betreten wird. Fuenf Zeilen bei 90px fuellen rund die halbe Bildhoehe - genau
+ *  so viel wie die bisher groesste gesetzte Ueberschrift auch. */
+export const HEADLINE_MAX_LINES = 5;
+
+/** Nennmasse je Format - dieselben Werte, die fal.ts anfordert. Nur fuer die Vorabpruefung
+ *  gedacht, ob eine Ueberschrift ueberhaupt setzbar ist; addHeadlineText selbst liest die
+ *  tatsaechlichen Masse aus dem erzeugten Bild. */
+export const HEADLINE_NOMINAL_SIZE: Record<PostFormat, { width: number; height: number }> = {
+  feed: { width: 1024, height: 1024 },
+  story: { width: 768, height: 1344 },
+};
+
+export interface HeadlineLayout {
+  fontSize: number;
+  lines: string[];
+  /** Zielgroesse je Format - das, was alle Beitraege gemeinsam haben sollen. */
+  targetFontSize: number;
+  /** false = der Notfall hat gegriffen und diese Ueberschrift wird kleiner gesetzt als die anderen. */
+  atTargetSize: boolean;
+  /** true = passt selbst an der Untergrenze nicht in vier Zeilen; die Ueberschrift ist schlicht
+   *  zu lang und gehoert neu geschrieben, nicht kleiner gesetzt. */
+  tooLong: boolean;
+}
+
+/**
+ * Entscheidet Schriftgroesse und Umbruch - rein rechnerisch, ohne sharp, damit dieselbe
+ * Entscheidung auch vor dem (bezahlten) Bilderzeugen geprueft werden kann.
+ */
+export function headlineLayout(
+  headline: string,
+  opts: { width: number; height: number; format: PostFormat; font?: { glyphWidthFactor?: number } },
+): HeadlineLayout {
+  const zone = getHeadlineSafeZone(opts.format);
+  const maxTextWidth = opts.width * (zone.right - zone.left);
+  const maxTextHeight = opts.height * (zone.bottom - zone.top);
+  const glyphWidthFactor = opts.font?.glyphWidthFactor ?? DEFAULT_GLYPH_WIDTH_FACTOR;
+
+  const targetFontSize = Math.round(maxTextWidth / (HEADLINE_TARGET_CHARS_PER_LINE * glyphWidthFactor));
+  const minFontSize = Math.max(1, Math.round(targetFontSize * HEADLINE_MIN_FONT_RATIO));
+
+  const passt = (fontSize: number, lines: string[]): boolean =>
+    lines.length <= HEADLINE_MAX_LINES && fontSize * 1.15 * lines.length <= maxTextHeight;
+
+  // Die Breite muss hier nicht mehr geprueft werden: wrapHeadline trennt mit breakLongWords=true
+  // auch ein einzelnes zu breites Wort, es kann also keine zu breite Zeile mehr entstehen.
+  let fontSize = targetFontSize;
+  let lines = wrapHeadline(headline, fontSize, maxTextWidth, glyphWidthFactor, true);
+  while (!passt(fontSize, lines) && fontSize > minFontSize) {
+    fontSize = Math.max(minFontSize, fontSize - Math.max(1, Math.round(fontSize * 0.04)));
+    lines = wrapHeadline(headline, fontSize, maxTextWidth, glyphWidthFactor, true);
+  }
+
+  return {
+    fontSize,
+    lines,
+    targetFontSize,
+    atTargetSize: fontSize === targetFontSize,
+    tooLong: !passt(fontSize, lines),
+  };
+}
+
+/** Passt diese Ueberschrift in diesem Format ohne Notfall-Verkleinerung? Fuer die Pruefung beim
+ *  Erzeugen, bevor ein Bild bezahlt wird. */
+export function headlineLayoutForFormat(
+  headline: string,
+  format: PostFormat,
+  font?: { glyphWidthFactor?: number },
+): HeadlineLayout {
+  return headlineLayout(headline, { ...HEADLINE_NOMINAL_SIZE[format], format, font });
 }
 
 /**
@@ -109,31 +272,8 @@ export async function addHeadlineText(
   const safeBottom = height * zone.bottom;
   const maxTextHeight = safeBottom - safeTop;
 
-  const MAX_FONT_SIZE = Math.round(height * 0.12);
-  const MIN_FONT_SIZE = Math.round(height * 0.035);
-  const MAX_LINES = 4; // beyond this, keep shrinking the font instead of adding still more lines
-
-  // Panel v7 fix (Teil 6): the original code guessed a font size from ONE assumed "longest
-  // line" BEFORE wrapping, wrapped headlines longer than 2 words into a blind 50/50 word-count
-  // split, and only ever re-checked the TOTAL block HEIGHT afterwards - never each line's actual
-  // WIDTH. A longer, unevenly-split headline (content pillars now produce these more often than
-  // the original short 2-4-word case, e.g. "Rückenschmerzen? Beweglichkeit zurückgewinnen") could
-  // therefore still render past the right edge with no fallback catching it - screenshot-
-  // confirmed by a customer (Andrea Hölzl). Fixed by iterating: wrap at the current font size,
-  // check the actual widest resulting line (not a pre-wrap guess) AND the total block height,
-  // shrink and re-wrap if either is still too big, down to a sane minimum font size.
   const glyphWidthFactor = font.glyphWidthFactor ?? DEFAULT_GLYPH_WIDTH_FACTOR;
-  let fontSize = MAX_FONT_SIZE;
-  let lines = wrapHeadline(headline, fontSize, maxTextWidth, glyphWidthFactor);
-  for (;;) {
-    const lineHeight = fontSize * 1.15;
-    const totalTextHeight = lineHeight * lines.length;
-    const widestLine = Math.max(...lines.map((line) => estimateTextWidth(line, fontSize, glyphWidthFactor)));
-    const fits = widestLine <= maxTextWidth && totalTextHeight <= maxTextHeight && lines.length <= MAX_LINES;
-    if (fits || fontSize <= MIN_FONT_SIZE) break;
-    fontSize = Math.max(MIN_FONT_SIZE, fontSize - Math.max(1, Math.round(fontSize * 0.08)));
-    lines = wrapHeadline(headline, fontSize, maxTextWidth, glyphWidthFactor);
-  }
+  const { fontSize, lines } = headlineLayout(headline, { width, height, format, font });
 
   const lineHeight = fontSize * 1.15;
   const totalTextHeight = lineHeight * lines.length;

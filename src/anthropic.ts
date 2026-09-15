@@ -317,6 +317,12 @@ export async function generatePlannedPostContent(input: {
     "Kleinunternehmen, im Rahmen einer automatischen Vorausplanung. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - " +
     'kein einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: ' +
     '{"headline": "kurze Schlagzeile fuer das Bild, max. 6 Woerter", "caption": "der Beitragstext"}. ' +
+    // 15.09.2026: Die Wortgrenze allein hat nicht gereicht. Entscheidend fuer das Bild ist nicht
+    // die Wortzahl, sondern das LAENGSTE Wort - ein "KI-Content-Partner" (18 Zeichen) fuellt eine
+    // Zeile schon allein. Die Bildkomposition trennt solche Woerter inzwischen selbst, aber eine
+    // Schlagzeile ohne Bandwurmwort liest sich auf dem Bild deutlich besser als eine getrennte.
+    "Die headline steht gross im Bild: hoechstens 45 Zeichen, und moeglichst kein Wort laenger " +
+    "als 16 Zeichen - lange Komposita lieber auftrennen oder umschreiben. " +
     `Schreibe vollständig auf ${languageName}. Tonalität: ${input.tone || "sachlich"}. ` +
     `Emojis: ${input.emojisEnabled ? "sparsam und passend einsetzen" : "keine Emojis verwenden"}. ` +
     `Hashtags: ${hashtagLine} ` +
