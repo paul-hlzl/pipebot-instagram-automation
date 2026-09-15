@@ -101,3 +101,34 @@ node scripts/redesign-func-test.mjs
 
 Die zuvor hier dokumentierten Schluessel wurden dabei rotiert und sind ungueltig. Ein neuer Link
 entsteht im Panel unter Einstellungen -> Konto -> "Persoenlichen Link erzeugen" (entwertet den alten).
+
+## Frontend ausliefern (seit 15.09.2026)
+
+Die Produktion serviert das Panel-Frontend NICHT mehr aus der Arbeitskopie, sondern aus einem
+eigenen Verzeichnis. Vorher zeigte `PANEL_PUBLIC_DIR` auf `/root/mcp-live/public/panel` - eine
+gespeicherte `panel.js` war damit in derselben Sekunde live, ohne Neustart, ohne Sandbox-Stufe
+und ohne Rücksicht auf das Routine-Fenster. Für die Server-Seite galt "erst Sandbox, dann
+Produktion", fürs Frontend faktisch nicht.
+
+| Umgebung | serviert aus | Prozess |
+|---|---|---|
+| Sandbox | `/root/panel-work` | `instagram-mcp-staging` (Port 3100) |
+| Produktion | `/root/panel-live` | `instagram-mcp` (Port 3000) |
+
+Gefüllt werden beide nur über:
+
+```
+node scripts/deploy-panel.mjs sandbox
+node scripts/deploy-panel.mjs produktion
+node scripts/deploy-panel.mjs produktion --pruefen   # zeigt nur, was sich ändern würde
+```
+
+Das Skript listet vor dem Kopieren jede neue und geänderte Datei, meldet verwaiste Dateien im
+Ziel (löscht sie aber nie von selbst) und verweigert die Auslieferung nach Produktion im
+Routine-Fenster :38-:48. Bewusst ohne Watcher und ohne Hook: Ausliefern ist eine Entscheidung.
+
+Ein Neustart ist nur nötig, wenn sich auch die Server-Seite geändert hat - statische Dateien
+liest der Prozess bei der nächsten Anfrage.
+
+Die Produktions-Konfiguration liegt in `/root/produktion.ecosystem.json` (Rechte 600), die der
+Sandbox in `/root/staging.ecosystem.json`.
