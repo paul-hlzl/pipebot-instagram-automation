@@ -612,7 +612,19 @@ export function createPanelRouter(): Router {
   // Einwilligung verwies also ins Leere. Ausgeliefert wird jetzt assets/datenschutz.html, sobald
   // die Datei existiert; solange nicht, sagt die Antwort klar warum (statt still 404).
   // Der INHALT kommt von Paul bzw. seiner Rechtsberatung - hier steht nur die Zustellung.
-  router.get("/datenschutz", (_req, res) => {
+  router.get("/datenschutz", (req, res) => {
+    // Eine einzige dauerhafte Adresse: sobald PANEL_PRIVACY_CANONICAL_URL gesetzt ist, leiten alle
+    // anderen Adressen dorthin weiter. Grund: die URL wird bei Meta, LinkedIn und Google
+    // hinterlegt - jede Aenderung ist dort Nacharbeit an drei Stellen. Ohne die Variable liefert
+    // jede Adresse die Seite selbst aus (aktueller Zustand, bis DNS fuer app.pipeflow.at steht).
+    const kanonisch = (process.env.PANEL_PRIVACY_CANONICAL_URL ?? "").replace(/\/$/, "");
+    if (kanonisch) {
+      const hier = `${baseUrlFor(req)}${mountFor(req)}/datenschutz`;
+      if (hier !== kanonisch) {
+        res.redirect(301, kanonisch);
+        return;
+      }
+    }
     const datei = path.join(PACKAGE_ROOT, "assets/datenschutz.html");
     if (fs.existsSync(datei)) {
       res.type("html").sendFile(datei);
