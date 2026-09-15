@@ -14,6 +14,8 @@
     "test:limit": "tsx scripts/check-limit.ts",
     "pretest:panel": "pm2 restart instagram-mcp-staging > /dev/null",
     "test:panel": "node scripts/test-panel.mjs",
+    "pretest:admin": "pm2 restart instagram-mcp-staging > /dev/null",
+    "test:admin": "node scripts/redesign-admin-test.mjs",
     "test:watermark": "node scripts/test-watermark.mjs",
     "test:linkedin-analytics": "node scripts/test-linkedin-analytics.mjs",
     "backup:db": "node scripts/backup-db.mjs",

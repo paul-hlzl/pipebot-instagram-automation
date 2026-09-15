@@ -20,6 +20,13 @@ import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
 import { commentStatsForCustomer } from "./comments.js";
 
 const COOKIE = "pp_admin";
+// Der Cookie-Pfad stand hier fest auf "/panel/admin". Unter /panel/sandbox/admin hat der Browser
+// das Sitzungs-Cookie deshalb NIE zurueckgeschickt: die Anmeldung lieferte 200, der naechste
+// Aufruf von /api/me 401 - die Sandbox-Admin-Seite war praktisch nicht benutzbar (gefunden beim
+// Redesign Phase 6). Gleiche Herleitung wie im Kunden-Router (router.ts MOUNT); ohne
+// PANEL_MOUNT_PATH bleibt es exakt "/panel/admin" wie bisher.
+const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
+const COOKIE_PATH = `${MOUNT}/admin`;
 const SESSION_HOURS = 12;
 const STATUSES = ["active", "paused"] as const;
 
@@ -59,7 +66,7 @@ function startAdminSession(res: Response): void {
   db.prepare("INSERT INTO admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(sha256(token), expires);
   res.setHeader(
     "Set-Cookie",
-    `${COOKIE}=${token}; Path=/panel/admin; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_HOURS * 3600}`,
+    `${COOKIE}=${token}; Path=${COOKIE_PATH}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_HOURS * 3600}`,
   );
 }
 
@@ -141,9 +148,14 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
   };
 }
 
-export function createAdminRouter(): Router {
+export function createAdminRouter(panelPublicDir?: string): Router {
   const router = express.Router();
-  const publicDir = process.env.PANEL_PUBLIC_DIR ?? path.resolve(process.cwd(), "public/panel");
+  // Redesign Phase 6: das Verzeichnis kommt jetzt vom Panel-Router (der die Sandbox-Weiche auf
+  // public/panel-redesign kennt). Vorher stand hier fest public/panel - die Sandbox unter
+  // /panel/sandbox/admin/ hat also die PRODUKTIONS-admin.html ausgeliefert, ein Redesign dieser
+  // Seite waere dort gar nicht sichtbar gewesen (und nur in Produktion aenderbar). Ohne Argument
+  // bleibt das alte Verhalten unveraendert.
+  const publicDir = panelPublicDir ?? process.env.PANEL_PUBLIC_DIR ?? path.resolve(process.cwd(), "public/panel");
 
   router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "admin.html")));
 
@@ -168,7 +180,7 @@ export function createAdminRouter(): Router {
   router.post("/api/logout", (req, res) => {
     const token = readCookie(req, COOKIE);
     if (token) db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha256(token));
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=/panel/admin; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${COOKIE_PATH}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
     res.json({ ok: true });
   });
 

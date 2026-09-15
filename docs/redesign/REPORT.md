@@ -27,7 +27,10 @@ Zwei weitere Funde aus derselben Ecke:
 
 Vorher-/Nachher-Screenshots: `docs/redesign/before/` und `docs/redesign/after/` (je 390 px und 1440 px).
 Die Vorher-Bilder stammen vom alten Panel aus einem lokalen Static-Server im Demo-Modus
-(`scripts/redesign-before-shots.mjs`) — ohne Produktion und ohne echte Kundenkonten.
+(`scripts/redesign-before-shots.mjs`) — ohne Produktion und ohne echte Kundenkonten. Die beiden
+Admin-Bildpaare (`20-admin-*`) entstanden dagegen in der Sandbox gegen die Staging-Datenbank: erst
+mit der alten Datei, dann mit der neuen, also gleiche Daten auf beiden Seiten. Alle dort
+sichtbaren Firmen sind Testkonten.
 
 ### Fundament
 | Thema | Vorher | Jetzt |
@@ -89,6 +92,20 @@ Suche. Alle sieben Gruppen bleiben dabei immer im DOM (nur ausgeblendet) — `PA
 das ganze Briefing, ein Entfernen hätte stillschweigend Werte verloren. Genau das prüft der
 Funktionstest.
 
+### Admin-Seite (Phase 6)
+`admin.html` läuft jetzt auf denselben Tokens, derselben Schrift und denselben Komponenten wie das
+Kunden-Panel — Google Fonts ist damit auch hier weg. Oben steht **ein Satz** statt einer Kachelwand
+(„Alles läuft." · „3 Verbindungen brauchen Handlung." · „2 Testphasen sind abgelaufen."), danach
+Zahlen, Kunden, Werkzeuge — vorher stand das Werkzeug (Test-E-Mail) ganz oben und die Kunden
+darunter. Zustände sind Umriss-Chips in der Pipe-Sprache (gefüllter Punkt = ok/erledigt, `--stop` =
+Problem), die ALL-CAPS-Spaltenköpfe sind weg, am Handy steht in jeder Kundenkarte Bezeichnung links
+und Wert rechts statt zwölf Zeilen untereinander, am Desktop bleiben die vier Zeilenaktionen in
+einer Zeile. Der letzte Systemdialog der Anwendung ist damit ebenfalls weg: „+7 Tage" fragt nicht
+mehr über `window.prompt()`, sondern im eigenen Dialog (Zahlenfeld, mit 7 vorbelegt, Enter
+bestätigt, Escape bricht ab). Der Detail-Dialog schließt jetzt auch mit Escape und gibt den Fokus
+an den auslösenden Knopf zurück. Die KI-Kosten-Tabelle zeigt deutsche Namen statt der internen
+Kürzel (`voice-dictation` → „Diktat-Transkription", alle sechs erfasst).
+
 ### Weitere
 Analytics nutzt dieselbe Segmented-Control wie Beiträge · Skeletons in der Form des Inhalts statt
 „Wird geladen …" · Fehlertexte mit „Erneut versuchen" · leere Zustände als Einladung · Toast-System
@@ -105,7 +122,7 @@ Pixel-Logo (Scope relativ, dadurch für `/panel` und `/panel/sandbox` automatisc
 |---|---|
 | **Splash nur einmal pro Browser-Sitzung** (statt bei jedem Reload), Dauer 1,5 s → 1,1 s, Öffnen in Pixel-Stufen | Beim zehnten Öffnen am Tag ist ein Markenmoment eine Wartezeit. Wie gefordert ausgewiesen und per Konstante `SPLASH_EVERY_LOAD` in `index.html` zurückdrehbar. |
 | **Aufteilung in drei Dateien** statt einer | Vom Auftrag erlaubt, wenn beide Mount-Pfade und die CSP funktionieren — beides nachgewiesen. Eine 252-KB-Datei war nicht mehr sinnvoll zu bearbeiten. |
-| **Zwei Server-Änderungen** (`express.static`, `font-src 'self'`) | Ohne sie ließen sich weder die Aufteilung noch die selbst gehostete Schrift ausliefern. Beide additiv, `npm run test:panel` bleibt grün. |
+| **Vier Server-Änderungen** (`express.static`, `font-src 'self'`, Admin-Verzeichnis aus dem Panel-Router, Cookie-Pfad der Admin-Sitzung) | Ohne die ersten beiden ließen sich weder die Aufteilung noch die selbst gehostete Schrift ausliefern; ohne die letzten beiden war die Admin-Seite in der Sandbox weder sichtbar noch benutzbar (siehe Abschnitt 4). Alle vier additiv, in Produktion verhalten sie sich unverändert, `npm run test:panel` bleibt grün (179/179). |
 | **Sandbox-Weiche im Router** (`public/panel-redesign`) | Siehe Abschnitt 0 — ohne sie wäre jede Änderung sofort in Produktion gewesen. Sollte nach dem Produktions-Deploy wieder entfernt werden. |
 | **Redundante „Zurück zur Übersicht"-Knöpfe entfernt** | Chanel-Regel: die Navigation ist ohnehin immer sichtbar. |
 
@@ -138,11 +155,27 @@ Pixel-Logo (Scope relativ, dadurch für `/panel` und `/panel/sandbox` automatisc
 4. **Wischen in der Freigabe** und **Lightbox mit Wischen/Doppeltipp-Zoom** — die Buttons bzw. die
    einfache Lightbox funktionieren, die Gesten fehlen.
 5. **Rundgang als Spotlight an echten Elementen** — läuft weiterhin als Dialog (4 Schritte).
-6. **`admin.html`** wurde noch nicht auf die neuen Tokens gezogen (Phase 6).
+6. ~~**`admin.html`** wurde noch nicht auf die neuen Tokens gezogen (Phase 6).~~ **Erledigt** —
+   siehe „Admin-Seite (Phase 6)" in Abschnitt 1.
 7. **Onboarding**: neuer Pipe-Fortschritt und neue Komponenten sind drin, die im Plan skizzierte
    mitwachsende Live-Vorschau des ersten Beitrags und die Hervorhebung von „Vorschlag aus meiner
    Website holen" stehen noch aus.
 8. **Web-Push** — laut Auftrag nur vormerken, siehe `docs/redesign/IDEEN.md`.
+
+### Zwei Altbestand-Fehler an der Admin-Seite (gefunden in Phase 6, beide behoben)
+
+**1. Die Admin-Seite war in der Sandbox nicht benutzbar.** Das Sitzungs-Cookie wurde fest mit
+`Path=/panel/admin` gesetzt. Unter `/panel/sandbox/admin/` schickt der Browser es damit nie zurück:
+die Anmeldung antwortete mit 200, der nächste Aufruf von `/api/me` mit 401 — die Seite fiel sofort
+auf die Anmeldemaske zurück, in einer Endlosschleife. Der Pfad wird jetzt wie im Kunden-Router aus
+`PANEL_MOUNT_PATH` abgeleitet (`src/panel/admin.ts`). Ohne diese Variable — also in Produktion —
+kommt exakt `/panel/admin` heraus wie bisher.
+
+**2. Die Sandbox servierte die Produktions-`admin.html`.** `createAdminRouter()` hat sein
+Verzeichnis selbst bestimmt (immer `public/panel`) und die Sandbox-Weiche des Panel-Routers nicht
+gekannt. Ein Redesign dieser Datei wäre dort gar nicht sichtbar gewesen — änderbar nur direkt in
+Produktion, also genau der Fall, den Abschnitt 0 verhindern soll. Der Panel-Router reicht das
+Verzeichnis jetzt durch; ohne Argument bleibt das Verhalten unverändert.
 
 ### Gefundener Altbestand-Fehler (nicht vom Redesign verursacht, nicht behoben)
 Fehlt der Instagram-Verbindung der Kommentar-Scope, sind die Radios für
@@ -163,7 +196,8 @@ melden. Empfehlung für die nächste Runde: Feld auch im deaktivierten Zustand m
 | `node scripts/redesign-undo-test.mjs` | **10/10** — Rückgängig ohne vorzeitigen Routine-Trigger |
 | `node scripts/redesign-a11y.mjs` (axe-core 4.10) | **0 kritische/ernste Verstöße**, 5 Ansichten × 2 Breiten |
 | `node scripts/redesign-check.mjs` | kein horizontales Scrollen bei 390 und 1440, **keine Konsolenfehler** |
-| Produktion unverändert | `md5sum public/panel/index.html` = `089c8228…` (wie bei `pre-redesign`) |
+| `npm run test:admin` (neu) | **41/41** — Anmeldung (richtig/falsch), Statussatz, Kundenliste, Detail-Dialog mit Escape und Fokus-Rückgabe, eigener Eingabedialog statt `window.prompt`, kein horizontales Scrollen, axe ohne kritische/ernste Verstöße, **keine externen Anfragen** |
+| Produktion unverändert | `md5sum public/panel/index.html` = `089c8228…`, `public/panel/admin.html` = `10c4a76d…` (beide wie bei `pre-redesign`) |
 
 Vier Fehler haben erst diese Tests gefunden: ein Beitragsbild ohne `max-width` sprengte bei 390 px
 das Layout; der Reiterwechsel legte keinen History-Eintrag an (Zurück-Geste sprang aus dem Bereich);
@@ -189,6 +223,12 @@ Beiträge** bereit (direkt in der Staging-DB angelegt, reine Testdaten). Beides 
 sobald Sie es freigeben oder überspringen — zum Neuanlegen genügt ein Hinweis, das ist ein
 Einzeiler.
 
+### Admin-Seite (nur für Sie)
+**https://mcp.pipebot.at/panel/sandbox/admin/** — Passwort wie gehabt aus der `.env`. Zu sehen sind
+dort die zehn Testkunden der Staging-Datenbank, keine echten. Bitte kurz prüfen: Sagt Ihnen der
+Satz ganz oben, ob etwas zu tun ist? Und fühlt sich die Kundenliste am Handy kürzer an als vorher?
+(Bisher war diese Seite in der Sandbox gar nicht anmeldbar, siehe Abschnitt 4.)
+
 ### Handy-Checkliste (bitte am Telefon durchklicken)
 1. Zweiten Link öffnen: Steht oben **ein** Satz, der sagt, was zu tun ist — nicht vier Kennzahlen?
 2. Von dort **zwei Taps** bis zur Freigabe: „Beiträge" → „Zur Freigabe". Fühlt sich das kurz genug an?
@@ -208,10 +248,11 @@ Punkt 10 ist der wichtigste. Wenn irgendetwas fehlt, bitte notieren: die Inventu
 ### Produktions-Deploy (erst nach Ihrer ausdrücklichen Freigabe)
 1. `git checkout main && git merge panel-redesign`
 2. Die Sandbox-Weiche in `src/panel/router.ts` entfernen und die neuen Dateien nach
-   `public/panel/` übernehmen (`index.html`, `panel.css`, `panel.js`, `manifest.webmanifest`,
-   die drei Icons). **Achtung:** In dem Moment, in dem `public/panel/index.html` ersetzt wird, ist
-   das neue Panel live — es gibt dafür keinen Deploy-Schritt.
-3. `npm run build && npm run test:panel`
+   `public/panel/` übernehmen (`index.html`, `panel.css`, `panel.js`, `admin.html`,
+   `manifest.webmanifest`, die drei Icons). **Achtung:** In dem Moment, in dem
+   `public/panel/index.html` ersetzt wird, ist das neue Panel live — es gibt dafür keinen
+   Deploy-Schritt.
+3. `npm run build && npm run test:panel && npm run test:admin`
 4. `pm2 restart instagram-mcp` — **nicht** zwischen :38 und :48 (stündliches Routine-Fenster).
 5. Danach `https://mcp.pipebot.at/panel/` am Handy gegenprüfen.
 

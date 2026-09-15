@@ -521,7 +521,7 @@ export function createPanelRouter(): Router {
 
   router.use(express.json({ limit: "50kb" }));
 
-  router.use("/admin", createAdminRouter());
+  router.use("/admin", createAdminRouter(publicDir));
 
   // Panel v15: dieselben Schriftdateien, die die Bild-Rendering-Pipeline serverseitig nutzt
   // (fonts.ts/assets/fonts) - hier oeffentlich servierbar, damit das Panel per @font-face eine
