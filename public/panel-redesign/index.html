@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#FFFFFF">
+<title>Pipeflow</title>
+
+<!--
+  Mount-agnostisch: das Panel laeuft unter /panel, /panel/sandbox und spaeter unter einer eigenen
+  Domain. Die SPA wird immer NUR am Mount-Wurzelpfad ausgeliefert - der Pfad ohne abschliessenden
+  Slash ist also exakt der Mount. Das <base>-Tag muss vor dem Stylesheet stehen, sonst wuerde
+  "panel.css" bei einem Aufruf ohne Slash (https://host/panel) faelschlicherweise zu /panel.css
+  aufgeloest (Produktion antwortet dort mit 200, ohne Redirect - genau der Fallstrick).
+-->
+<script>
+  (function () {
+    var path = location.pathname.replace(/\/+$/, "");
+    var filePreview = location.protocol === "file:" || /\.html?$/i.test(path);
+    var base = document.createElement("base");
+    base.href = filePreview ? "./" : path + "/";
+    document.head.appendChild(base);
+  })();
+</script>
+
+<link rel="preload" href="fonts/SchibstedGrotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="panel.css">
+<link rel="manifest" href="manifest.webmanifest">
+</head>
+<body>
+
+<div id="splash" aria-hidden="true">
+  <div class="splash-panel splash-left"></div>
+  <div class="splash-panel splash-right"></div>
+  <div class="splash-content">
+    <div class="splash-word">Pipeflow</div>
+    <div class="splash-sub">Powered by Pipeline AI Solutions</div>
+  </div>
+</div>
+<script>
+  (function () {
+    // Redesign: der volle Auftritt laeuft nur EINMAL pro Browser-Sitzung (vorher bei jedem
+    // Reload 1,5s - beim zehnten Oeffnen am Tag ist das kein Markenmoment mehr, sondern eine
+    // Wartezeit). Zurueckdrehbar: SPLASH_EVERY_LOAD auf true setzen.
+    var SPLASH_EVERY_LOAD = false;
+    var splash = document.getElementById("splash");
+    if (!splash) return;
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var seen = false;
+    try { seen = sessionStorage.getItem("pf-splash") === "1"; } catch (e) { /* Privatmodus: dann eben jedes Mal */ }
+    if (seen && !SPLASH_EVERY_LOAD) { splash.remove(); return; }
+    try { sessionStorage.setItem("pf-splash", "1"); } catch (e) { /* egal */ }
+    var holdMs = reduced ? 200 : 1100;
+    setTimeout(function () {
+      splash.classList.add("splash-done");
+      setTimeout(function () { splash.remove(); }, 320);
+    }, holdMs);
+  })();
+</script>
+
+<a class="skip-link" href="#stage">Zum Inhalt springen</a>
+
+<div id="demo" class="demo" hidden>Vorschau: Hier wird nichts gespeichert und keine echte Verbindung aufgebaut.</div>
+<div id="sandbox-banner" class="sandbox-banner" hidden role="status">TESTVERSION — hier werden neue Funktionen ausprobiert. Keine echten Kunden, keine echten Daten, keine echten Instagram-/LinkedIn-Verbindungen.</div>
+<div id="trialbar" class="trialbar" style="display:none" role="status"></div>
+
+<header class="appbar" id="appbar" hidden>
+  <a class="brand" href="." aria-label="Pipeflow Übersicht" data-go="dashboard">
+    <svg width="22" height="22" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">
+      <rect x="0" y="0" width="3" height="3"/><rect x="3" y="1" width="5" height="1"/><rect x="8" y="0" width="3" height="3"/>
+      <rect x="9" y="3" width="1" height="5"/><rect x="8" y="8" width="3" height="3"/><rect x="3" y="9" width="5" height="1"/><rect x="0" y="8" width="3" height="3"/>
+    </svg>
+    <span>Pipeflow</span>
+  </a>
+
+  <nav class="appnav" id="appnav" aria-label="Hauptbereiche"></nav>
+
+  <div class="appbar-actions">
+    <button type="button" class="btn btn-primary appbar-post" data-open-post-now>Jetzt posten</button>
+    <button type="button" class="acct" id="acct-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Konto und Hilfe"></button>
+  </div>
+</header>
+
+<div id="acct-menu" class="acct-menu" role="menu" hidden></div>
+
+<main id="stage" class="stage" tabindex="-1"></main>
+
+<nav class="tabbar" id="tabbar" aria-label="Hauptbereiche" hidden></nav>
+
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<div id="sheet-overlay" class="sheet-overlay" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <button type="button" class="sheet-grip" id="sheet-close" aria-label="Schließen"></button>
+    <h2 class="sheet-title" id="sheet-title"></h2>
+    <div class="sheet-body" id="sheet-body"></div>
+  </div>
+</div>
+
+<div id="confirm-overlay" class="confirm-overlay" hidden>
+  <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-message"></p>
+    <div id="confirm-typecheck" hidden>
+      <label id="confirm-type-label" for="confirm-type-input"></label>
+      <input id="confirm-type-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <div class="confirm-actions">
+      <button type="button" class="confirm-cancel" id="confirm-cancel">Abbrechen</button>
+      <button type="button" class="confirm-ok" id="confirm-ok">Bestätigen</button>
+    </div>
+  </div>
+</div>
+
+<div id="lightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox-close" aria-label="Schließen"></button>
+  <img id="lightbox-img" alt="">
+</div>
+
+<div id="tour-overlay" class="tour-overlay" hidden>
+  <div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+    <div class="tour-step" id="tour-step"></div>
+    <h2 id="tour-title"></h2>
+    <p id="tour-text"></p>
+    <div class="tour-dots" id="tour-dots" aria-hidden="true"></div>
+    <div class="tour-actions">
+      <button type="button" class="link" id="tour-skip">Rundgang beenden</button>
+      <button type="button" class="btn btn-primary" id="tour-next">Weiter</button>
+    </div>
+  </div>
+</div>
+
+<button type="button" class="chat-fab" id="chat-fab" aria-label="Hilfe-Chat öffnen" hidden></button>
+
+<script src="panel.js"></script>
+</body>
+</html>

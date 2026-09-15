@@ -394,7 +394,17 @@ export function createPanelRouter(): Router {
   assertEncryptionKey();
   baseUrl();
   const router = express.Router();
-  const publicDir = process.env.PANEL_PUBLIC_DIR ?? path.resolve(process.cwd(), "public/panel");
+  // Panel-Redesign ("Flow"): Produktion und Sandbox laufen aus demselben Arbeitsverzeichnis und
+  // servieren index.html direkt von der Platte - eine Aenderung an public/panel/index.html waere
+  // also SOFORT in Produktion live, ohne Deploy. Damit am neuen Panel gefahrlos gebaut werden
+  // kann, serviert nur die Sandbox (PANEL_SANDBOX=true) aus public/panel-redesign; Produktion
+  // bleibt unveraendert auf public/panel. Faellt automatisch zurueck, wenn das Verzeichnis fehlt
+  // (z.B. wenn main ausgecheckt ist) - die Sandbox zeigt dann einfach wieder das alte Panel.
+  const defaultPublicDir = path.resolve(process.cwd(), "public/panel");
+  const redesignDir = path.resolve(process.cwd(), "public/panel-redesign");
+  const publicDir =
+    process.env.PANEL_PUBLIC_DIR ??
+    (process.env.PANEL_SANDBOX === "true" && fs.existsSync(redesignDir) ? redesignDir : defaultPublicDir);
   // Generated post/story images (approval-review cards, style samples) are hosted on the R2
   // media bucket, not this origin - img-src must allow that domain or browsers silently drop
   // the <img> load (shows as an empty box, no console-visible network error to the user).
@@ -412,7 +422,11 @@ export function createPanelRouter(): Router {
     res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     res.setHeader(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'`,
+      // font-src 'self': das neue Panel hostet Schibsted Grotesk selbst (assets/fonts, serviert
+      // unter ${mount}/fonts) statt es von Google Fonts zu laden - DSGVO-Grund, siehe
+      // docs/redesign/PLAN.md. fonts.gstatic.com bleibt vorerst erlaubt, solange das alte Panel
+      // in Produktion laeuft; faellt raus, sobald das Redesign live ist.
+      `default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'`,
     );
     next();
   });
@@ -513,6 +527,12 @@ export function createPanelRouter(): Router {
   // (fonts.ts/assets/fonts) - hier oeffentlich servierbar, damit das Panel per @font-face eine
   // echte Live-Vorschau zeigen kann, statt die Schrift nur beim Namen zu nennen.
   router.use("/fonts", express.static(path.join(PACKAGE_ROOT, "assets/fonts"), { maxAge: "7d" }));
+
+  // Redesign: das neue Panel ist in index.html + panel.css + panel.js aufgeteilt (die alte
+  // 250-KB-Einzeldatei war nicht mehr sinnvoll wartbar). Statisch aus demselben publicDir, damit
+  // beide Mount-Pfade (/panel und /panel/sandbox) ohne Sonderfall funktionieren - express.static
+  // laesst alles durch, was keine Datei ist, die API-Routen darunter bleiben also unberuehrt.
+  router.use(express.static(publicDir, { index: false, maxAge: "5m" }));
 
   router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
