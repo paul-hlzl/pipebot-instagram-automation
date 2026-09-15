@@ -1059,17 +1059,33 @@ export function createPanelRouter(): Router {
     // DB steht nur der Hash (gleiches Muster wie login_key_hash/access-link).
     const verifyToken = randomToken(24);
     db.prepare(
+      /* 15.09.2026: Die Spaltenliste hinkte dem Formular hinterher. Alles, was seit Panel v10
+         dazugekommen ist - Kommentar-Automatik, Google-Bewertungen, Video-Diashow und (neu) der
+         Farbverlauf - wird im Onboarding abgefragt, landete beim Signup aber nirgends: der
+         Interessent stellte es ein, bekam 201 zurueck und fand seine Einstellung danach auf
+         Standard. Ueber PATCH /api/me ging es, nur beim ersten Mal nicht. Aufgefallen beim
+         Einbau des Verlaufs ins Onboarding, betraf aber 13 weitere Felder mit. */
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
          ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements,
          active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode, notify_on_publish, notify_weekly_report,
+         gradient_enabled, gradient_color2, gradient_direction, font_choice,
+         comment_automation_enabled, comment_automation_mode,
+         google_review_automation_enabled, google_review_mode, google_review_posts_enabled, google_review_post_min_stars,
+         video_enabled, video_weekdays, video_post_time, video_length_seconds, video_zoom_direction, video_voice, video_voice_enabled,
+         carousel_slide_count, carousel_auto_frequency,
          login_key_hash, email_verify_token_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
       data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
+      data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection, data.fontChoice,
+      data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
+      data.googleReviewAutomationEnabled ? 1 : 0, data.googleReviewMode, data.googleReviewPostsEnabled ? 1 : 0, data.googleReviewPostMinStars,
+      data.videoEnabled ? 1 : 0, data.videoWeekdays || null, data.videoPostTime || null, data.videoLengthSeconds, data.videoZoomDirection, data.videoVoice, data.videoVoiceEnabled ? 1 : 0,
+      data.carouselSlideCount, data.carouselAutoFrequency,
       sha256(randomToken()), sha256(verifyToken), now, now, now);
     setContentPillars(id, data.contentPillars);
     startSession(res, id);

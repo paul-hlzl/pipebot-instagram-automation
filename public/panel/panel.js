@@ -811,6 +811,44 @@
     </details>`;
   }
 
+  /* ================= Farbverlauf (ein Baustein, zwei Orte) =================
+   *
+   * Steht seit Panel v15 in den Einstellungen unter "Aussehen" und seit 15.09.2026 zusaetzlich
+   * im Onboarding-Schritt "Ihr Stil", gleich neben der Akzentfarbe. Bewusst DIESELBE Funktion an
+   * beiden Stellen und dieselben Felder (gradientEnabled / gradientColor2 / gradientDirection) -
+   * beide Formulare senden ohnehin gemeinsam an PATCH /api/me bzw. /api/signup. Eine zweite
+   * Umsetzung waere genau der Weg, auf dem sich die beiden Orte auseinanderentwickeln.
+   *
+   * Die Zusatzfelder liegen in #gradient-options und sind eingeklappt, solange der Verlauf aus
+   * ist (Umschalten siehe change-Handler) - der Onboarding-Schritt soll nicht ueberladen wirken.
+   */
+  function gradientFieldsHtml(c) {
+    return `
+      <div class="field">
+        <label class="check"><input type="checkbox" id="f-gradientEnabled" name="gradientEnabled" ${c.gradientEnabled ? "checked" : ""}><span>Farbverlauf statt Einzelfarbe verwenden</span></label>
+        <div id="gradient-options" ${c.gradientEnabled ? "" : "hidden"}>
+          <div class="grid2">
+            <div class="field">
+              <label for="f-gradientColor2">Zweite Farbe</label>
+              <div class="colorrow">
+                <input id="f-gradientColor2" name="gradientColor2" type="color" value="${esc(c.gradientColor2 || "#137A3F")}">
+                ${wertAnzeigeHtml({ fuer: "f-gradientColor2", wert: c.gradientColor2 || "#137A3F", leerText: "Es wird die vorgeschlagene Farbe verwendet", farbe: true })}
+              </div>
+              <div class="swatches" id="gradient-suggestions" role="group" aria-label="Passende Verlauf-Vorschläge"></div>
+              <p class="hint">Vorschläge zur Akzentfarbe.</p>
+            </div>
+            <div class="field">
+              <label for="f-gradientDirection">Richtung</label>
+              <select id="f-gradientDirection" name="gradientDirection">
+                ${Object.entries(GRADIENT_DIRECTIONS).map(([k, v]) => `<option value="${k}" ${(c.gradientDirection || "diagonal") === k ? "selected" : ""}>${v}</option>`).join("")}
+              </select>
+              <p class="hint">Wirkt überall dort, wo bisher die Akzentfarbe stand: Bild-Hintergründe, Wasserzeichen-Fläche, Karussell-Slides.</p>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
   function companyHtml() {
     const c = S.customer || {
       tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
@@ -879,12 +917,13 @@
             <label for="f-accentColor">Akzentfarbe für Ihre Bilder <span class="opt">(optional)</span></label>
             <div class="colorrow">
               <input id="f-accentColor" name="accentColor" type="color" value="${esc(c.accentColor || "#0a0e1a")}">
-              <input type="text" value="${esc(c.accentColor || "")}" placeholder="Standard" readonly aria-hidden="true" tabindex="-1">
+              ${wertAnzeigeHtml({ fuer: "f-accentColor", wert: c.accentColor, leerText: "Es wird die Standardfarbe verwendet", farbe: true })}
             </div>
             <div class="swatches" role="group" aria-label="Vorschläge">
               ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
             </div>
             <p class="hint">Leer = Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Thema unten verwendet.</strong>" : ""}</p>
+            ${gradientFieldsHtml(c)}
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
@@ -1201,7 +1240,7 @@
                   <label for="f-accentColor">Akzentfarbe für Ihre Bilder <span class="opt">(optional)</span></label>
                   <div class="colorrow">
                     <input id="f-accentColor" name="accentColor" type="color" value="${esc(c.accentColor || "#0a0e1a")}">
-                    <input type="text" value="${esc(c.accentColor || "")}" placeholder="Standard" readonly aria-hidden="true" tabindex="-1">
+                    ${wertAnzeigeHtml({ fuer: "f-accentColor", wert: c.accentColor, leerText: "Es wird die Standardfarbe verwendet", farbe: true })}
                   </div>
                   <div class="swatches" role="group" aria-label="Vorschläge">
                     ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
@@ -1218,29 +1257,7 @@
                   </div>
                 </div>
               </div>
-              <div class="field">
-                <label class="check"><input type="checkbox" id="f-gradientEnabled" name="gradientEnabled" ${c.gradientEnabled ? "checked" : ""}><span>Farbverlauf statt Einzelfarbe verwenden</span></label>
-                <div id="gradient-options" ${c.gradientEnabled ? "" : "hidden"}>
-                  <div class="grid2">
-                    <div class="field">
-                      <label for="f-gradientColor2">Zweite Farbe</label>
-                      <div class="colorrow">
-                        <input id="f-gradientColor2" name="gradientColor2" type="color" value="${esc(c.gradientColor2 || "#137A3F")}">
-                        <input type="text" value="${esc(c.gradientColor2 || "")}" placeholder="Wählen" readonly aria-hidden="true" tabindex="-1">
-                      </div>
-                      <div class="swatches" id="gradient-suggestions" role="group" aria-label="Passende Verlauf-Vorschläge"></div>
-                      <p class="hint">Vorschläge zur Akzentfarbe.</p>
-                    </div>
-                    <div class="field">
-                      <label for="f-gradientDirection">Richtung</label>
-                      <select id="f-gradientDirection" name="gradientDirection">
-                        ${Object.entries(GRADIENT_DIRECTIONS).map(([k, v]) => `<option value="${k}" ${(c.gradientDirection || "diagonal") === k ? "selected" : ""}>${v}</option>`).join("")}
-                      </select>
-                      <p class="hint">Wirkt überall dort, wo bisher die Akzentfarbe stand: Bild-Hintergründe, Wasserzeichen-Fläche, Karussell-Slides.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              ${gradientFieldsHtml(c)}
               <div class="field">
                 <label for="f-fontChoice">Schriftart für Text auf Bildern</label>
                 <select id="f-fontChoice" name="fontChoice">
@@ -1864,7 +1881,7 @@
         <div><dt>Rhythmus</dt><dd>${esc(FREQ[c.frequency] || "")} um ${esc(c.postTime)} Uhr</dd></div>
         ${c.nextPostAt && !c.trialExpired && !c.customerPaused ? `<div><dt>Nächster Beitrag</dt><dd>${esc(fmtNextPost(c.nextPostAt))}</dd></div>` : ""}
         <div><dt>Tonalität</dt><dd>${esc(TONES[c.tone] || "")}</dd></div>
-        <div><dt>Bild-Akzentfarbe</dt><dd>${c.accentColor ? `<span style="display:inline-block;width:14px;height:14px;background:${esc(c.accentColor)};vertical-align:middle;margin-right:8px;border:1px solid var(--rule)"></span>${esc(c.accentColor)}` : "Standard"}</dd></div>
+        <div><dt>Bild-Akzentfarbe</dt><dd><span class="wertanzeige"><span class="wertanzeige-fleck" style="background:${esc(c.accentColor || STANDARD_AKZENT)}"></span><span class="wertanzeige-text">${esc(c.accentColor ? c.accentColor.toUpperCase() : "Standardfarbe")}</span></span></dd></div>
         <div><dt>Aufruf zum Handeln</dt><dd>${esc(CTA_LABEL(c.ctaPreference))}</dd></div>
       </dl>
       <div class="actions">
@@ -2257,6 +2274,39 @@
         </div>
       </div>
     </div>`;
+  }
+
+  /** Farbe, die die Bildgenerierung nimmt, wenn der Kunde keine eigene gewaehlt hat (fal.ts). */
+  const STANDARD_AKZENT = "#0a0e1a";
+
+  /* ================= Wertanzeige (15.09.2026) =================
+   *
+   * EIN Baustein fuer "welcher Wert gilt hier gerade" - statt eines schreibgeschuetzten
+   * Eingabefelds, in dem einsam das Wort "Standard" stand. Das war gleich doppelt schlecht:
+   * niemand konnte erraten, was "Standard" bedeutet, UND das Feld wurde nie aktualisiert - wer
+   * eine Farbe waehlte, sah weiter "Standard". Ein Eingabefeld, in das man nicht schreiben kann,
+   * ist ausserdem das falsche Element dafuer.
+   *
+   * Zeigt jetzt: Farbfleck + Klartext. Ohne eigene Wahl steht dort, was tatsaechlich passiert
+   * ("Es wird die Standardfarbe verwendet"), nicht nur ein Wort.
+   */
+  function wertAnzeigeHtml({ fuer, wert, leerText, farbe = false }) {
+    const gesetzt = Boolean(wert);
+    const fleck = farbe ? `<span class="wertanzeige-fleck" style="background:${esc(wert || STANDARD_AKZENT)}"></span>` : "";
+    return `<span class="wertanzeige" data-wert-fuer="${esc(fuer)}" data-leer="${esc(leerText)}"${gesetzt ? "" : " data-leerzustand"}>
+      ${fleck}<span class="wertanzeige-text">${esc(gesetzt ? String(wert).toUpperCase() : leerText)}</span></span>`;
+  }
+
+  /** Nach jeder Aenderung am zugehoerigen Feld aufrufen - sonst steht dort wieder ein alter Wert. */
+  function aktualisiereWertAnzeige(feldId) {
+    const el = document.querySelector(`[data-wert-fuer="${feldId}"]`);
+    const feld = document.getElementById(feldId);
+    if (!el || !feld) return;
+    delete el.dataset.leerzustand;
+    const fleck = el.querySelector(".wertanzeige-fleck");
+    if (fleck) fleck.style.background = feld.value;
+    const text = el.querySelector(".wertanzeige-text");
+    if (text) text.textContent = String(feld.value || "").toUpperCase();
   }
 
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
@@ -2994,16 +3044,27 @@
     box.innerHTML = suggestGradientPartners(hex).map((s) => `<button type="button" class="swatch" data-gradient-swatch="${s}" aria-pressed="${current.toLowerCase() === s.toLowerCase()}" style="background:${s}" aria-label="${s}"></button>`).join("");
   }
 
+  /**
+   * Der Bildhintergrund, wie ihn die Bildgenerierung gerade erzeugen wuerde: Einzelfarbe oder
+   * Verlauf. EINE Stelle fuer beide Vorschauen - die kleine Beispielkachel und die grosse
+   * Erstbeitrags-Vorschau. Vorher kannte nur die kleine den Verlauf, die grosse zeigte auch bei
+   * eingeschaltetem Verlauf eine einfarbige Flaeche.
+   */
+  function bildHintergrundCss() {
+    const hex = document.getElementById("f-accentColor")?.value || STANDARD_AKZENT;
+    const gradientOn = document.getElementById("f-gradientEnabled")?.checked;
+    const color2 = document.getElementById("f-gradientColor2")?.value;
+    const direction = document.getElementById("f-gradientDirection")?.value || "diagonal";
+    return gradientOn && color2
+      ? `linear-gradient(${GRADIENT_CSS_ANGLE[direction] || GRADIENT_CSS_ANGLE.diagonal}, ${hex}, ${color2})`
+      : hex;
+  }
+
   function updateLivePreview() {
     const square = document.getElementById("lp-square");
     if (!square) return;
     const hex = document.getElementById("f-accentColor")?.value || "#0a0e1a";
-    const gradientOn = document.getElementById("f-gradientEnabled")?.checked;
-    const color2 = document.getElementById("f-gradientColor2")?.value;
-    const direction = document.getElementById("f-gradientDirection")?.value || "diagonal";
-    square.style.background = gradientOn && color2
-      ? `linear-gradient(${GRADIENT_CSS_ANGLE[direction] || GRADIENT_CSS_ANGLE.diagonal}, ${hex}, ${color2})`
-      : hex;
+    square.style.background = bildHintergrundCss();
     const wm = document.getElementById("lp-watermark");
     const company = document.querySelector('#formpart-a [name=company]')?.value || document.querySelector('[name=company]')?.value || "";
     const watermarkText = document.getElementById("f-watermarkText")?.value || "";
@@ -3120,8 +3181,10 @@
     const emojis = fpChecked("emojisEnabled");
     const postTime = fpVal("#f-postTime") || "15:00";
 
-    // Bild: gleiche Herleitung wie die Vorschau in den Einstellungen (Akzentfarbe, Beschriftung)
-    media.style.background = accent;
+    // Bild: gleiche Herleitung wie die Vorschau in den Einstellungen (Akzentfarbe, Verlauf,
+    // Beschriftung) - ueber bildHintergrundCss(), damit ein eingeschalteter Verlauf hier genauso
+    // sichtbar ist wie auf der kleinen Beispielkachel.
+    media.style.background = bildHintergrundCss();
     // Ueberschrift im Bild: nur was auch als Ueberschrift taugt. Ein abgeschnittener Satz mit "…"
     // saehe im Beitragsbild aus wie ein Fehler - dann lieber Branche oder Firmenname.
     const aboutLine = fpFirstSentence(about, 42);
@@ -3187,7 +3250,8 @@
     // alle ist billiger und vollstaendiger als eine Liste von IDs, die beim naechsten neuen Feld
     // wieder vergessen wird. Sie liest nur DOM-Werte, kein Netz.
     if (e.target.closest && e.target.closest("#company")) updateFirstPostPreview();
-    if (e.target.id === "f-accentColor") updateGradientSuggestions();
+    if (e.target.id === "f-accentColor") { aktualisiereWertAnzeige("f-accentColor"); updateGradientSuggestions(); }
+    if (e.target.id === "f-gradientColor2") aktualisiereWertAnzeige("f-gradientColor2");
     if (e.target.id === "f-pillar-keywords") {
       S.pillarAiKeywords = e.target.value;
     }
@@ -3205,6 +3269,7 @@
       if (box) box.hidden = !e.target.checked;
       if (e.target.checked) updateGradientSuggestions();
       updateLivePreview();
+      updateFirstPostPreview();
     }
     // Auswahlfelder, Haken und Wochentage loesen kein "input" aus, veraendern die Vorschau aber
     // genauso (Kanal, Uhrzeit, Hashtags, Emojis, Sprache, Ton).
@@ -3645,6 +3710,7 @@
       const hex = swatch.dataset.swatch;
       const picker = document.getElementById("f-accentColor");
       if (picker) picker.value = hex;
+      aktualisiereWertAnzeige("f-accentColor");
       document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === swatch)));
       updateGradientSuggestions();
       updateLivePreview();
@@ -3655,6 +3721,7 @@
       const hex = gradientSwatch.dataset.gradientSwatch;
       const picker = document.getElementById("f-gradientColor2");
       if (picker) picker.value = hex;
+      aktualisiereWertAnzeige("f-gradientColor2");
       document.querySelectorAll("[data-gradient-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === gradientSwatch)));
       updateLivePreview();
       return;

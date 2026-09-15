@@ -51,6 +51,17 @@
   --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
   --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
 
+  /* Grundabstand fuer JEDE Reihe auswaehlbarer Kacheln/Kaestchen (15.09.2026).
+     Vorher hatte jede Reihe ihren eigenen Wert - Farbfelder, Kanal- und Format-Kacheln,
+     Farbthemen, Segmente und Chips standen mit 8px aneinander, die Wochentage sogar mit 4px.
+     Das sah ueberall zusammengequetscht aus und war von Reihe zu Reihe unterschiedlich.
+     Wer eine neue Reihe baut, nimmt diesen Wert - nicht einen frisch ausgedachten.
+     Einzige Ausnahme ist die Wochentagsauswahl, siehe --gap-kacheln-eng. */
+  --gap-kacheln: var(--s3);
+  /* Sieben feste 44px-Kreise muessen auf einem 360px-Handy in EINE Reihe passen:
+     7x44 + 6x8 = 356px. Mit dem Grundabstand waeren es 380px und die Woche braeche um. */
+  --gap-kacheln-eng: var(--s2);
+
   --r1: 8px; --r2: 12px; --r3: 18px;
 
   --dur-1: 120ms; --dur-2: 200ms; --dur-3: 320ms;
@@ -308,7 +319,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .err { color: var(--stop); font-size: var(--t-small); margin-top: var(--s2); }
 .hint { color: var(--stone); font-size: var(--t-small); margin-top: var(--s2); }
 
-.chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.chips { display: flex; flex-wrap: wrap; gap: var(--gap-kacheln); }
 .chip {
   display: inline-flex; align-items: center; gap: var(--s2);
   min-height: 36px; padding: var(--s2) var(--s3);
@@ -642,7 +653,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .saved.on { opacity: 1; }
 .consequence { font-size: var(--t-small); color: var(--stone); border-left: 3px solid var(--warn-line); padding-left: var(--s3); margin-top: var(--s2); }
 
-.swatches { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.swatches { display: flex; flex-wrap: wrap; gap: var(--gap-kacheln); }
 .swatch { width: 32px; height: 32px; border-radius: var(--r1); border: 1px solid var(--rule); cursor: pointer; padding: 0; }
 .swatch[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
 
@@ -786,8 +797,18 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .wd { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s1); font-size: var(--t-micro); }
 
 /* Farbauswahl */
-.colorrow { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
-.theme-list { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.colorrow { display: flex; gap: var(--gap-kacheln); align-items: center; flex-wrap: wrap; }
+
+/* Wertanzeige: Farbfleck plus Klartext statt eines karg wirkenden Felds mit einem Wort. */
+.wertanzeige { display: inline-flex; align-items: center; gap: var(--s2); min-height: 44px; }
+.wertanzeige-fleck {
+  width: 22px; height: 22px; border-radius: var(--r1);
+  border: 1px solid var(--rule); flex: 0 0 auto;
+}
+.wertanzeige-text { font-size: var(--t-small); color: var(--ink); font-variant-numeric: tabular-nums; }
+/* Ohne eigene Wahl steht dort ein ganzer Satz - der darf ruhiger wirken als ein gesetzter Wert. */
+.wertanzeige[data-leerzustand] .wertanzeige-text { color: var(--stone); font-variant-numeric: normal; }
+.theme-list { display: flex; flex-wrap: wrap; gap: var(--gap-kacheln); }
 .theme-chip { display: inline-flex; align-items: center; gap: var(--s2); border: 1px solid var(--line-strong); border-radius: var(--r3); padding: var(--s1) var(--s3); background: var(--paper); font: inherit; font-size: var(--t-small); cursor: pointer; }
 .theme-chip[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 .theme-dot { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); }
@@ -875,7 +896,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .sum { font-size: var(--t-body); }
 .val { font-variant-numeric: tabular-nums; }
 .ghost { color: var(--stone); }
-.seg { display: inline-flex; gap: var(--s2); }
+.seg { display: inline-flex; flex-wrap: wrap; gap: var(--gap-kacheln); }
 
 /* Kopfzeile: "Jetzt posten" gehoert am Handy in die Bottom-Bar, nicht in den Kopf.
    (Höhere Spezifität als .btn, sonst gewinnt dessen späteres display:inline-flex.) */
@@ -953,7 +974,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 /* Große Auswahl-Kacheln (Kanäle, Format) */
 fieldset { border: 0; padding: 0; margin: 0 0 var(--s5); }
 fieldset > legend { padding: 0; margin-bottom: var(--s3); }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s2); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--gap-kacheln); }
 .tile { position: relative; display: block; cursor: pointer; }
 .tile input { position: absolute; opacity: 0; width: 0; height: 0; }
 .tile-face {
@@ -1106,7 +1127,7 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 
 /* --- Wochentage: runde Umschalter statt einer Liste mit Kaestchen. Die alte Regel .wd hat den
        CONTAINER erwischt (flex-direction: column) - die sieben Tage standen untereinander. --- */
-.daypicker { display: flex; flex-wrap: wrap; gap: var(--s1); }
+.daypicker { display: flex; flex-wrap: wrap; gap: var(--gap-kacheln-eng); }
 .daypicker label { position: relative; }
 .daypicker input { position: absolute; opacity: 0; width: 0; height: 0; }
 .daypicker span {
@@ -1136,7 +1157,7 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
 
 /* --- Auswahl mit zwei Moeglichkeiten: klar getrennte Felder statt zweier Textzeilen --- */
-.choices { display: grid; gap: var(--s2); }
+.choices { display: grid; gap: var(--gap-kacheln); }
 .choice {
   display: flex; align-items: flex-start; gap: var(--s3);
   border: 1px solid var(--line-strong); border-radius: var(--r1);

@@ -163,6 +163,18 @@ async function main() {
         contactName: "Test Person",
         email: testEmail,
         tone: "sachlich",
+        // 15.09.2026: bewusst Felder mitschicken, die es beim Bau des Signups noch nicht gab -
+        // die Spaltenliste im INSERT hinkte dem Formular hinterher und verwarf sie still.
+        // Kein zusaetzlicher Signup dafuer: der Suite steht nur eine begrenzte Zahl pro Stunde zu.
+        accentColor: "#123456",
+        gradientEnabled: true,
+        gradientColor2: "#abcdef",
+        gradientDirection: "horizontal",
+        commentAutomationEnabled: true,
+        commentAutomationMode: "auto",
+        googleReviewAutomationEnabled: true,
+        videoEnabled: true,
+        videoLengthSeconds: 15,
         frequency: "werktags",
         postTime: "15:00",
       })),
@@ -220,8 +232,24 @@ async function main() {
   try {
     const { default: Database } = await import("better-sqlite3");
     const db = new Database(STAGING_DB, { readonly: true });
-    const row = db.prepare("SELECT id FROM customers WHERE email = ?").get(testEmail);
+    const row = db.prepare("SELECT * FROM customers WHERE email = ?").get(testEmail);
     customerId = row?.id ?? "";
+
+    // Alles, was das Onboarding-Formular anbietet, muss der Signup auch speichern. Die
+    // Spaltenliste im INSERT hing dem Formular jahrelang hinterher: Kommentar-Automatik,
+    // Google-Bewertungen, Video-Diashow und Farbverlauf wurden abgefragt und still verworfen.
+    const erwartet = [
+      ["accent_color", "#123456"], ["gradient_enabled", 1], ["gradient_color2", "#abcdef"],
+      ["gradient_direction", "horizontal"], ["comment_automation_enabled", 1],
+      ["comment_automation_mode", "auto"], ["google_review_automation_enabled", 1],
+      ["video_enabled", 1], ["video_length_seconds", 15],
+    ];
+    const falsch = erwartet.filter(([spalte, soll]) => String(row?.[spalte]).toLowerCase() !== String(soll).toLowerCase());
+    ok(
+      `Signup speichert alle ${erwartet.length} mitgeschickten Einstellungen`,
+      falsch.length === 0,
+      falsch.map(([k, soll]) => `${k}=${row?.[k]} statt ${soll}`).join(", "),
+    );
   } catch (e) {
     console.log(`  (Hinweis: konnte customerId fuer Cleanup nicht ermitteln: ${e.message})`);
   }

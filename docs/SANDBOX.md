@@ -132,3 +132,27 @@ liest der Prozess bei der nächsten Anfrage.
 
 Die Produktions-Konfiguration liegt in `/root/produktion.ecosystem.json` (Rechte 600), die der
 Sandbox in `/root/staging.ecosystem.json`.
+
+## Verbindliche Selbstprüfung vor "erledigt"
+
+Nichts gilt als erledigt, was nicht **in der ausgelieferten Fassung im echten Browser**
+gegengeprüft wurde - Desktop **und** Handy-Breite (360-390px), an der Stelle, an der der Kunde
+es sieht. Nicht per API, nicht aus dem Quelltext geschlossen, nicht in der Arbeitskopie.
+
+Grund: mehrere Fehler in diesem Projekt waren im Code "richtig" und trotzdem kaputt - ein
+Selektor zeigte ins Leere (`.dictate-wrap` gegen `.with-dictate`), eine Klasse hatte gar kein CSS
+(`.is-filtered`, die ganze Verbinden-Seite), eine Option war beim Dateiumbau untergegangen
+(Video-Diashow, Bewertungs-Freigaben). Keiner dieser Fälle fällt auf, solange man nur den
+Quelltext liest oder die API abfragt.
+
+Dazu gehört ebenso:
+
+- **Systematisch suchen, nicht die gemeldete Stelle reparieren.** Wird ein Muster gemeldet
+  (unklare Anzeige, zu enge Abstände, fehlende Option), erst alle Fundstellen auflisten, dann
+  einen gemeinsamen Baustein bauen - keine Reparatur Seite für Seite.
+- **Abstände bringt jedes Element selbst mit**, nie das Nachbar-Element. Für Reihen
+  auswählbarer Kacheln gilt `--gap-kacheln` aus panel.css; wer eine neue Reihe baut, nimmt
+  diesen Wert statt eines frisch ausgedachten.
+- **Eine Einstellung, eine Umsetzung.** Kommt dieselbe Einstellung an zwei Orten vor
+  (Onboarding und Einstellungen), teilen sich beide eine Funktion - siehe `gradientFieldsHtml`.
+- `npm run audit:panel` und `npm run test:panel` laufen vor jedem Ausliefern.
