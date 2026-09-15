@@ -587,7 +587,10 @@ if (!(db.prepare(`PRAGMA table_info(analytics_account_snapshots)`).all() as { na
 // 15.09.2026: Klartext-Grund, warum eine "Jetzt posten"-Anfrage nicht zu einem Beitrag gefuehrt
 // hat - fuer den Kunden lesbar, nicht als technischer Code. Vorher wurde eine gescheiterte
 // Anfrage einfach als erledigt markiert und im Panel passierte sichtbar nichts.
-migrateColumns("post_requests", [["note", "TEXT"]]);
+// notify_email: pro Anfrage merken, ob der Kunde eine Mail will, sobald der Beitrag live ist
+// (15.09.2026, Haekchen im "Jetzt posten"-Dialog). Bewusst pro ANFRAGE und nicht als
+// Kundeneinstellung: wer oefter sofort postet, will nicht jedes Mal eine Mail.
+migrateColumns("post_requests", [["note", "TEXT"], ["notify_email", "INTEGER NOT NULL DEFAULT 0"]]);
 migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
 migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
 
@@ -800,6 +803,7 @@ export interface PostRequestRow {
   updated_at: string;
   format: string;
   note: string | null;
+  notify_email: number;
 }
 
 export interface PlannedPostRow {

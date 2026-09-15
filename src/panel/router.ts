@@ -1687,7 +1687,10 @@ export function createPanelRouter(): Router {
     // waehlbar im Panel ist sie seit 15.09.2026 (beim Redesign war die Option verlorengegangen).
     const requestedFormat = str(req.body?.format, 30);
     const format = ["carousel", "video_slideshow"].includes(requestedFormat) ? requestedFormat : "single";
-    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single"));
+    // Pro Anfrage, nicht als Kundeneinstellung: wer oefter sofort postet, will nicht jedes Mal
+    // eine Mail (siehe post_requests.notify_email).
+    const notifyEmail = req.body?.notifyEmail === true;
+    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single", notifyEmail));
     triggerRoutineNow("post-now");
     // Video-Diashows macht der Server selbst (videos.ts) - die externe Routine sieht sie gar nicht.
     // Deshalb hier sofort anstossen statt bis zum naechsten Video-Cron zu warten: der Kunde hat

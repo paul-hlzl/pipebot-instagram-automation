@@ -26,7 +26,7 @@ import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
 import type { LinkedInCredentials } from "../linkedin.js";
 import type { ImageBranding } from "../fal.js";
 import { sendMailBestEffort } from "./mailer.js";
-import { approvalNeededEmail, firstPostLiveEmail, pendingApprovalsSummaryEmail, postPublishedEmail, tokenExpiringEmail } from "./emails.js";
+import { approvalNeededEmail, firstPostLiveEmail, pendingApprovalsSummaryEmail, postNowFailedEmail, postNowLiveEmail, postPublishedEmail, tokenExpiringEmail } from "./emails.js";
 
 const DAY = 86_400_000;
 
@@ -813,10 +813,12 @@ export interface PostRequest {
   /** Klartext fuer den Kunden, warum aus dieser Anfrage nichts geworden ist (Status 'skipped'
    *  oder 'failed'). Null im Normalfall. Siehe markPostRequestSkipped. */
   note: string | null;
+  /** Der Kunde hat beim Anfordern eine Mail gewuenscht, sobald dieser Beitrag live ist. */
+  notifyEmail: boolean;
 }
 
 function toPostRequest(r: PostRequestRow): PostRequest {
-  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at, format: r.format, note: r.note ?? null };
+  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at, format: r.format, note: r.note ?? null, notifyEmail: Boolean(r.notify_email) };
 }
 
 /** Panel v8: per CHANNEL, not per customer overall - a customer may now have up to one open
@@ -865,13 +867,13 @@ export function postRequestCountToday(customerId: string): number {
  * whole point is that the routine decides how to fulfil it). Caller must check
  * openPostRequestCount/postRequestCountToday against POST_REQUEST_MAX_OPEN/_PER_DAY first.
  */
-export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null, format: string = "single"): PostRequest {
+export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null, format: string = "single", notifyEmail = false): PostRequest {
   const id = `preq_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
-  ).run(id, customerId, topic || null, channel, now, now, format);
-  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now, format, note: null };
+    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format, notify_email) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+  ).run(id, customerId, topic || null, channel, now, now, format, notifyEmail ? 1 : 0);
+  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now, format, note: null, notifyEmail };
 }
 
 /** Most recent request for one customer (any status), for the panel's own status display. Null if they never asked. */
@@ -963,16 +965,23 @@ export function closeOpenPostRequestAfterPublish(customerId: string, provider: s
   const zeile = kanal
     ? db
         .prepare(
-          "SELECT id FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing') AND (channel = ? OR channel IS NULL) ORDER BY created_at LIMIT 1",
+          "SELECT id, notify_email FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing') AND (channel = ? OR channel IS NULL) ORDER BY created_at LIMIT 1",
         )
         .get(customerId, kanal)
     : db
-        .prepare("SELECT id FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing') ORDER BY created_at LIMIT 1")
+        .prepare("SELECT id, notify_email FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing') ORDER BY created_at LIMIT 1")
         .get(customerId);
   if (!zeile) return 0;
-  const id = (zeile as { id: string }).id;
+  const { id, notify_email: willMail } = zeile as { id: string; notify_email: number };
   db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
   console.error(`[post-request] ${id} nach Veroeffentlichung (${provider}${channel ? "/" + channel : ""}) automatisch abgeschlossen`);
+  // Genau hier ist der Beitrag nachweislich live - der richtige Moment fuer die angehakte Mail.
+  if (willMail) {
+    const kunde = db.prepare("SELECT email, company FROM customers WHERE id = ?").get(customerId) as { email: string; company: string } | undefined;
+    if (kunde) {
+      sendMailBestEffort(postNowLiveEmail({ to: kunde.email, company: kunde.company, channelLabel: EMAIL_CHANNEL_LABEL[kanal ?? ""] ?? "neuer" }));
+    }
+  }
   return 1;
 }
 
@@ -1008,10 +1017,35 @@ export function markPostRequestDone(id: string): boolean {
  * Fehlercodes. Die Uebersetzung technischer Gruende passiert beim Aufrufer.
  */
 export function markPostRequestSkipped(id: string, grund: string): boolean {
+  const text = grund.slice(0, 300);
   const result = db
     .prepare("UPDATE post_requests SET status = 'skipped', note = ?, updated_at = ? WHERE id = ?")
-    .run(grund.slice(0, 300), nowIso(), id);
-  return result.changes > 0;
+    .run(text, nowIso(), id);
+  if (result.changes === 0) return false;
+  benachrichtigeUeberFehlschlag(id, text);
+  return true;
+}
+
+/**
+ * Mail an den Kunden, wenn aus seiner Anfrage nichts geworden ist - aber nur, wenn er beim
+ * Anfordern das Haekchen gesetzt hat. Wer keine Mail wollte, bekommt auch im Fehlerfall keine;
+ * der Grund steht fuer ihn im Panel an der Anfrage.
+ */
+export function benachrichtigeUeberFehlschlag(requestId: string, grund: string): void {
+  try {
+    const z = db
+      .prepare(
+        `SELECT r.channel, r.notify_email, c.email, c.company FROM post_requests r
+         JOIN customers c ON c.id = r.customer_id WHERE r.id = ?`,
+      )
+      .get(requestId) as { channel: string | null; notify_email: number; email: string; company: string } | undefined;
+    if (!z || !z.notify_email) return;
+    sendMailBestEffort(
+      postNowFailedEmail({ to: z.email, company: z.company, channelLabel: EMAIL_CHANNEL_LABEL[z.channel ?? ""] ?? "neuer", grund }),
+    );
+  } catch (err) {
+    console.error("[post-request] Fehlschlag-Mail nicht moeglich:", err instanceof Error ? err.message : err);
+  }
 }
 
 /**
@@ -1037,7 +1071,10 @@ export function expireStalePostRequests(): PostRequest[] {
   const abgelaufen: PostRequest[] = [];
   for (const r of offen) {
     const grund = "Wir konnten diese Anfrage innerhalb von zwei Stunden nicht ausführen. Bitte versuchen Sie es noch einmal - wenn es wieder nicht klappt, schreiben Sie uns.";
-    if (stmt.run(grund, jetzt, r.id).changes > 0) abgelaufen.push(toPostRequest({ ...r, status: "failed", note: grund, updated_at: jetzt }));
+    if (stmt.run(grund, jetzt, r.id).changes > 0) {
+      benachrichtigeUeberFehlschlag(r.id, grund);
+      abgelaufen.push(toPostRequest({ ...r, status: "failed", note: grund, updated_at: jetzt }));
+    }
   }
   return abgelaufen;
 }

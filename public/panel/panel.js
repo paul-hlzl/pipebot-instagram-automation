@@ -1757,17 +1757,25 @@
     // Panel v14: Format nur fuer Instagram Feed relevant (Karussell gibt es nicht bei Story/
     // LinkedIn) - trotzdem immer sichtbar mit erklaerendem Hinweis, statt sich dynamisch je nach
     // Kanalauswahl ein-/auszublenden (einfacher zu verstehen als ein Feld, das verschwindet).
-    // Grosse Kacheln statt Standard-Checkboxen: am Handy sicher treffbar (44px+) und der Zustand
-    // ist auf einen Blick lesbar (Ink-Flaeche = ausgewaehlt), ohne dass eine Legende noetig waere.
+    /* Kacheln statt Standard-Checkboxen: am Handy sicher treffbar (44px+), ohne dass eine
+     * Legende noetig waere.
+     *
+     * 15.09.2026: Jede Kachel traegt jetzt eine eigene Zustandsmarke - ein Kaestchen (Mehrfach-
+     * auswahl) bzw. einen Kreis (Einfachauswahl), das bei Auswahl ein Haekchen zeigt. Vorher gab
+     * es nur die Flaechenfarbe, und das reichte nicht: das Kanal-Symbol links oben (ein
+     * Quadrat-Umriss fuer den Feed, ein schmales Rechteck fuer die Story) sah aus wie ein LEERES
+     * Ankreuzkaestchen - auf einer ausgewaehlten, also schwarzen Kachel genauso wie auf einer
+     * nicht ausgewaehlten. Wer angekreuzt hatte, konnte nicht erkennen, ob es geklappt hat.
+     * Dazu die Zeile statt der Spalte: dieselbe Information, gut halb so hoch. */
     const chanIcon = (id) => (id === "linkedin" ? "linkedin" : id === "ig_story" ? "story" : "feed");
+    const marke = `<span class="tile-mark" aria-hidden="true">${icon("check", 11)}</span>`;
     return `<fieldset class="field post-now-channels">
       <legend class="lbl">Wo soll es erscheinen?</legend>
       <div class="tiles">
         ${available.map((o) => `
           <label class="tile${open.has(o.id) ? " is-disabled" : ""}">
             <input type="checkbox" name="postNowChannel" value="${o.id}" ${open.has(o.id) ? "disabled" : "checked"}>
-            <span class="tile-face">${icon(chanIcon(o.id), 18)}<span>${esc(o.label)}</span>
-            ${open.has(o.id) ? `<span class="micro muted">schon angefragt</span>` : ""}</span>
+            <span class="tile-face">${marke}${icon(chanIcon(o.id), 16)}<span class="tile-text">${esc(o.label)}${open.has(o.id) ? `<span class="micro muted">schon angefragt</span>` : ""}</span></span>
           </label>`).join("")}
       </div>
     </fieldset>
@@ -1777,12 +1785,16 @@
         ${Object.entries(POST_FORMATS).map(([k, f]) => `
           <label class="tile">
             <input type="radio" name="postNowFormat" value="${k}" ${k === "single" ? "checked" : ""}>
-            <span class="tile-face">${icon(f.symbol, 18)}<span>${esc(f.kurz)}</span></span>
+            <span class="tile-face">${marke}${icon(f.symbol, 16)}<span class="tile-text">${esc(f.kurz)}</span></span>
           </label>`).join("")}
       </div>
       <p class="hint">Karussell verbraucht ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES}× die Bildkosten eines Einzelbild-Beitrags (aktuell ${esc(String(c.carouselSlideCount ?? 5))} Bilder, einstellbar unter „Kanäle &amp; Zeitplan“).</p>
       <p class="hint">${postNowVideoHintHtml(c)}</p>
-    </fieldset>`;
+    </fieldset>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="f-postNowNotify" name="postNowNotify"><span>Per E-Mail benachrichtigen, wenn der Beitrag live ist</span></label>
+      <p class="hint">Gilt nur für diesen einen Beitrag - Sie bekommen nicht bei jedem Mal eine Mail.</p>
+    </div>`;
   }
 
   function statusHtml(c) {
@@ -4082,10 +4094,18 @@
         return;
       }
       const format = document.querySelector('input[name="postNowFormat"]:checked')?.value || "single";
+      const notifyEmail = Boolean(document.getElementById("f-postNowNotify")?.checked);
       btn.classList.add("busy");
       try {
-        applyState(await api("POST", "/api/post-now", { topic, channels, format }));
-        S.banner = { kind: "ok", text: "Angefragt - wir kümmern uns beim nächsten Lauf darum." };
+        applyState(await api("POST", "/api/post-now", { topic, channels, format, notifyEmail }));
+        /* 15.09.2026: vorher stand hier nur "Angefragt - wir kuemmern uns beim naechsten Lauf
+         * darum." Das sagte weder, dass es ein paar Minuten dauert, noch woran man sieht, dass
+         * es geklappt hat. Bewusst ohne Uhrzeit: der Sofort-Trigger verkuerzt die Wartezeit
+         * meist auf wenige Minuten, garantieren laesst sich das nicht. */
+        S.banner = {
+          kind: "ok",
+          text: `Ihr Beitrag wird in Kürze veröffentlicht. Das kann je nach laufender Routine ein paar Minuten dauern - den Stand sehen Sie hier unter „Jetzt posten“.${notifyEmail ? " Sie bekommen eine E-Mail, sobald er live ist." : ""}`,
+        };
         render(true);
       } catch (err) {
         showError(err.message || "Anfrage fehlgeschlagen.");

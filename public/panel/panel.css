@@ -977,17 +977,36 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--gap-kacheln); }
 .tile { position: relative; display: block; cursor: pointer; }
 .tile input { position: absolute; opacity: 0; width: 0; height: 0; }
+/* Eine Zeile statt einer Spalte: dieselbe Information, gut halb so hoch (vorher 72px Mindest-
+   hoehe plus Innenabstand, jetzt 48px). Die 44px-Tap-Flaeche aus dem frueheren Fix bleibt
+   deutlich uebererfuellt. */
 .tile-face {
-  display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2);
-  min-height: 72px; padding: var(--s3) var(--s4);
+  display: flex; flex-direction: row; align-items: center; gap: var(--s3);
+  min-height: 48px; padding: var(--s2) var(--s3);
   border: 1px solid var(--line-strong); border-radius: var(--r2);
   font-size: var(--t-small); font-weight: 500;
   transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease), color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
 }
-.tile-face svg { fill: currentColor; }
+.tile-face svg { fill: currentColor; flex: 0 0 auto; }
+.tile-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile-text .micro { font-weight: 400; }
+
+/* Die Zustandsmarke - das eigentliche "ist ausgewaehlt". Kaestchen bei Mehrfachauswahl, Kreis
+   bei Einfachauswahl, genau wie es ein Kunde von nativen Bedienelementen kennt. Das Haekchen
+   darin ist nur im ausgewaehlten Zustand sichtbar. */
+.tile-mark {
+  flex: 0 0 auto; width: 20px; height: 20px; display: grid; place-items: center;
+  border: 1.5px solid var(--line-strong); border-radius: 5px; background: var(--paper);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.tile input[type="radio"] + .tile-face .tile-mark { border-radius: 50%; }
+.tile-mark svg { fill: var(--paper); opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+
 .tile:hover .tile-face { border-color: var(--ink); }
 .tile:active .tile-face { transform: scale(.98); }
 .tile input:checked + .tile-face { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tile input:checked + .tile-face .tile-mark { background: var(--go); border-color: var(--go); }
+.tile input:checked + .tile-face .tile-mark svg { opacity: 1; }
 .tile input:focus-visible + .tile-face { outline: 2px solid var(--ink); outline-offset: 2px; }
 .tile.is-disabled .tile-face { opacity: .5; }
 .tile.is-disabled { cursor: not-allowed; }

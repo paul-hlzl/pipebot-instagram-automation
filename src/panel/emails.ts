@@ -262,3 +262,46 @@ export function postRequestExpiredEmail(input: { to: string; eintraege: { compan
       `Pipeflow`,
   };
 }
+
+/**
+ * "Ihr angeforderter Beitrag ist live" (15.09.2026) - nur wenn der Kunde beim Anfordern das
+ * Haekchen gesetzt hat. Bewusst NICHT an die allgemeine Veroeffentlichungs-Benachrichtigung
+ * gekoppelt: die betrifft jeden planmaessigen Beitrag, diese hier nur den einen, auf den der
+ * Kunde gerade wartet.
+ */
+export function postNowLiveEmail(input: { to: string; company: string; channelLabel: string }): MailInput {
+  return {
+    to: input.to,
+    subject: `Ihr ${input.channelLabel}-Beitrag ist live - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `der Beitrag, den Sie für "${input.company}" über "Jetzt posten" angefordert haben, ist jetzt ` +
+      `veröffentlicht.\n\n` +
+      `Ansehen können Sie ihn im Panel unter "Beiträge":\n${panelUrl()}\n\n` +
+      `Diese E-Mail kam, weil Sie beim Anfordern das Häkchen "Per E-Mail benachrichtigen" gesetzt ` +
+      `haben - sie kommt nur für diesen einen Beitrag, nicht für jeden.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
+/**
+ * Gegenstueck zu postNowLiveEmail: der angeforderte Beitrag ist NICHT entstanden (15.09.2026).
+ *
+ * Ohne diese Mail blieb eine Luecke: wer beim Anfordern eine Benachrichtigung angehakt hat,
+ * bekam bei Erfolg eine Mail und im Fehlerfall gar nichts - also genau dann nichts, wenn er
+ * etwas tun muesste. Im Panel stand der Grund zwar (Warn-Banner an der Anfrage), aber nur fuer
+ * den, der von sich aus nachsieht.
+ */
+export function postNowFailedEmail(input: { to: string; company: string; channelLabel: string; grund: string }): MailInput {
+  return {
+    to: input.to,
+    subject: `Ihr ${input.channelLabel}-Beitrag konnte nicht erstellt werden - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `der Beitrag, den Sie für "${input.company}" über "Jetzt posten" angefordert haben, ist NICHT ` +
+      `entstanden.\n\nGrund:\n${input.grund}\n\n` +
+      `Sie können die Anfrage jederzeit neu stellen:\n${panelUrl()}\n\n` +
+      `Diese E-Mail kam, weil Sie beim Anfordern das Häkchen "Per E-Mail benachrichtigen" gesetzt haben.\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
