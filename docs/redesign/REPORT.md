@@ -184,6 +184,11 @@ Testkunden (echte Sandbox-Konten, keine Kundendaten):
 - **Mit Freigabe-Modus** (hier liegen Beispiel-Freigaben und geplante Beiträge):
   `…/panel/sandbox/login?key=cJaCXkVjls9umce3x9Pvg-KA3Q29eBWU`
 
+In diesem zweiten Konto liegen für den Rundgang **3 wartende Freigaben** und **4 geplante
+Beiträge** bereit (direkt in der Staging-DB angelegt, reine Testdaten). Beides ist verbraucht,
+sobald Sie es freigeben oder überspringen — zum Neuanlegen genügt ein Hinweis, das ist ein
+Einzeiler.
+
 ### Handy-Checkliste (bitte am Telefon durchklicken)
 1. Zweiten Link öffnen: Steht oben **ein** Satz, der sagt, was zu tun ist — nicht vier Kennzahlen?
 2. Von dort **zwei Taps** bis zur Freigabe: „Beiträge" → „Zur Freigabe". Fühlt sich das kurz genug an?
