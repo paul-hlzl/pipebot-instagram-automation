@@ -452,10 +452,29 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
    Kartenbreite war es am Desktop 730x730px gross und hat Text, Freigeben und alles andere
    erschlagen (Rueckmeldung von Paul nach dem Livegang). Am Handy bleibt es ueber dem Text und in
    voller Breite - dort ist genau das die vertraute Beitragsansicht. */
+/* Das Beitragsbild steht LINKS neben Text und Aktionen statt darueber: in voller Kartenbreite
+   nahm es am Handy den halben Bildschirm und am Desktop 730x730px ein, waehrend die Tagesreiter
+   darueber winzig blieben - komplett unproportioniert. Zum Vergroessern genuegt ein Tipp aufs
+   Bild (Lightbox). */
+.card { display: grid; grid-template-columns: 116px minmax(0, 1fr); align-items: start; }
+.card-media { border-right: 1px solid var(--rule); }
+.card-media.story { aspect-ratio: 9 / 16; max-height: 200px; }
+@media (min-width: 560px) {
+  .card { grid-template-columns: 180px minmax(0, 1fr); }
+  .card-media.story { max-height: 320px; }
+}
+
+/* Ausnahme Freigabe: hier MUSS das Bild beurteilbar sein - das ist die eine Entscheidung, um die
+   es geht. Deshalb am Handy ueber dem Text, aber gedeckelt statt bildschirmfuellend. */
+@media (max-width: 767px) {
+  .card.is-submitted, .card.is-approved { grid-template-columns: 1fr; }
+  .card.is-submitted .card-media, .card.is-approved .card-media {
+    max-width: 260px; border-right: 0; border-bottom: 1px solid var(--rule);
+  }
+}
 @media (min-width: 768px) {
-  .card { display: grid; grid-template-columns: 260px minmax(0, 1fr); align-items: start; max-width: 880px; }
-  .card-media { border-right: 1px solid var(--rule); }
-  .card-media.story { aspect-ratio: 9 / 16; max-height: 420px; }
+  .card { grid-template-columns: 260px minmax(0, 1fr); max-width: 880px; }
+  .card-media.story { max-height: 420px; }
   .card-body { padding: var(--s5); }
 }
 
@@ -688,7 +707,11 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
    Komponenten der übernommenen Ansichten (Onboarding, Einstellungen, Guide,
    Analytics, Vorschau) — dieselben Tokens, kein Alt-Stil, keine Alt-Farben.
    =========================================================================== */
-.lede { color: var(--stone); margin-top: var(--s2); max-width: 68ch; }
+/* Grundrhythmus: Ueberschrift, Vorspann und Inhalt standen ohne jeden Abstand aufeinander - das
+   ist der "zusammengestauchte" Eindruck, den Paul gemeldet hat. Randkollaps sorgt dafuer, dass
+   Elemente mit eigenem Abstand (z. B. .segmented) dadurch nicht doppelt Luft bekommen. */
+.stage h1 { margin-bottom: var(--s2); }
+.lede { color: var(--stone); margin-top: var(--s2); margin-bottom: var(--s5); max-width: 68ch; }
 .actions { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin-top: var(--s4); }
 .row { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
 .grid2 { display: grid; gap: var(--s4); }
@@ -728,8 +751,19 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 
 /* Freigabe-Karten */
 .approval-card { border: 1px solid var(--rule); border-radius: var(--r2); overflow: hidden; margin-bottom: var(--s4); }
-.approval-card img { width: 100%; display: block; aspect-ratio: 1; object-fit: cover; background: var(--wash); }
+.approval-card img { width: 100%; display: block; aspect-ratio: 1; object-fit: cover; background: var(--wash); cursor: zoom-in; }
+.approval-card .ph { aspect-ratio: 1; background: var(--wash); display: block; }
 .approval-body { padding: var(--s4); }
+/* Hier wird entschieden, also bleibt das Bild gross genug zum Beurteilen - aber nicht mehr
+   bildschirmfuellend (am Desktop waren es 730x730px). Ein Tipp aufs Bild oeffnet die Lightbox. */
+@media (max-width: 767px) {
+  .approval-card > img, .approval-card > .ph { max-width: 260px; border-bottom: 1px solid var(--rule); }
+}
+@media (min-width: 768px) {
+  .approval-card { display: grid; grid-template-columns: 260px minmax(0, 1fr); align-items: start; max-width: 880px; }
+  .approval-card > img, .approval-card > .ph, .approval-card > .post-grid { border-right: 1px solid var(--rule); }
+  .approval-body { padding: var(--s5); }
+}
 
 /* Wochentage (alt: .wd) */
 .wd { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s1); font-size: var(--t-micro); }
@@ -956,3 +990,95 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 .guide-item .link { margin-top: var(--s2); display: inline-block; font-size: var(--t-small); }
 .guide-item.is-off { opacity: .55; }
 /* Pfeile in Linktexten sind Teil der bestehenden Texte - keine zusätzlichen Zeichen ergänzen. */
+
+/* ===========================================================================
+   Nachgezogen (15.09.2026): Komponenten, die beim Aufteilen der alten 252-KB-Einzeldatei
+   ohne CSS geblieben sind. Ohne diese Regeln fallen ganze Bloecke auf Browser-Standard
+   zurueck - Bilder in Originalgroesse (1024px!), keine Abstaende, kollidierende
+   Beschriftungen. Gemeldet von Paul nach dem Livegang ("Bilder viel zu gross",
+   "wirkt zusammengestaucht").
+   =========================================================================== */
+
+/* --- Analytics: Kennzahlen --- */
+.an-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--s5) var(--s4); margin: var(--s5) 0 var(--s7);
+}
+.an-stat .lbl { font-size: var(--t-small); font-weight: 400; color: var(--stone); margin-bottom: var(--s1); }
+.an-stat .val { font-size: var(--t-h1); font-weight: 700; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.delta { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s1); }
+.delta.up { color: var(--go); }
+.delta.down { color: var(--stop); }
+
+/* --- Analytics: Verlaufskurven --- */
+.an-chart-wrap { margin: var(--s4) 0 var(--s7); }
+.an-chart-wrap svg { display: block; width: 100%; height: 120px; }
+.an-chart-label {
+  display: flex; justify-content: space-between; gap: var(--s4);
+  margin-top: var(--s2); font-size: var(--t-micro); color: var(--stone);
+}
+.an-chart-label span:nth-child(2) { font-weight: 500; color: var(--ink); }
+
+/* --- Analytics: Top-Beitraege. Das Bild ist eine Vorschaukachel, kein Plakat - zum
+       Vergroessern gibt es die Lightbox (data-lightbox). --- */
+.an-top-posts { display: grid; gap: var(--s3); margin-top: var(--s4); }
+.an-top-post {
+  display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--s4);
+  align-items: center; padding-bottom: var(--s3); border-bottom: 1px solid var(--rule);
+}
+.an-top-post:last-child { border-bottom: 0; padding-bottom: 0; }
+.an-top-post img, .an-top-post .ph {
+  width: 72px; height: 72px; display: block; border-radius: var(--r1);
+  object-fit: cover; background: var(--wash);
+}
+.an-top-post img { cursor: zoom-in; }
+.an-top-post strong { display: block; line-height: 1.3; }
+.an-top-post .stats { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s1); font-variant-numeric: tabular-nums; }
+
+/* Abschnittsueberschriften in Analytics brauchen Luft nach oben - sie klebten am Element davor. */
+#analytics-body h2 { margin-top: var(--s7); }
+#analytics-body > *:first-child { margin-top: 0; }
+
+/* --- KI-Vorschlagsbox (Website-Analyse, Saeulen-Vorschlaege) --- */
+.ai-box {
+  border: 1px solid var(--rule); border-left: 3px solid var(--ink);
+  border-radius: var(--r1); padding: var(--s4); margin-top: var(--s3);
+}
+.ai-box p + p { margin-top: var(--s2); }
+.ai-box .row { margin-top: var(--s4); }
+.ai-box button {
+  min-height: 40px; padding: var(--s2) var(--s4);
+  border: 1px solid var(--ink); border-radius: var(--r3);
+  background: var(--ink); color: var(--paper); font: inherit; font-weight: 500; cursor: pointer;
+}
+.ai-box button.ghost { background: var(--paper); color: var(--ink); border-color: var(--line-strong); }
+
+/* --- Content-Saeulen --- */
+.pillar-row { display: grid; gap: var(--s2); padding: var(--s3) 0; border-bottom: 1px solid var(--rule); }
+@media (min-width: 640px) {
+  .pillar-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 92px auto; align-items: center; gap: var(--s3); }
+}
+
+/* --- Zugangslink kopieren --- */
+.copyrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s3); }
+.copyrow input { flex: 1 1 220px; }
+
+/* --- "Zugang verloren?" im Onboarding --- */
+.recover-access { margin-top: var(--s7); padding-top: var(--s5); border-top: 1px solid var(--rule); }
+.recover-access > summary { cursor: pointer; font-size: var(--t-small); font-weight: 500; }
+
+/* --- Kleintexte, die ohne Regel wie Fliesstext aussahen --- */
+.fine { font-size: var(--t-small); color: var(--stone); margin-top: var(--s3); }
+.locked { font-size: var(--t-small); color: var(--stone); border-left: 3px solid var(--line-strong); padding-left: var(--s3); margin-top: var(--s2); }
+.preview-hint { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s2); }
+.set-noresult { color: var(--stone); padding: var(--s6) 0; }
+.intro { margin-bottom: var(--s4); }
+.intro-trial { font-size: var(--t-small); color: var(--stone); }
+
+/* --- Monatskalender (derzeit nicht gerendert, aber vorhanden) --- */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s1); }
+.cal-grid .hd { font-size: var(--t-micro); font-weight: 500; color: var(--stone); text-align: center; }
+.cal-day { aspect-ratio: 1; display: grid; place-content: center; gap: 2px; font-size: var(--t-micro); border: 1px solid var(--rule); border-radius: 3px; color: var(--stone); }
+.cal-day.today { border-color: var(--ink); color: var(--ink); font-weight: 700; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s4); margin-top: var(--s3); font-size: var(--t-micro); color: var(--stone); }
+.cal-legend span { display: inline-flex; align-items: center; gap: var(--s2); }

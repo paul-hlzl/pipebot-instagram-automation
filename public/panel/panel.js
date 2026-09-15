@@ -2289,7 +2289,7 @@
       : p.status === "approved" ? "Von Ihnen freigegeben."
       : S.customer.approvalMode ? `${when}, sobald Sie freigeben.` : `${when}.`;
 
-    return `<article class="card preview-card" data-plan-id="${esc(p.id)}">
+    return `<article class="card preview-card is-${esc(p.status)}" data-plan-id="${esc(p.id)}">
       ${p.imageUrl
         ? `<img class="card-media${p.channel === "ig_story" ? " story" : ""}" src="${esc(p.imageUrl)}" alt="Vorschaubild: ${esc(p.headline || "")}" data-lightbox loading="lazy" decoding="async">`
         : `<div class="card-media"></div>`}
