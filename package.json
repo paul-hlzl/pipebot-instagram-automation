@@ -15,6 +15,7 @@
     "pretest:panel": "pm2 restart instagram-mcp-staging > /dev/null",
     "test:panel": "node scripts/test-panel.mjs",
     "test:reviews": "node scripts/test-reviews.mjs",
+    "test:video": "node scripts/test-video.mjs",
     "test:watermark": "node scripts/test-watermark.mjs",
     "test:linkedin-analytics": "node scripts/test-linkedin-analytics.mjs",
     "backup:db": "node scripts/backup-db.mjs",

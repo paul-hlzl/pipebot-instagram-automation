@@ -21,6 +21,15 @@ import { db } from "./db.js";
 
 export type Frequency = "taeglich" | "werktags" | "3x-woche";
 export type PostingChannel = "instagram" | "linkedin";
+/**
+ * Die Video-Diashow hat einen EIGENEN Wochenplan (siehe videos.ts) - sie ist technisch ein
+ * Instagram-Beitrag, folgt aber nicht dem Instagram-Zeitplan. Deshalb ein eigener Kanalwert hier
+ * statt eines Flags: nur so kann "heute schon gepostet?" auf Video-Beitraege eingegrenzt werden,
+ * ohne dass ein normaler Feed-Beitrag am selben Tag das Video als erledigt markiert.
+ */
+export type SchedulableChannel = PostingChannel | "instagram_video";
+/** Wert der posts.format-Spalte fuer Video-Diashows - hier gespiegelt, damit schedule.ts nicht von videos.ts abhaengt. */
+const VIDEO_FORMAT = "video_slideshow";
 
 // JS-style weekday numbers as produced by Intl's "short" weekday formatting below: Sun=0..Sat=6.
 const POSTING_DAYS: Record<Frequency, number[]> = {
@@ -109,15 +118,19 @@ function isPausedOn(customer: ScheduleInput, dateStr: string): boolean {
 }
 
 /** True if this customer already has a logged post on the given Vienna calendar date (optionally restricted to one provider). */
-function hasPostOnViennaDate(customerId: string, dateStr: string, provider?: PostingChannel): boolean {
+function hasPostOnViennaDate(customerId: string, dateStr: string, provider?: PostingChannel, format?: string): boolean {
   // Posts cluster around "today" by definition, so the last handful is always enough to check -
   // avoids scanning the whole table for customers with a long history.
   const rows = (
-    provider
+    format && provider
       ? db
-          .prepare("SELECT posted_at FROM posts WHERE customer_id = ? AND provider = ? ORDER BY posted_at DESC LIMIT 10")
-          .all(customerId, provider)
-      : db.prepare("SELECT posted_at FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 10").all(customerId)
+          .prepare("SELECT posted_at FROM posts WHERE customer_id = ? AND provider = ? AND format = ? ORDER BY posted_at DESC LIMIT 10")
+          .all(customerId, provider, format)
+      : provider
+        ? db
+            .prepare("SELECT posted_at FROM posts WHERE customer_id = ? AND provider = ? ORDER BY posted_at DESC LIMIT 10")
+            .all(customerId, provider)
+        : db.prepare("SELECT posted_at FROM posts WHERE customer_id = ? ORDER BY posted_at DESC LIMIT 10").all(customerId)
   ) as { posted_at: string }[];
   return rows.some((r) => viennaParts(new Date(r.posted_at)).dateStr === dateStr);
 }
@@ -131,6 +144,11 @@ export interface ScheduleInput {
   /** Per-channel override of activeWeekdays. Falls back to activeWeekdays (then frequency) when unset. */
   instagramWeekdays?: string | null;
   linkedinWeekdays?: string | null;
+  /** Eigener Wochenplan der Video-Diashow. Anders als bei Instagram/LinkedIn gibt es hier KEINEN
+   *  Rückfall auf activeWeekdays/frequency: ohne ausdrücklich gewählte Tage entsteht kein Video. */
+  videoWeekdays?: string | null;
+  /** Eigene Uhrzeit für Video-Beiträge. Leer = dieselbe wie für normale Beiträge (postTime). */
+  videoPostTime?: string | null;
   /** Inclusive Vienna-date (YYYY-MM-DD) pause/vacation range. Nothing is due for either channel while "now" falls inside it. */
   pauseFrom?: string | null;
   pauseUntil?: string | null;
@@ -145,18 +163,22 @@ interface ScheduledSlot {
 
 const LOOKAHEAD_DAYS = 60; // generous enough to see past a long vacation pause and still find a slot
 
-function nextSlot(customer: ScheduleInput, now: Date, channel: PostingChannel | null): ScheduledSlot {
+function nextSlot(customer: ScheduleInput, now: Date, channel: SchedulableChannel | null): ScheduledSlot {
+  const isVideo = channel === "instagram_video";
   const channelSpecific = channel === "instagram" ? customer.instagramWeekdays : channel === "linkedin" ? customer.linkedinWeekdays : undefined;
-  const days = parseWeekdayList(channelSpecific) ?? parseWeekdayList(customer.activeWeekdays) ?? postingDaysFor(customer.frequency);
-  const { hour, minute } = parsePostTime(customer.postTime);
-  const provider = channel ?? undefined;
+  const days = isVideo
+    ? parseWeekdayList(customer.videoWeekdays) ?? [] // kein Rückfall, siehe ScheduleInput.videoWeekdays
+    : parseWeekdayList(channelSpecific) ?? parseWeekdayList(customer.activeWeekdays) ?? postingDaysFor(customer.frequency);
+  const { hour, minute } = parsePostTime(isVideo ? customer.videoPostTime || customer.postTime : customer.postTime);
+  const provider: PostingChannel | undefined = isVideo ? "instagram" : (channel as PostingChannel | null) ?? undefined;
+  const format = isVideo ? VIDEO_FORMAT : undefined;
 
   for (let offset = 0; offset < LOOKAHEAD_DAYS; offset++) {
     const candidate = new Date(now.getTime() + offset * 86_400_000);
     const { dateStr, weekday } = viennaParts(candidate);
     if (isPausedOn(customer, dateStr)) continue;
     if (!days.includes(weekday)) continue;
-    if (hasPostOnViennaDate(customer.customerId, dateStr, provider)) continue;
+    if (hasPostOnViennaDate(customer.customerId, dateStr, provider, format)) continue;
     return { dateStr, hour, minute, iso: viennaWallClockToUtcIso(dateStr, hour, minute) };
   }
   // Should be unreachable outside of a 60-day-plus pause with no posting days at all, but keep
@@ -187,12 +209,12 @@ export function isDue(customer: ScheduleInput, now: Date = new Date()): boolean 
 }
 
 /** Same as `nextPostAt`, but for one specific channel - respects `instagramWeekdays`/`linkedinWeekdays` and only counts posts on that channel as "already posted". */
-export function nextPostAtForChannel(customer: ScheduleInput, channel: PostingChannel, now: Date = new Date()): string {
+export function nextPostAtForChannel(customer: ScheduleInput, channel: SchedulableChannel, now: Date = new Date()): string {
   return nextSlot(customer, now, channel).iso;
 }
 
 /** Same as `isDue`, but for one specific channel - see `nextPostAtForChannel`. */
-export function isDueForChannel(customer: ScheduleInput, channel: PostingChannel, now: Date = new Date()): boolean {
+export function isDueForChannel(customer: ScheduleInput, channel: SchedulableChannel, now: Date = new Date()): boolean {
   return dueFromSlot(nextSlot(customer, now, channel), now);
 }
 
@@ -213,4 +235,21 @@ export function isPostingDayForChannel(customer: ScheduleInput, channel: Posting
   const days = parseWeekdayList(channelSpecific) ?? parseWeekdayList(customer.activeWeekdays) ?? postingDaysFor(customer.frequency);
   const { dateStr, weekday } = viennaParts(date);
   return { dateStr, due: !isPausedOn(customer, dateStr) && days.includes(weekday) };
+}
+
+/**
+ * Ist für diesen Kunden JETZT eine Video-Diashow fällig? Eigene Funktion statt eines weiteren
+ * Kanalwerts in isDueForChannel-Aufrufern, damit an den Aufrufstellen sofort lesbar ist, dass hier
+ * ein eigener Wochenplan gilt - und damit der Fall "keine Video-Tage gewählt" (nie fällig)
+ * garantiert nicht versehentlich auf den allgemeinen Zeitplan zurückfällt.
+ */
+export function isVideoDue(customer: ScheduleInput, now: Date = new Date()): boolean {
+  if (!parseWeekdayList(customer.videoWeekdays)) return false;
+  return isDueForChannel(customer, "instagram_video", now);
+}
+
+/** Nächster geplanter Video-Termin (ISO) - null, wenn der Kunde keine Video-Tage gewählt hat. */
+export function nextVideoPostAt(customer: ScheduleInput, now: Date = new Date()): string | null {
+  if (!parseWeekdayList(customer.videoWeekdays)) return null;
+  return nextPostAtForChannel(customer, "instagram_video", now);
 }

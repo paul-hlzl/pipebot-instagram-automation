@@ -23,6 +23,7 @@ import { startTrialEndingEmailSchedule } from "./panel/trial-emails.js";
 import { startDailyAnalyticsSnapshotSchedule, startWeeklyAnalyticsSummarySchedule } from "./panel/analytics.js";
 import { startCommentAutomationSchedule } from "./panel/comments.js";
 import { startReviewAutomationSchedule } from "./panel/reviews.js";
+import { startVideoSchedule } from "./panel/videos.js";
 import {
   assertChannelEnabled,
   assertLinkedInHasImage,
@@ -1166,6 +1167,9 @@ async function main(): Promise<void> {
   // Google-Bewertungen: wieder ein eigener Cron (siehe reviews.ts). Laeuft ins Leere, solange kein
   // Kunde das Feature eingeschaltet/Google verbunden hat - kein Aufruf an Google, keine Kosten.
   startReviewAutomationSchedule();
+  // Video-Diashow (Reels): eigener Cron mit eigenem Wochenplan (siehe panel/videos.ts). Rendern
+  // laeuft ueber eine Warteschlange, damit mehrere Kunden nie gleichzeitig die CPU belegen.
+  startVideoSchedule();
   // Bind to loopback only - Nginx (proxy_pass http://127.0.0.1:3000) is the only
   // intended entry point. Express/Node default to 0.0.0.0 (all interfaces) if no
   // host is given, which would expose this port directly to the internet.

@@ -750,7 +750,7 @@
   // rein informativ hier (Anzeige/Validierung im Formular), die echte Grenze setzt der Server.
   const CAROUSEL_MIN_SLIDES = 3;
   const CAROUSEL_MAX_SLIDES = 7;
-  const POST_FORMATS = { single: "Einzelbild", carousel: "Karussell (mehrere Bilder zum Wischen)" };
+  const POST_FORMATS = { single: "Einzelbild", carousel: "Karussell (mehrere Bilder zum Wischen)", video_slideshow: "Video-Diashow (Reel mit Sprachausgabe)" };
   const HASHTAGS = { keine: "Keine", wenige: "Wenige (2-3)", viele: "Viele (5+)" };
   const LANGUAGES = { de: "Deutsch", en: "Englisch" };
   const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
@@ -822,7 +822,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram" };
+  const S = { providers: [], videoVoices: [], voicePreviewAvailable: false, videoLengths: [5, 10, 15], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram" };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1464,6 +1464,7 @@
     { id: "aussehen", label: "Aussehen" },
     { id: "inhalt", label: "Inhalt & Sprache" },
     { id: "kanaele", label: "Kanäle & Zeitplan" },
+    { id: "video", label: "Video-Diashow" },
     { id: "automatik", label: "Freigaben & Automatik" },
     { id: "mail", label: "Benachrichtigungen" },
     { id: "konto", label: "Konto" },
@@ -1690,6 +1691,8 @@
                 <p class="hint" style="margin:0 0 10px">${c.customerPaused ? "Aktuell pausiert - es wird nichts veröffentlicht, bis Sie fortsetzen." : "Läuft. Sie können jederzeit anhalten, ohne Einstellungen zu verlieren."}</p>
                 <button type="button" class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
               </div>`)}
+
+            ${group("video", "Kurze Hochformat-Videos mit Sprachausgabe - eigener Zeitplan, unabhängig von Ihren normalen Beiträgen.", videoSettingsHtml(c))}
 
             ${group("automatik", "Was ohne Ihr Zutun passiert - und was vorher über Ihren Tisch geht.", `
               <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben</span></label>
@@ -2352,13 +2355,21 @@
     const badge = channelBadgeLabel(a);
     const pillarPart = a.pillarTitle ? `, basierend auf Ihrer Content-Säule „${esc(a.pillarTitle)}“` : "";
     const isCarousel = a.format === "carousel" && Array.isArray(a.slides) && a.slides.length > 0;
-    const formatNote = isCarousel ? ` Karussell mit ${a.slides.length} Bildern - wischen Sie im veröffentlichten Post durch alle Slides.` : "";
-    const context = `Erstellt ${esc(fmtCreated(a.createdAt))} für ${esc(badge || "Ihren Kanal")} (${esc(originLabel(a.source))})${pillarPart}.${formatNote} Prüfen Sie Text und Bild${isCarousel ? "er" : ""}, dann geben Sie frei oder lehnen Sie ab.`;
+    const formatNote = a.videoUrl
+      ? " Video-Diashow - bitte einmal ansehen (und anhören), bevor Sie freigeben."
+      : isCarousel
+        ? ` Karussell mit ${a.slides.length} Bildern - wischen Sie im veröffentlichten Post durch alle Slides.`
+        : "";
+    const context = `Erstellt ${esc(fmtCreated(a.createdAt))} für ${esc(badge || "Ihren Kanal")} (${esc(originLabel(a.source))})${pillarPart}.${formatNote} Prüfen Sie Text und ${a.videoUrl ? "Video" : `Bild${isCarousel ? "er" : ""}`}, dann geben Sie frei oder lehnen Sie ab.`;
     // Karussell: alle Slides als kleine Bild-Reihe (gleiche .post-grid-Optik wie der Verlauf),
     // nicht nur die erste - der Kunde muss vor der Freigabe jedes einzelne Bild sehen koennen.
-    const mediaHtml = isCarousel
-      ? `<div class="post-grid" style="flex:none;width:220px">${a.slides.map((s) => `<img src="${esc(s.imageUrl)}" alt="" data-lightbox>`).join("")}</div>`
-      : (a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`);
+    // Video-Diashow: das fertige Video muss VOR der Freigabe abspielbar sein - ein Standbild
+    // allein reicht nicht, um zu beurteilen, was da gleich veroeffentlicht wird.
+    const mediaHtml = a.videoUrl
+      ? `<video src="${esc(a.videoUrl)}" ${a.imageUrl ? `poster="${esc(a.imageUrl)}"` : ""} controls playsinline preload="metadata" style="width:220px;border-radius:12px;background:#000"></video>`
+      : isCarousel
+        ? `<div class="post-grid" style="flex:none;width:220px">${a.slides.map((s) => `<img src="${esc(s.imageUrl)}" alt="" data-lightbox>`).join("")}</div>`
+        : (a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`);
     return `<div class="approval-card" data-approval-id="${esc(a.id)}">
       ${mediaHtml}
       <div class="approval-body">
@@ -2430,6 +2441,63 @@
     </div>`;
   }
 
+  /* ================= Video-Diashow (Einstellungen) =================
+     Eigener Bereich statt einer weiteren Format-Option: die Video-Diashow hat einen eigenen
+     Wochenplan (ein Kunde will vielleicht nur montags ein Reel), eine eigene Länge, eine eigene
+     Zoomrichtung und eine eigene Stimme. Ohne angehakte Tage entsteht nie automatisch ein Video -
+     nur noch über "Jetzt posten". */
+  function videoSettingsHtml(c) {
+    const voices = S.videoVoices || [];
+    const chosenVoice = c.videoVoice || (voices[0] && voices[0].id) || "";
+    const lengths = S.videoLengths || [5, 10, 15];
+    const igMissing = !conn("instagram");
+    return `
+      <label class="check${igMissing ? " is-disabled" : ""}"><input type="checkbox" name="videoEnabled" ${c.videoEnabled ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Video-Diashows automatisch erstellen</span></label>
+      ${igMissing
+        ? `<p class="locked">Dafür muss Instagram verbunden sein. <button type="button" class="link" data-go="instagram">Jetzt verbinden</button>, danach lässt sich das hier einschalten.</p>`
+        : `<span class="consequence">Ein Video entsteht nur an den Tagen, die Sie hier anhaken - unabhängig von Ihrem normalen Beitrags-Zeitplan. Ohne angehakten Tag passiert automatisch nichts.</span>`}
+      <fieldset class="field">
+        <legend>An welchen Tagen ein Video?</legend>
+        <div class="seg wd" data-weekday-channel="video">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${(c.videoWeekdays || "").split(",").includes(String(i + 1)) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+      </fieldset>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-videoPostTime">Um wie viel Uhr? <span class="opt">(optional)</span></label>
+          <input id="f-videoPostTime" name="videoPostTime" type="time" value="${esc(c.videoPostTime || "")}" step="900">
+          <p class="hint">Leer lassen = dieselbe Uhrzeit wie Ihre normalen Beiträge (${esc(c.postTime || "15:00")} Uhr).</p>
+        </div>
+        <div class="field">
+          <label for="f-videoLengthSeconds">Wie lang?</label>
+          <select id="f-videoLengthSeconds" name="videoLengthSeconds">
+            ${lengths.map((l) => `<option value="${l}" ${Number(c.videoLengthSeconds || 10) === l ? "selected" : ""}>${l} Sekunden${l === 5 ? " (Hook, eine Aussage, Abschluss)" : l === 10 ? " (Hook, zwei bis drei Aussagen, Abschluss)" : " (Hook, drei bis vier Aussagen, Abschluss)"}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-videoZoomDirection">Bildbewegung</label>
+          <select id="f-videoZoomDirection" name="videoZoomDirection">
+            <option value="alternate" ${(c.videoZoomDirection || "alternate") === "alternate" ? "selected" : ""}>Abwechselnd - mal hinein, mal heraus</option>
+            <option value="in" ${c.videoZoomDirection === "in" ? "selected" : ""}>Immer langsam hineinzoomen</option>
+            <option value="out" ${c.videoZoomDirection === "out" ? "selected" : ""}>Immer langsam herauszoomen</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-videoVoice">Stimme</label>
+          <select id="f-videoVoice" name="videoVoice">
+            ${voices.map((v) => `<option value="${esc(v.id)}" ${chosenVoice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}
+          </select>
+          <p class="hint" id="voice-desc">${esc((voices.find((v) => v.id === chosenVoice) || {}).description || "")}</p>
+          ${S.voicePreviewAvailable
+            ? `<p class="hint"><button type="button" class="link" id="voice-preview">Stimme anhören</button> <span id="voice-preview-state"></span></p>`
+            : `<p class="hint">Vorhören ist gerade nicht verfügbar (Sprachausgabe nicht konfiguriert).</p>`}
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" name="videoVoiceEnabled" ${c.videoVoiceEnabled !== false ? "checked" : ""}><span>Text im Video vorlesen lassen</span></label>
+      <span class="consequence">Der Text steht <strong>immer auch im Bild</strong> - Videos funktionieren damit auch für alle, die ohne Ton schauen. Ohne Sprachausgabe entsteht dasselbe Video stumm.</span>
+      ${c.nextVideoPostAt ? `<p class="hint">Nächstes Video: ${esc(fmtNextPost(c.nextVideoPostAt))}.</p>` : ""}`;
+  }
+
   function commentApprovalCardHtml(a) {
     return `<div class="approval-card" data-comment-approval-id="${esc(a.id)}">
       <div class="approval-body">
@@ -2481,7 +2549,9 @@
       }
       box.innerHTML = `<ul class="history">${posts.map((post) => `
         <li>
-          ${post.imageUrl ? `<img src="${esc(post.imageUrl)}" alt="" data-lightbox>` : `<div class="history-ph"></div>`}
+          ${post.videoUrl
+            ? `<video src="${esc(post.videoUrl)}" ${post.imageUrl ? `poster="${esc(post.imageUrl)}"` : ""} controls playsinline preload="none" style="width:96px;border-radius:8px;background:#000"></video>`
+            : post.imageUrl ? `<img src="${esc(post.imageUrl)}" alt="" data-lightbox>` : `<div class="history-ph"></div>`}
           <div class="cap">
             <strong>${esc(post.headline || PLATFORM_LABEL(post.provider))}</strong>
             <span>${esc(PLATFORM_LABEL(post.provider))}${post.caption ? " · " + esc(post.caption.slice(0, 80)) + (post.caption.length > 80 ? "…" : "") : ""}</span>
@@ -3011,6 +3081,16 @@
       S.settingsQuery = e.target.value;
       applySettingsFilter(S.settingsQuery);
     }
+  });
+
+  // Stimmen-Beschreibung sofort mitziehen, ohne Neu-Rendern der ganzen Seite.
+  document.addEventListener("change", (e) => {
+    if (e.target.id !== "f-videoVoice") return;
+    const desc = $("#voice-desc");
+    const voice = (S.videoVoices || []).find((v) => v.id === e.target.value);
+    if (desc) desc.textContent = voice ? voice.description : "";
+    const state = $("#voice-preview-state");
+    if (state) state.textContent = "";
   });
 
   document.addEventListener("change", (e) => {
@@ -3670,6 +3750,27 @@
       }
       return;
     }
+    if (e.target.closest("#voice-preview")) {
+      const btn = e.target.closest("#voice-preview");
+      const voice = document.querySelector('[name="videoVoice"]')?.value || "";
+      const state = $("#voice-preview-state");
+      btn.classList.add("busy");
+      if (state) state.textContent = "wird erzeugt …";
+      try {
+        const { audioDataUrl } = await api("POST", "/api/voice-preview", { voice });
+        const audio = new Audio(audioDataUrl);
+        if (state) state.textContent = "spielt ab";
+        audio.onended = () => { if (state) state.textContent = ""; };
+        await audio.play();
+      } catch (err) {
+        if (state) state.textContent = "";
+        showError(err.message || "Hörprobe fehlgeschlagen.");
+      } finally {
+        btn.classList.remove("busy");
+      }
+      return;
+    }
+
     const reviewApproveBtn = e.target.closest("[data-review-approve]");
     const reviewRejectBtn = e.target.closest("[data-review-reject]");
     if (reviewApproveBtn || reviewRejectBtn) {
@@ -3878,11 +3979,15 @@
     body.commentAutomationEnabled = checked("commentAutomationEnabled");
     body.googleReviewAutomationEnabled = checked("googleReviewAutomationEnabled");
     body.googleReviewPostsEnabled = checked("googleReviewPostsEnabled");
+    body.videoEnabled = checked("videoEnabled");
+    body.videoVoiceEnabled = checked("videoVoiceEnabled");
     body.gradientEnabled = checked("gradientEnabled");
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
     const liDays = Array.from(form.querySelectorAll('[data-weekday-channel="linkedin"] input:checked')).map((el) => Number(el.value));
+    const videoDays = Array.from(form.querySelectorAll('[data-weekday-channel="video"] input:checked')).map((el) => Number(el.value));
+    body.videoWeekdays = videoDays.join(",");
     body.instagramWeekdays = igDays.join(",");
     body.linkedinWeekdays = liDays.join(",");
     body.activeWeekdays = body.instagramWeekdays;
@@ -3979,6 +4084,9 @@
     try {
       const p = await api("GET", "/api/providers");
       S.providers = p.providers;
+      S.videoVoices = p.videoVoices || [];
+      S.voicePreviewAvailable = Boolean(p.voicePreviewAvailable);
+      S.videoLengths = p.videoLengths || [5, 10, 15];
       S.aiAvailable = Boolean(p.aiAvailable);
       S.trialDays = Number(p.trialDays) || 7;
       S.turnstileSiteKey = p.turnstileSiteKey || null;

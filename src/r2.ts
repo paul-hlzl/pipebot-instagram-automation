@@ -191,3 +191,34 @@ export async function deleteObject(key: string): Promise<void> {
     client.destroy();
   }
 }
+
+/**
+ * Fertig gerendertes Video (MP4) nach R2 - Instagram lädt Reels ausschließlich über eine
+ * öffentlich erreichbare URL hoch, rohe Bytes nimmt die Graph-API nicht an (gleiches Prinzip wie
+ * bei den Bildern oben). Eigener `videos/`-Präfix, damit Video-Objekte in der Bucket-Übersicht
+ * und bei einem späteren Aufräumen von den Bildern unterscheidbar bleiben. Bleibt liegen wie ein
+ * Beitragsbild auch - Instagram lädt das Video beim Veröffentlichen zwar zu sich, die URL wird
+ * aber auch für die Freigabe-Vorschau im Panel gebraucht.
+ */
+export async function uploadVideoBuffer(buffer: Buffer): Promise<string> {
+  const config = getConfig();
+  if (!buffer.length) throw new ToolError("Video ist leer - nichts hochzuladen.");
+  const key = `videos/${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.mp4`;
+
+  const client = new S3Client({
+    region: "auto",
+    endpoint: config.mediaEndpoint,
+    credentials: { accessKeyId: config.mediaAccessKey, secretAccessKey: config.mediaSecretKey },
+  });
+  try {
+    await client.send(
+      new PutObjectCommand({ Bucket: config.mediaBucketName, Key: key, Body: buffer, ContentType: "video/mp4" }),
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unbekannter R2-Fehler";
+    throw new ToolError(`Video-Upload nach Cloudflare R2 fehlgeschlagen. Details: ${detail}`);
+  } finally {
+    client.destroy();
+  }
+  return `${config.mediaBucketUrl}/${key}`;
+}

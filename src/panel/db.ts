@@ -491,6 +491,28 @@ migrateColumns("customers", [["branding_last_changed_at", "TEXT"]]);
 // Content-Recycling (aus einer guten Bewertung einen Beitragsvorschlag machen) - eigener Schalter,
 // nicht an die Antwort-Automatik gekoppelt: viele Kunden wollen antworten lassen, aber nicht jede
 // Bewertung weiterveroeffentlichen (Einverstaendnis der bewertenden Person, siehe Panel-Hinweis).
+// Video-Diashow (Teil B des Karussell-Auftrags, siehe videos.ts/video.ts). Standard: aus. Die
+// Video-Diashow ist bewusst KEINE blosse Format-Option neben Einzelbild/Karussell, sondern ein
+// eigener Bereich mit eigenem Wochenplan - ein Kunde kann "nur montags ein Reel" wollen, waehrend
+// Einzelbilder ihrem eigenen Zeitplan folgen. video_weekdays leer/NULL heisst: keine
+// automatischen Videos (auch bei video_enabled=1 entsteht dann nur etwas ueber "Jetzt posten").
+// video_post_time NULL faellt auf die normale post_time zurueck.
+migrateColumns("customers", [
+  ["video_enabled", "INTEGER NOT NULL DEFAULT 0"],
+  ["video_weekdays", "TEXT"],
+  ["video_post_time", "TEXT"],
+  ["video_length_seconds", "INTEGER NOT NULL DEFAULT 10"],
+  ["video_zoom_direction", "TEXT NOT NULL DEFAULT 'alternate'"],
+  ["video_voice", "TEXT NOT NULL DEFAULT 'de-DE-Wavenet-H'"],
+  ["video_voice_enabled", "INTEGER NOT NULL DEFAULT 1"],
+]);
+// Das fertige MP4 einer Video-Diashow. image_url bleibt daneben belegt (Standbild aus dem Video) -
+// dadurch funktionieren Verlauf, Freigabe-Karten und Vorschau-Kacheln unveraendert weiter, auch wo
+// sie nur ein Bild erwarten; wer ein Video abspielen will, nimmt video_url.
+migrateColumns("posts", [["video_url", "TEXT"]]);
+migrateColumns("pending_approvals", [["video_url", "TEXT"]]);
+migrateColumns("planned_posts", [["video_url", "TEXT"]]);
+
 migrateColumns("customers", [
   ["google_review_automation_enabled", "INTEGER NOT NULL DEFAULT 0"],
   ["google_review_mode", "TEXT NOT NULL DEFAULT 'approval'"],
@@ -622,6 +644,13 @@ export interface CustomerRow {
   google_review_mode: string;
   google_review_posts_enabled: number;
   google_review_post_min_stars: number;
+  video_enabled: number;
+  video_weekdays: string | null;
+  video_post_time: string | null;
+  video_length_seconds: number;
+  video_zoom_direction: string;
+  video_voice: string;
+  video_voice_enabled: number;
 }
 
 export interface ConnectionRow {
@@ -649,6 +678,7 @@ export interface PostRow {
   posted_at: string;
   pillar_title: string | null;
   format: string;
+  video_url: string | null;
 }
 
 /** Panel v14: eine Zeile pro Slide eines Mehrbild-Posts (Karussell/Video-Diashow), siehe db.ts
@@ -738,6 +768,7 @@ export interface PendingApprovalRow {
   updated_at: string;
   format: string;
   branding_version_at_generation: string | null;
+  video_url: string | null;
 }
 
 export interface PostRequestRow {
@@ -767,6 +798,7 @@ export interface PlannedPostRow {
   updated_at: string;
   format: string;
   branding_version_at_generation: string | null;
+  video_url: string | null;
 }
 
 export interface PlanningErrorRow {

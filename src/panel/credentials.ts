@@ -160,6 +160,8 @@ export function scheduleInputFor(c: CustomerRow): ScheduleInput {
     activeWeekdays: c.active_weekdays,
     instagramWeekdays: c.instagram_weekdays,
     linkedinWeekdays: c.linkedin_weekdays,
+    videoWeekdays: c.video_weekdays,
+    videoPostTime: c.video_post_time,
     pauseFrom: c.pause_from,
     pauseUntil: c.pause_until,
   };
@@ -491,6 +493,8 @@ export interface LoggedPost {
   postedAt: string;
   format: string;
   slides: PostMediaSlide[];
+  /** Fertig gerendertes MP4 einer Video-Diashow (sonst null) - der Verlauf spielt es dann ab, statt nur das Standbild zu zeigen. */
+  videoUrl?: string | null;
 }
 
 /** One slide of a carousel/video-slideshow post - see db.ts's post_media table comment. */
@@ -559,6 +563,8 @@ export function logPost(
     format?: string;
     /** Full slide list for a carousel/video-slideshow post - `imageUrl` above stays the cover/first slide either way. */
     slides?: { imageUrl: string; overlayText?: string }[];
+    /** Fertig gerendertes MP4 (nur format='video_slideshow'). */
+    videoUrl?: string;
   },
 ): void {
   // Panel v6 Aufgabe 4d: vor dem Insert geprueft, damit "war das der allererste Post" korrekt
@@ -566,8 +572,8 @@ export function logPost(
   const isFirstPost = (db.prepare("SELECT COUNT(*) as n FROM posts WHERE customer_id = ?").get(customerId) as { n: number }).n === 0;
   const id = `post_${randomToken(9)}`;
   db.prepare(
-    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title, format)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO posts (id, customer_id, provider, external_post_id, headline, caption, image_url, posted_at, pillar_title, format, video_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     customerId,
@@ -579,6 +585,7 @@ export function logPost(
     nowIso(),
     post.pillarTitle ?? null,
     post.format ?? "single",
+    post.videoUrl ?? null,
   );
   savePostMedia("post", id, post.slides);
   if (isFirstPost) maybeSendFirstPostEmail(customerId);
@@ -625,6 +632,7 @@ export function listPostsForCustomer(customerId: string, limit = 30): LoggedPost
     imageUrl: r.image_url,
     postedAt: r.posted_at,
     format: r.format,
+    videoUrl: r.video_url,
     slides: r.format === "single" ? [] : getPostMedia("post", r.id),
   }));
 }
@@ -898,10 +906,18 @@ const POST_REQUEST_STALE_PROCESSING_MS = 3 * 3_600_000;
  * POST_REQUEST_STALE_PROCESSING_MS is treated as abandoned and reclaimed for one more attempt,
  * so a genuine crash mid-run still eventually gets retried instead of being stuck forever.
  */
+/**
+ * Panel v22: Video-Anfragen (format='video_slideshow') sind hier BEWUSST ausgenommen. Sie werden
+ * vollständig serverseitig abgearbeitet (videos.ts) - würde die externe Routine sie ebenfalls
+ * sehen, würde sie versuchen, daraus mit den Bild-Werkzeugen einen Beitrag zu machen, und der
+ * Kunde bekäme am Ende zwei. Dasselbe gilt für listApprovedPendingPosts weiter unten.
+ */
 export function listOpenPostRequests(): PostRequest[] {
   const staleBefore = new Date(Date.now() - POST_REQUEST_STALE_PROCESSING_MS).toISOString();
   const claimable = db
-    .prepare("SELECT id FROM post_requests WHERE status = 'pending' OR (status = 'processing' AND updated_at < ?) ORDER BY created_at")
+    .prepare(
+      "SELECT id FROM post_requests WHERE format != 'video_slideshow' AND (status = 'pending' OR (status = 'processing' AND updated_at < ?)) ORDER BY created_at",
+    )
     .all(staleBefore) as { id: string }[];
   if (claimable.length === 0) return [];
 
@@ -942,6 +958,9 @@ export interface PendingApproval {
   createdAt: string;
   updatedAt: string;
   format: string;
+  /** Panel v22: fertig gerendertes MP4 einer Video-Diashow (sonst null). `imageUrl` bleibt daneben
+   *  mit dem Standbild belegt, damit jede bestehende Vorschau-/Verlaufs-Ansicht weiter funktioniert. */
+  videoUrl: string | null;
   /** Panel v14: full slide list for a carousel/video-slideshow approval - empty for 'single'. The
    *  customer's approval-card preview needs every slide, not just the cover `imageUrl`. */
   slides: PostMediaSlide[];
@@ -967,6 +986,7 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     format: r.format,
+    videoUrl: r.video_url,
     slides: r.format === "single" ? [] : getPostMedia("pending_approval", r.id),
     brandingVersionAtGeneration: r.branding_version_at_generation,
   };
@@ -1021,6 +1041,8 @@ export function savePendingApproval(input: {
   format?: string;
   /** Full slide list for a carousel/video-slideshow approval - `imageUrl` above stays the cover/first slide. */
   slides?: { imageUrl: string; overlayText?: string }[];
+  /** Fertig gerendertes MP4 (nur format='video_slideshow') - siehe PendingApproval.videoUrl. */
+  videoUrl?: string;
   /** Panel v19: when this content's text was actually written - defaults to now (a fresh, on-the-spot
    *  generation, the overwhelmingly common case for this function). submitPlannedPostForApproval
    *  passes the SOURCE planned_post's own timestamp instead, since it's copying existing content
@@ -1031,8 +1053,8 @@ export function savePendingApproval(input: {
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at, format, branding_version_at_generation)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at, format, branding_version_at_generation, video_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.customerId,
@@ -1047,6 +1069,7 @@ export function savePendingApproval(input: {
     now,
     input.format ?? "single",
     input.brandingVersionAtGeneration ?? now,
+    input.videoUrl ?? null,
   );
   savePostMedia("pending_approval", id, input.slides);
   maybeSendApprovalsSummaryEmail(input.customerId);
@@ -1110,7 +1133,20 @@ export function setPendingApprovalStatus(customerId: string, id: string, status:
 
 /** All customer-approved posts across all customers, oldest first - what `list_approved_pending_posts` (the MCP tool) returns for the routine to actually publish + logPost, then mark done via `mark_pending_approval_published`. */
 export function listApprovedPendingPosts(): PendingApproval[] {
-  const rows = db.prepare("SELECT * FROM pending_approvals WHERE status = 'approved' ORDER BY created_at").all() as PendingApprovalRow[];
+  // Video-Diashows fehlen hier absichtlich - sie veroeffentlicht der Server selbst (videos.ts),
+  // die externe Routine kann kein Video hochladen. Siehe listOpenPostRequests oben.
+  const rows = db
+    .prepare("SELECT * FROM pending_approvals WHERE status = 'approved' AND format != 'video_slideshow' ORDER BY created_at")
+    .all() as PendingApprovalRow[];
+  return rows.map(toPendingApproval);
+}
+
+/** Gegenstueck zu listApprovedPendingPosts fuer den Server-Pfad: freigegebene Video-Diashows, die
+ *  noch veroeffentlicht werden muessen (siehe videos.ts's publishApprovedVideos). */
+export function listApprovedVideoPosts(): PendingApproval[] {
+  const rows = db
+    .prepare("SELECT * FROM pending_approvals WHERE status = 'approved' AND format = 'video_slideshow' ORDER BY created_at")
+    .all() as PendingApprovalRow[];
   return rows.map(toPendingApproval);
 }
 
