@@ -29,19 +29,21 @@ automatisch angemeldet – das ist technisch nicht umgehbar. Der Weg hinein ist 
 der persönliche Zugangslink, der unter **beiden** Adressen funktioniert. Ein im Panel neu erzeugter
 Link zeigt jeweils auf die Adresse, unter der er erzeugt wurde.
 
-## Was noch manuell fehlt
+## Stand
 
-1. **DNS:** A-Record `app.pipeflow.at` → `2.29.38.44`
-2. **Zertifikat:** danach `certbot --nginx -d app.pipeflow.at` (ersetzt das Übergangszertifikat,
-   Erneuerung läuft dann automatisch wie bei `mcp.pipebot.at`)
-3. **Redirect-URIs** bei Meta und LinkedIn zusätzlich eintragen (siehe Sitzungsbericht)
+- **DNS:** erledigt (15.09.2026) – `app.pipeflow.at` → `2.29.38.44`
+- **Zertifikat:** erledigt – Let's Encrypt (ECDSA), gültig bis 14.12.2026, automatische Erneuerung
+  über `certbot.timer`; Probelauf für beide Zertifikate erfolgreich. HTTP leitet auf HTTPS um.
+- **Datenschutz-Adresse:** `https://app.pipeflow.at/datenschutz` ist kanonisch,
+  `mcp.pipebot.at/panel/datenschutz` leitet mit 301 dorthin (`PANEL_PRIVACY_CANONICAL_URL`).
+- **Offen, nur von Paul zu erledigen:** Redirect-URIs bei Meta und LinkedIn zusätzlich eintragen.
 
 ## Bevor `mcp.pipebot.at/panel` abgeschaltet werden darf
 
-- [ ] DNS und Zertifikat für `app.pipeflow.at` stehen
+- [x] DNS und Zertifikat für `app.pipeflow.at` stehen
 - [ ] Redirect-URIs bei Meta und LinkedIn für die neue Adresse eingetragen **und** einmal echt getestet
 - [ ] Alle bestehenden Kunden haben sich mindestens einmal unter der neuen Adresse angemeldet
-- [ ] Datenschutz-URL bei Meta, LinkedIn und Google zeigt auf die dauerhafte Adresse
+- [ ] Datenschutz-URL bei Meta, LinkedIn und Google eingetragen: `https://app.pipeflow.at/datenschutz`
 - [ ] Instagram-Webhook-Callback geprüft (siehe Bericht: bleibt auf der alten Adresse)
 - [ ] Zugangslinks in alten E-Mails sind abgelaufen oder ersetzt
 - [ ] `PANEL_BASE_URL` in `.env` auf die neue Adresse umgestellt
