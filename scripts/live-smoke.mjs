@@ -9,7 +9,9 @@
  */
 import { chromium } from "/root/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
 
-const BASE = process.argv[2] || "https://mcp.pipebot.at/panel";
+// Seit 15.09.2026 ist app.pipeflow.at die einzige Kundenadresse; mcp.pipebot.at/panel
+// antwortet nur noch mit 301 dorthin und taugt deshalb nicht mehr als Pruefziel.
+const BASE = process.argv[2] || "https://app.pipeflow.at";
 let problems = 0;
 const log = (ok, msg, extra) => { if (!ok) problems++; console.log(`  ${ok ? "ok  " : "FAIL"} - ${msg}${extra ? ` (${extra})` : ""}`); };
 
