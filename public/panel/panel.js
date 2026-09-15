@@ -123,7 +123,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], videoVoices: [], voicePreviewAvailable: false, videoLengths: [5, 10, 15], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram",
+  const S = { providers: [], videoVoices: [], voicePreviewAvailable: false, videoLengths: [5, 10, 15], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, pendingReviewCount: 0, analyticsChannel: "instagram",
     // Redesign: aktiver Reiter im Bereich "Beiträge" und Anzahl offener Freigaben (speist den
     // Status-Satz und die Zähler in Navigation/Bottom-Bar aus derselben Quelle).
     postTab: "geplant", approvalCount: 0,
@@ -614,7 +614,7 @@
 
   /** Anzahl offener Aufgaben, die als Zähler an "Beiträge" erscheinen (Freigaben + Kommentare). */
   function openTaskCount() {
-    return (S.approvalCount || 0) + (S.pendingCommentCount || 0);
+    return (S.approvalCount || 0) + (S.pendingCommentCount || 0) + (S.pendingReviewCount || 0);
   }
 
   /** Initialen für den Kontoknopf - aus dem Firmennamen, nie aus personenbezogenen Daten. */
@@ -1463,8 +1463,17 @@
     }
   }
 
+  /**
+   * Nur noch der Name der Formularseite, keine zweite Schrittzaehlung.
+   *
+   * Vorher standen zwei Zaehlungen direkt uebereinander: "Schritt 1 von 4 · Unternehmen" (die
+   * Fortschrittsleiste ueber das ganze Onboarding) und "Schritt 1 von 2 · Über Sie" (die zwei
+   * Seiten dieses einen Formulars). Beide stimmten, zusammen widersprachen sie sich fuer jeden,
+   * der sie liest. Die Leiste bleibt, weil sie den echten Fortschritt zeigt; hier steht nur noch,
+   * auf welcher der beiden Formularseiten man gerade ist.
+   */
   function formPartLabel(part) {
-    return `Schritt ${part} von 2 · ${part === 1 ? "Über Sie" : "Ihr Stil"}`;
+    return part === 1 ? "Über Sie" : "Ihr Stil";
   }
   function formPartLede(part) {
     return part === 1 ? "Erzählen Sie uns, worum es bei Ihnen geht." : "Wie sollen Ihre Beiträge aussehen und klingen?";
@@ -1593,15 +1602,18 @@
         : c.status === "renew-soon" ? `Freigabe läuft am ${fmtDate(c.expiresAt)} ab, bitte bald neu verbinden.`
         : `Verbunden seit ${fmtDate(c.connectedAt)}`;
       statusBox = `
-        <div class="status${warn ? " warn" : ""}">
+        <div class="conn-status${warn ? " warn" : ""}">
           <span class="dot" aria-hidden="true"></span>
           <div class="who"><strong>${esc(c.accountName)}</strong><small>${sub}</small></div>
           <button class="link" data-disconnect="${p.id}">Trennen</button>
         </div>`;
     }
 
+    // EIN Gerüst für Instagram, LinkedIn und jede künftige Plattform - die Abstände kommen aus
+    // .provider-page in panel.css, nicht aus einzelnen Inline-Angaben hier.
     return `
       ${bannerHtml()}
+      <div class="provider-page">
       <h1>${esc(p.name)} verbinden</h1>
       <p class="lede">${esc(p.tagline)}</p>
       ${p.notice ? `<p class="notice">${esc(p.notice)}</p>` : ""}
@@ -1625,9 +1637,12 @@
         <p class="fine">${p.available ? "Wir bekommen nur das Recht, Beiträge zu veröffentlichen. Ihr Passwort sehen wir nie." : S.sandbox ? "Demo-Modus: In der Testversion absichtlich deaktiviert - es wird kein echtes Konto verbunden." : "Diese Verbindung ist gerade nicht verfügbar. Schreiben Sie uns, wir schalten sie frei."}</p>
       `}
       <h2>Häufige Fragen</h2>
-      <details><summary>Kann ich die Verbindung wieder trennen?</summary><p>Ja, jederzeit mit einem Klick hier im Panel. Danach veröffentlichen wir nichts mehr auf ${esc(p.name)}.</p></details>
-      <details><summary>Sehe ich die Beiträge, bevor sie erscheinen?</summary><p>Zum Start stimmen wir Stil und Themen mit Ihnen ab. Danach laufen die Beiträge im gewählten Rhythmus automatisch.</p></details>
-      <details><summary>Es kommt eine Fehlermeldung. Was tun?</summary><p>Prüfen Sie, ob Sie mit dem richtigen Konto angemeldet sind, und versuchen Sie es erneut. Klappt es nicht, schreiben Sie an <a href="mailto:office@pipeline-solutions.at">office@pipeline-solutions.at</a>.</p></details>
+      <div class="faq">
+        <details><summary>Kann ich die Verbindung wieder trennen?</summary><p>Ja, jederzeit mit einem Klick hier im Panel. Danach veröffentlichen wir nichts mehr auf ${esc(p.name)}.</p></details>
+        <details><summary>Sehe ich die Beiträge, bevor sie erscheinen?</summary><p>Zum Start stimmen wir Stil und Themen mit Ihnen ab. Danach laufen die Beiträge im gewählten Rhythmus automatisch.</p></details>
+        <details><summary>Es kommt eine Fehlermeldung. Was tun?</summary><p>Prüfen Sie, ob Sie mit dem richtigen Konto angemeldet sind, und versuchen Sie es erneut. Klappt es nicht, schreiben Sie an <a href="mailto:office@pipeline-solutions.at">office@pipeline-solutions.at</a>.</p></details>
+      </div>
+      </div>
     `;
   }
 
@@ -1674,10 +1689,20 @@
       .map((o) => {
         const r = byChannel[o.id];
         const topicPart = r.topic ? `: "${esc(r.topic)}"` : "";
-        return r.status === "pending" || r.status === "processing"
-          ? `<div class="banner" role="status">${esc(o.label)} ausstehend${topicPart} - angefragt am ${esc(fmtDate(r.createdAt))}.
-               <button type="button" class="link" data-cancel-request="${esc(r.id || "")}">Anfrage zurückziehen</button></div>`
-          : `<div class="banner ok" role="status">${esc(o.label)} erledigt${topicPart}.</div>`;
+        if (r.status === "pending" || r.status === "processing") {
+          return `<div class="banner" role="status">${esc(o.label)} ausstehend${topicPart} - angefragt am ${esc(fmtDate(r.createdAt))}.
+               <button type="button" class="link" data-cancel-request="${esc(r.id || "")}">Anfrage zurückziehen</button></div>`;
+        }
+        // 15.09.2026: 'skipped' und 'failed' sahen vorher aus wie "erledigt" - der Kunde bekam
+        // nie einen Beitrag und erfuhr auch nicht, warum. Jetzt steht der Grund dort im Klartext.
+        if (r.status === "skipped" || r.status === "failed") {
+          return `<div class="banner warn" role="status">${esc(o.label)}${topicPart}: hat nicht geklappt.
+               ${r.note ? `<span class="micro">${esc(r.note)}</span>` : ""}</div>`;
+        }
+        if (r.status === "cancelled") {
+          return `<div class="banner" role="status">${esc(o.label)}${topicPart} - von Ihnen zurückgezogen.</div>`;
+        }
+        return `<div class="banner ok" role="status">${esc(o.label)} erledigt${topicPart}.</div>`;
       });
     return lines.join("");
   }
@@ -2210,6 +2235,30 @@
     </div>`;
   }
 
+  /**
+   * Google-Bewertungsantwort zur Freigabe - Gegenstueck zu commentApprovalCardHtml.
+   *
+   * Beim Redesign "Flow" verlorengegangen (15.09.2026 wiederhergestellt): die Einstellungen zur
+   * Bewertungs-Automatik haben den Umbau ueberlebt, die Freigabe-Oberflaeche dazu nicht. Der
+   * Standardmodus ist "approval" - ohne diese Karte haette also jeder, der die Automatik
+   * einschaltet, Antworten erzeugt, die er nirgends freigeben kann.
+   */
+  function reviewApprovalCardHtml(a) {
+    const sterne = a.starRating >= 1 && a.starRating <= 5 ? "★".repeat(a.starRating) + "☆".repeat(5 - a.starRating) : "";
+    return `<div class="approval-card" data-review-approval-id="${esc(a.id)}">
+      <div class="approval-body">
+        <span class="channel-badge">Google-Bewertung</span>
+        <p class="hint" style="margin:2px 0 10px">${esc(sterne)} ${esc(a.reviewerName || "Jemand")} schrieb: ${a.reviewText ? `„${esc(a.reviewText)}“` : "(nur Sterne, kein Text)"}</p>
+        <label style="display:block;margin-bottom:4px">Ihre Antwort</label>
+        ${withDictate(`<textarea class="review-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>`)}
+        <div class="actions">
+          <button class="btn" data-review-approve="${esc(a.id)}">Freigeben</button>
+          <button class="link" data-review-reject="${esc(a.id)}">Ablehnen</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   const CTA_LABEL = (k) => CTAS[k] || CTAS.link_bio;
   const PLATFORM_LABEL = (p) => prov(p)?.name || p;
 
@@ -2260,14 +2309,18 @@
     if (!box) return;
     const c = S.customer;
     try {
-      const [{ approvals }, comments] = await Promise.all([
+      const [{ approvals }, comments, reviews] = await Promise.all([
         api("GET", "/api/approvals"),
         c && c.commentAutomationEnabled && c.commentAutomationMode !== "auto"
           ? api("GET", "/api/comment-approvals").catch(() => ({ approvals: [] }))
           : Promise.resolve({ approvals: [] }),
+        c && c.googleReviewAutomationEnabled && c.googleReviewMode !== "auto"
+          ? api("GET", "/api/review-approvals").catch(() => ({ approvals: [] }))
+          : Promise.resolve({ approvals: [] }),
       ]);
       S.approvalCount = (approvals || []).length;
       S.pendingCommentCount = (comments.approvals || []).length;
+      S.pendingReviewCount = (reviews.approvals || []).length;
       renderChrome();
 
       const parts = [];
@@ -2276,6 +2329,11 @@
         parts.push(`<div class="section"><div class="section-head"><h2>Kommentar-Antworten</h2></div>
           <p class="lede small">Diese Antworten hat die KI auf echte Fragen unter Ihren Beiträgen vorbereitet.</p>
           ${comments.approvals.map(commentApprovalCardHtml).join("")}</div>`);
+      }
+      if (reviews.approvals && reviews.approvals.length) {
+        parts.push(`<div class="section"><div class="section-head"><h2>Antworten auf Google-Bewertungen</h2></div>
+          <p class="lede small">Diese Antworten stehen später öffentlich unter Ihrem Google-Eintrag - deshalb erst nach Ihrer Freigabe.</p>
+          ${reviews.approvals.map(reviewApprovalCardHtml).join("")}</div>`);
       }
       box.innerHTML = parts.length
         ? parts.join("")
@@ -2970,7 +3028,16 @@
     termin: "Termin buchen - online in zwei Minuten.",
     keiner: "",
   };
-  const FP_SKELETON = '<div class="sk sk-line" style="width:92%"></div><div class="sk sk-line" style="width:78%"></div><div class="sk sk-line" style="width:54%"></div>';
+  /**
+   * Was in der Vorschau steht, solange die Beschreibung fehlt.
+   *
+   * Bis 15.09.2026 standen hier drei .sk-Balken - dieselben, die das Panel sonst beim echten
+   * Laden zeigt, inklusive Schimmer-Animation. Fuer jeden Nutzer heisst das "es laedt", man
+   * wartet also auf etwas, das nie kommt: es wird gar nichts geladen, der Text entsteht rein aus
+   * dem Formular. Besonders unguenstig, weil es der erste Eindruck jedes Interessenten ist.
+   * Jetzt steht dort ohne Animation, was zu tun ist.
+   */
+  const FP_WARTET = '<p class="fp-wartet">Sobald Sie unten beschreiben, worum es in Ihren Beiträgen gehen soll, steht hier Ihr Beispieltext.</p>';
 
   function firstPostPreviewHtml() {
     return `
@@ -2984,7 +3051,7 @@
           </div>
           <div class="fp-body">
             <p class="card-kicker"><span class="pipe-node" data-state="planned" aria-hidden="true"></span><span id="fp-kicker">Noch kein Kanal gewählt</span></p>
-            <div class="fp-caption" id="fp-caption">${FP_SKELETON}</div>
+            <div class="fp-caption" id="fp-caption">${FP_WARTET}</div>
             <p class="fp-tags micro muted" id="fp-tags" hidden></p>
             <p class="fp-style micro muted" id="fp-style"></p>
           </div>
@@ -3082,7 +3149,7 @@
     const caption = document.getElementById("fp-caption");
     const lead = fpFirstSentence(about, 150);
     if (!lead) {
-      caption.innerHTML = FP_SKELETON;
+      caption.innerHTML = FP_WARTET;
     } else {
       const ctaLine = CTA_PREVIEW[cta] || "";
       caption.innerHTML = [emojis ? `✨ ${lead}` : lead, ctaLine].filter(Boolean)
@@ -3910,6 +3977,29 @@
         const box = $("#approvals-list");
         if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
         refreshPendingCommentBadge();
+      } catch (err) {
+        showError(err.message || "Aktion fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
+    const reviewApproveBtn = e.target.closest("[data-review-approve]");
+    const reviewRejectBtn = e.target.closest("[data-review-reject]");
+    if (reviewApproveBtn || reviewRejectBtn) {
+      const btn = reviewApproveBtn || reviewRejectBtn;
+      const id = btn.dataset.reviewApprove || btn.dataset.reviewReject;
+      const action = reviewApproveBtn ? "approve" : "reject";
+      if (action === "reject" && !(await showConfirm({ title: "Antwort ablehnen?", message: "Sie wird dann nicht bei Google veröffentlicht.", confirmLabel: "Ablehnen" }))) return;
+      const card = btn.closest(".approval-card");
+      const body = action === "approve" ? { reply: card?.querySelector(".review-reply-text")?.value ?? "" } : undefined;
+      btn.classList.add("busy");
+      try {
+        await api("POST", `/api/review-approvals/${id}/${action}`, body);
+        card?.remove();
+        const box = $("#approvals-list");
+        if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+        S.pendingReviewCount = Math.max(0, (S.pendingReviewCount || 1) - 1);
+        renderChrome();
       } catch (err) {
         showError(err.message || "Aktion fehlgeschlagen.");
         btn.classList.remove("busy");

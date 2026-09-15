@@ -23,7 +23,7 @@ import { startTrialEndingEmailSchedule } from "./panel/trial-emails.js";
 import { startDailyAnalyticsSnapshotSchedule, startWeeklyAnalyticsSummarySchedule } from "./panel/analytics.js";
 import { startCommentAutomationSchedule } from "./panel/comments.js";
 import { startReviewAutomationSchedule } from "./panel/reviews.js";
-import { startVideoSchedule } from "./panel/videos.js";
+import { startPostRequestExpiry, startVideoSchedule } from "./panel/videos.js";
 import { startStandstillWatch } from "./panel/standstill-watch.js";
 import {
   assertChannelEnabled,
@@ -1171,6 +1171,8 @@ async function main(): Promise<void> {
   // Video-Diashow (Reels): eigener Cron mit eigenem Wochenplan (siehe panel/videos.ts). Rendern
   // laeuft ueber eine Warteschlange, damit mehrere Kunden nie gleichzeitig die CPU belegen.
   startVideoSchedule();
+  // Netz unter dem Selbstabschluss: haengende "Jetzt posten"-Anfragen laufen nach 2 Stunden ab.
+  startPostRequestExpiry();
   // Stillstands-Wache: meldet an Paul, wenn fuer einen Kunden trotz Zeitplan lange nichts
   // veroeffentlicht wurde. Stille ist der gefaehrlichste Fehlerzustand dieses Produkts.
   startStandstillWatch();

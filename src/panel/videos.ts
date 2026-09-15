@@ -29,7 +29,9 @@ import {
   listApprovedVideoPosts,
   markPendingApprovalPublished,
   logPost,
+  expireStalePostRequests,
   markPostRequestDone,
+  markPostRequestSkipped,
   pickPillarForToday,
   resolveImageBranding,
   resolveInstagramCredentials,
@@ -39,6 +41,8 @@ import {
 } from "./credentials.js";
 import { isVideoDue } from "./schedule.js";
 import { logUsageCost } from "./analytics.js";
+import { sendMailBestEffort } from "./mailer.js";
+import { postRequestExpiredEmail } from "./emails.js";
 import { generateVideoScript } from "../anthropic.js";
 import { generateBackgroundImage } from "../fal.js";
 import { publishReelToInstagram } from "../instagram.js";
@@ -375,6 +379,28 @@ function videoCandidates(): CustomerRow[] {
     .all() as CustomerRow[];
 }
 
+/**
+ * Uebersetzt einen internen Skip-Grund in einen Satz, den der Kunde lesen soll.
+ *
+ * Bewusst eine feste Zuordnung statt der Rohmeldung: "ffmpeg/ffprobe sind auf diesem Server nicht
+ * verfuegbar" nennt ein Programm auf unserem Server - das gehoert nicht nach aussen, sagt dem
+ * Kunden nichts und wirkt wie ein Defekt bei ihm. Unbekannte Gruende bekommen einen neutralen
+ * Satz; der genaue Wortlaut steht weiterhin im Log.
+ */
+function kundengrund(intern: string | undefined): string {
+  const g = String(intern ?? "").toLowerCase();
+  if (g.includes("instagram nicht verbunden")) {
+    return "Für ein Video muss Instagram verbunden sein. Verbinden Sie Ihr Konto unter „Instagram verbinden“ und fordern Sie den Beitrag danach erneut an.";
+  }
+  if (g.includes("ffmpeg") || g.includes("ffprobe")) {
+    return "Die Videoerstellung war vorübergehend nicht verfügbar. Bitte fordern Sie den Beitrag später noch einmal an - wir haben den Fehler protokolliert.";
+  }
+  if (g.includes("freigabe bereit")) {
+    return "Für diesen Kanal liegt heute schon ein Beitrag zur Freigabe bereit. Geben Sie ihn frei oder lehnen Sie ihn ab, dann können Sie einen neuen anfordern.";
+  }
+  return "Aus dieser Anfrage ist kein Beitrag geworden. Bitte versuchen Sie es noch einmal - wenn es wieder nicht klappt, schreiben Sie uns.";
+}
+
 export async function runVideoPass(): Promise<VideoRunSummary> {
   const startedAt = nowIso();
   const summary: VideoRunSummary = {
@@ -414,7 +440,12 @@ export async function runVideoPass(): Promise<VideoRunSummary> {
     if (!request && customer.approval_mode && hasPendingOrApprovedToday(customer.id, "ig_feed")) continue;
 
       const produced = await produceVideoPost(customer, request?.topic ?? null, Boolean(request));
-      if (request) markPostRequestDone(request.id);
+      if (request) {
+        // 15.09.2026: eine Anfrage, aus der nichts geworden ist, wird nicht mehr stillschweigend
+        // als erledigt abgehakt - der Kunde bekommt den Grund im Klartext zu sehen.
+        if (produced.status === "skipped") markPostRequestSkipped(request.id, kundengrund(produced.reason));
+        else markPostRequestDone(request.id);
+      }
       if (produced.status === "published") summary.produced++;
       else if (produced.status === "pending_approval") summary.pendingApproval++;
       else {
@@ -436,6 +467,35 @@ export async function runVideoPass(): Promise<VideoRunSummary> {
 
   summary.finishedAt = nowIso();
   return summary;
+}
+
+/**
+ * Zeitablauf-Waechter fuer haengende "Jetzt posten"-Anfragen (15.09.2026, Punkt 8).
+ *
+ * Laeuft alle 20 Minuten - oft genug, dass die Zwei-Stunden-Grenze nicht zur Drei-Stunden-Grenze
+ * wird, selten genug, dass es nichts kostet (eine indizierte Abfrage, sonst nichts).
+ */
+/** Gleiche Adresse wie die Stillstands-Warnung - eine Stelle, an der der Betreiber nachsieht. */
+const betreiberMail = (): string => process.env.PANEL_ALERT_EMAIL ?? "office@pipebot.at";
+
+export function startPostRequestExpiry(intervalMinutes = 20): NodeJS.Timeout {
+  const run = () => {
+    try {
+      const abgelaufen = expireStalePostRequests();
+      if (!abgelaufen.length) return;
+      console.warn(`[panel] ${abgelaufen.length} "Jetzt posten"-Anfrage(n) nach 2 Stunden abgelaufen:`, abgelaufen.map((r) => `${r.customerId}/${r.channel}`).join(", "));
+      const eintraege = abgelaufen.map((r) => ({
+        company: (db.prepare("SELECT company FROM customers WHERE id = ?").get(r.customerId) as { company?: string } | undefined)?.company ?? r.customerId,
+        channel: r.channel ?? "unbekannt",
+        createdAt: r.createdAt,
+      }));
+      sendMailBestEffort(postRequestExpiredEmail({ to: betreiberMail(), eintraege }));
+    } catch (err) {
+      console.error("[panel] Zeitablauf-Waechter fehlgeschlagen:", err instanceof Error ? err.message : err);
+    }
+  };
+  setTimeout(run, 90_000);
+  return setInterval(run, intervalMinutes * 60_000);
 }
 
 export function startVideoSchedule(intervalMinutes = VIDEO_CRON_INTERVAL_MINUTES): NodeJS.Timeout {

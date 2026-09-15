@@ -92,7 +92,9 @@ for (const m of panelCss.matchAll(/\.([A-Za-z][\w-]*)/g)) cssClasses.add(m[1]);
 const ignored = new Set([
   "vh", "opt", "num", "small", "micro", "muted", "prose", "err", "hint", "busy", "pending",
   "cur", "n", "todayStr", "previewSelectedDate", "is-", "guide",
-  "comment-reply-text", "fp-body", "post-now-channels", "post-now-format", "sheet-body",
+  // Reine Fanghaken fuer JS (querySelector), nie zum Gestalten gedacht - das Aussehen kommt
+  // vom umgebenden .approval-body bzw. vom textarea-Grundstil.
+  "comment-reply-text", "review-reply-text", "fp-body", "post-now-channels", "post-now-format", "sheet-body",
   "turnstile-load-error", "overlay", "close",
 ]);
 const unstyled = [...classesInMarkup].filter((c) => !cssClasses.has(c) && !ignored.has(c)).sort();
@@ -174,6 +176,58 @@ if (!serverFormate.size || !panelFormate.size) {
   } else {
     pass(`alle ${serverFormate.size} vom Server akzeptierten Beitragsformate sind im Panel wählbar`);
   }
+}
+
+/* ---------- 6. Server-Routen, die das Panel nie aufruft ----------
+ *
+ * Die Gegenrichtung zu Pruefung 3. Dort geht es um Panel-Aufrufe ohne Route (kaputt, faellt
+ * sofort auf); hier um Routen ohne Panel-Aufruf - eine fertig gebaute Funktion, die im Panel
+ * nicht erreichbar ist und deshalb NIEMANDEM auffaellt.
+ *
+ * Anlass: /api/review-approvals. Die Freigabe-Oberflaeche fuer Antworten auf Google-Bewertungen
+ * ging beim Redesign "Flow" verloren, waehrend die zugehoerigen Einstellungen ueberlebten. Der
+ * Standardmodus ist "approval" - wer die Automatik einschaltet, haette also Antworten erzeugt,
+ * die er nirgends freigeben kann. Zweiter Fall desselben Musters nach der Video-Diashow, damit
+ * ist "das war der Einzelfall" widerlegt und eine Dauerpruefung faellig.
+ */
+/** Umgekehrte Richtung von matchesRoute: ruft irgendein Panel-Aufruf DIESE Route an? */
+const wirdAufgerufen = (route) => {
+  const [rm, rp] = route.split(" ");
+  const rsegs = rp.split("/");
+  for (const call of calls) {
+    const [method, path] = call.split(" ");
+    if (method !== rm) continue;
+    const segs = path.split("/");
+    if (segs.length !== rsegs.length) continue;
+    if (segs.every((s, i) => s === rsegs[i] || s === ":x" || rsegs[i] === ":x")) return true;
+  }
+  return false;
+};
+// Nur die Routen des KUNDEN-Routers pruefen. Die Admin-Seite ist eine eigene Datei mit eigener
+// Pruefung (Abschnitt 4) und ruft ihre Routen selbst auf.
+const panelRoutes = new Set();
+for (const m of routerTs.matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
+  panelRoutes.add(`${m[1].toUpperCase()} ${normalize(m[2]).replace(/:[\w]+/g, ":x")}`);
+}
+const nurServer = [...panelRoutes]
+  .filter((r) => {
+    const pfad = r.split(" ")[1];
+    // Nicht jede Route gehoert ins Panel: OAuth-Rueckwege, Seitenauslieferung und Webhooks
+    // steuert der Browser direkt an, nicht per api(). /api/health und /api/providers holt der
+    // Startcode ausserhalb von api().
+    if (!pfad.startsWith("/api/")) return false;
+    if (/^\/api\/(health|providers)$/.test(pfad)) return false;
+    if (wirdAufgerufen(r)) return false;
+    // Letzte Chance: manche Aufrufe bauen die Adresse dynamisch zusammen oder haengen sie an ein
+    // src-Attribut. Taucht der Pfad irgendwo woertlich im Panel auf, gilt er als erreichbar.
+    const woertlich = pfad.replace(/\/:x/g, "");
+    return !panelJs.includes(woertlich);
+  })
+  .sort();
+if (nurServer.length) {
+  fail(`${nurServer.length} Server-Route(n) ruft das Panel nirgends auf - fertig gebaut, aber unerreichbar?`, nurServer);
+} else {
+  pass("jede /api-Route des Servers wird vom Panel auch aufgerufen");
 }
 
 console.log(problems ? `\n${problems} Bruchstelle(n)` : "\nkeine Bruchstellen gefunden");

@@ -193,18 +193,39 @@ async function renderTextCard(
   // Reels-Sicherheitszone: oben Profilzeile, unten Beschreibung/Buttons - Text bleibt in der Mitte.
   const maxTextWidth = VIDEO_WIDTH * 0.84;
   const maxTextHeight = VIDEO_HEIGHT * 0.44;
-  const maxFontSize = Math.round(VIDEO_HEIGHT * (kind === "point" ? 0.062 : 0.072));
-  const minFontSize = Math.round(VIDEO_HEIGHT * 0.030);
 
-  let fontSize = maxFontSize;
-  let lines = wrapHeadline(text, fontSize, maxTextWidth, font.glyphWidthFactor);
-  for (;;) {
-    const lineHeight = fontSize * 1.2;
-    const widest = Math.max(...lines.map((l) => estimateTextWidth(l, fontSize, font.glyphWidthFactor)));
-    const fits = widest <= maxTextWidth && lineHeight * lines.length <= maxTextHeight && lines.length <= 4;
-    if (fits || fontSize <= minFontSize) break;
-    fontSize = Math.max(minFontSize, fontSize - Math.max(1, Math.round(fontSize * 0.07)));
-    lines = wrapHeadline(text, fontSize, maxTextWidth, font.glyphWidthFactor);
+  /* 15.09.2026: dieselbe Umstellung wie bei den Beitragsbildern (watermark.ts).
+   *
+   * Vorher: bei der groesstmoeglichen Schrift anfangen und verkleinern, bis es passt. Dadurch war
+   * die Schriftgroesse eine Funktion der Textlaenge - innerhalb EINES Videos wurde die Hook gross
+   * und ein langer Punkt klein gesetzt, obwohl beide gleich wichtig sind. Jetzt eine feste
+   * Zielgroesse je Kartenart, ausgedrueckt in Zeichen pro Zeile, und Verkleinern nur noch als eng
+   * begrenzter Notfall.
+   *
+   * Die Zielgroessen bilden die bisherigen Maximalwerte ab (Hook/CTA 0.072, Punkt 0.062 der
+   * Bildhoehe) - ein Video sieht also aus wie eines mit durchweg kurzen Texten, nicht wie eines
+   * mit durchweg langen. Hook und CTA duerfen weiterhin groesser sein als die Punkte dazwischen:
+   * das ist gewollte Hierarchie, keine Zufallsschwankung.
+   *
+   * Worttrennung ist hier eingeschaltet. Sie war in video.ts nie bewusst aus - den Schalter gab
+   * es bis heute gar nicht; er entstand beim Bildgroessen-Fix und stand nur deshalb auf "aus",
+   * damit sich am Video nichts ungefragt aendert. Inhaltlich gilt hier dasselbe: ein
+   * "Social-Media-Posts" zwingt sonst die ganze Karte herunter. Getrennt wird zuerst an
+   * vorhandenen Bindestrichen, das liest sich auch in Bewegung sauber.
+   */
+  const zielZeichenProZeile = kind === "point" ? 17 : 15;
+  const zielFontSize = Math.min(
+    Math.round(VIDEO_HEIGHT * (kind === "point" ? 0.062 : 0.072)),
+    Math.round(maxTextWidth / (zielZeichenProZeile * font.glyphWidthFactor)),
+  );
+  const minFontSize = Math.max(1, Math.round(zielFontSize * 0.85));
+  const MAX_ZEILEN = 4;
+
+  let fontSize = zielFontSize;
+  let lines = wrapHeadline(text, fontSize, maxTextWidth, font.glyphWidthFactor, true);
+  while (fontSize > minFontSize && (lines.length > MAX_ZEILEN || fontSize * 1.2 * lines.length > maxTextHeight)) {
+    fontSize = Math.max(minFontSize, fontSize - Math.max(1, Math.round(fontSize * 0.04)));
+    lines = wrapHeadline(text, fontSize, maxTextWidth, font.glyphWidthFactor, true);
   }
 
   const lineHeight = fontSize * 1.2;

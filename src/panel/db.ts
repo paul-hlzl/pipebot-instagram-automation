@@ -584,6 +584,10 @@ if (!(db.prepare(`PRAGMA table_info(analytics_account_snapshots)`).all() as { na
     CREATE INDEX IF NOT EXISTS analytics_account_snapshots_customer_date ON analytics_account_snapshots(customer_id, channel, snapshot_date DESC);
   `);
 }
+// 15.09.2026: Klartext-Grund, warum eine "Jetzt posten"-Anfrage nicht zu einem Beitrag gefuehrt
+// hat - fuer den Kunden lesbar, nicht als technischer Code. Vorher wurde eine gescheiterte
+// Anfrage einfach als erledigt markiert und im Panel passierte sichtbar nichts.
+migrateColumns("post_requests", [["note", "TEXT"]]);
 migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
 migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
 
@@ -795,6 +799,7 @@ export interface PostRequestRow {
   created_at: string;
   updated_at: string;
   format: string;
+  note: string | null;
 }
 
 export interface PlannedPostRow {

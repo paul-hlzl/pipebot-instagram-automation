@@ -242,3 +242,23 @@ export function reviewReplyRejectedEmail(input: {
       `Ihr Pipeflow-Team\nPipeline AI Solutions`,
   };
 }
+
+/**
+ * Betreiber-Mail, wenn eine "Jetzt posten"-Anfrage nach zwei Stunden ohne Ergebnis abgelaufen ist
+ * (15.09.2026). Geht an den Betreiber, nicht an den Kunden: der sieht den Grund im Panel an der
+ * Anfrage. Hier geht es darum, dass jemand nachsieht, warum nichts zurueckkam.
+ */
+export function postRequestExpiredEmail(input: { to: string; eintraege: { company: string; channel: string; createdAt: string }[] }): MailInput {
+  const zeilen = input.eintraege.map((e) => `- ${e.company}, Kanal ${e.channel}, angefragt ${e.createdAt}`).join("\n");
+  return {
+    to: input.to,
+    subject: `${input.eintraege.length} "Jetzt posten"-Anfrage(n) nach 2 Stunden abgelaufen - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `die folgenden Anfragen sind nach zwei Stunden ohne Ergebnis abgelaufen und wurden geschlossen:\n\n${zeilen}\n\n` +
+      `Sie werden NICHT erneut ausgegeben - genau das hat am 15.09. zu einem vierfach veröffentlichten Beitrag geführt. ` +
+      `Der Kunde sieht im Panel an der Anfrage, dass sie nicht geklappt hat, und kann sie neu stellen.\n\n` +
+      `Bitte im Log nachsehen, warum nichts zurückkam.\n\n` +
+      `Pipeflow`,
+  };
+}

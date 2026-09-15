@@ -810,10 +810,13 @@ export interface PostRequest {
   /** Panel v14: 'single' (default) | 'carousel' | 'video_slideshow' - only meaningful for
    *  channel='ig_feed', see Session-Bericht Teil C. Ignore for ig_story/linkedin requests. */
   format: string;
+  /** Klartext fuer den Kunden, warum aus dieser Anfrage nichts geworden ist (Status 'skipped'
+   *  oder 'failed'). Null im Normalfall. Siehe markPostRequestSkipped. */
+  note: string | null;
 }
 
 function toPostRequest(r: PostRequestRow): PostRequest {
-  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at, format: r.format };
+  return { id: r.id, customerId: r.customer_id, topic: r.topic, channel: r.channel, status: r.status, createdAt: r.created_at, updatedAt: r.updated_at, format: r.format, note: r.note ?? null };
 }
 
 /** Panel v8: per CHANNEL, not per customer overall - a customer may now have up to one open
@@ -868,7 +871,7 @@ export function createPostRequest(customerId: string, topic: string | null, chan
   db.prepare(
     `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
   ).run(id, customerId, topic || null, channel, now, now, format);
-  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now, format };
+  return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now, format, note: null };
 }
 
 /** Most recent request for one customer (any status), for the panel's own status display. Null if they never asked. */
@@ -991,6 +994,52 @@ export function cancelPostRequest(customerId: string, id?: string): number {
 export function markPostRequestDone(id: string): boolean {
   const result = db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
   return result.changes > 0;
+}
+
+/**
+ * Schliesst eine Anfrage ab, aus der KEIN Beitrag geworden ist, und haelt den Grund im Klartext
+ * fest (15.09.2026).
+ *
+ * Vorher landete auch so eine Anfrage als 'done' in der Liste: der Kunde sah "erledigt", bekam
+ * aber nie einen Beitrag und erfuhr nie, warum. Eigener Status 'skipped', damit das Panel es
+ * anders darstellen kann; wie 'done' blockiert er den Kanal nicht weiter.
+ *
+ * `grund` ist fuer Kundenaugen gedacht - keine Dateinamen, keine Programmnamen, keine
+ * Fehlercodes. Die Uebersetzung technischer Gruende passiert beim Aufrufer.
+ */
+export function markPostRequestSkipped(id: string, grund: string): boolean {
+  const result = db
+    .prepare("UPDATE post_requests SET status = 'skipped', note = ?, updated_at = ? WHERE id = ?")
+    .run(grund.slice(0, 300), nowIso(), id);
+  return result.changes > 0;
+}
+
+/**
+ * Zeitablauf fuer haengende Anfragen (15.09.2026).
+ *
+ * Der Hauptmechanismus bleibt der Selbstabschluss: sobald ein Beitrag veroeffentlicht ist,
+ * schliesst logPost die zugehoerige Anfrage. Das hier ist nur das Netz darunter - fuer den Fall,
+ * dass ueberhaupt nichts zurueckkommt. Zwei Stunden, nicht drei: die bisherige
+ * Drei-Stunden-Wiedervorlage hat eine noch laufende Anfrage ein zweites Mal ausgegeben und damit
+ * am 15.09. denselben Beitrag vierfach veroeffentlicht. Abgelaufene Anfragen werden deshalb
+ * NICHT erneut ausgegeben, sondern endgueltig geschlossen.
+ */
+export const POST_REQUEST_TIMEOUT_MS = 2 * 3_600_000;
+
+export function expireStalePostRequests(): PostRequest[] {
+  const grenze = new Date(Date.now() - POST_REQUEST_TIMEOUT_MS).toISOString();
+  const offen = db
+    .prepare("SELECT * FROM post_requests WHERE status IN ('pending','processing') AND created_at < ?")
+    .all(grenze) as PostRequestRow[];
+  if (!offen.length) return [];
+  const jetzt = nowIso();
+  const stmt = db.prepare("UPDATE post_requests SET status = 'failed', note = ?, updated_at = ? WHERE id = ? AND status IN ('pending','processing')");
+  const abgelaufen: PostRequest[] = [];
+  for (const r of offen) {
+    const grund = "Wir konnten diese Anfrage innerhalb von zwei Stunden nicht ausführen. Bitte versuchen Sie es noch einmal - wenn es wieder nicht klappt, schreiben Sie uns.";
+    if (stmt.run(grund, jetzt, r.id).changes > 0) abgelaufen.push(toPostRequest({ ...r, status: "failed", note: grund, updated_at: jetzt }));
+  }
+  return abgelaufen;
 }
 
 export interface PendingApproval {

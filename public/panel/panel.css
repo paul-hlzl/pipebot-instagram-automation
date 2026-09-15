@@ -286,8 +286,11 @@ a { color: inherit; }
   display: block; font-size: var(--t-small); font-weight: 500; margin-bottom: var(--s2);
 }
 .field .opt { color: var(--stone); font-weight: 400; }
+/* input[type=search] gehoert hier dazu - es fehlte, und das Suchfeld der Einstellungen sah
+   deshalb als einziges Feld im Panel nach Browser-Standard aus (duenner grauer Rahmen, keine
+   Rundung, zu klein). */
 input[type=text], input[type=email], input[type=url], input[type=time], input[type=date],
-input[type=password], input[type=number], textarea, select {
+input[type=password], input[type=number], input[type=search], textarea, select {
   width: 100%; font: inherit; font-size: var(--t-body); /* nie <16px: sonst zoomt iOS */
   color: var(--ink); background: var(--paper);
   border: 1px solid var(--line-strong); border-radius: var(--r1);
@@ -497,6 +500,8 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 }
 @keyframes sk { to { transform: translateX(100%); } }
 .sk-line { height: 12px; margin-bottom: var(--s2); }
+/* Wartezustand der Erstbeitrags-Vorschau: bewusst ruhig, keine Animation - siehe FP_WARTET. */
+.fp-wartet { margin: 0; color: var(--stone); font-size: var(--t-s); line-height: 1.5; }
 .sk-tile { aspect-ratio: 1; border-radius: var(--r2); }
 
 .notice {
@@ -737,6 +742,10 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .banner { border: 1px solid var(--rule); border-left: 3px solid var(--ink); border-radius: var(--r1); padding: var(--s3) var(--s4); font-size: var(--t-small); margin-bottom: var(--s4); }
 .banner.ok { border-left-color: var(--go); }
 .banner.bad { border-left-color: var(--stop); }
+/* Anfrage hat nicht geklappt: Warnfarbe statt Rot - es ist kein Defekt, sondern etwas, das der
+   Kunde meist selbst beheben kann (siehe markPostRequestSkipped). */
+.banner.warn { border-left-color: var(--warn-line); background: var(--warn-bg); }
+.banner .micro { display: block; margin-top: var(--s2); color: var(--stone); }
 .needs-action { border: 1px solid var(--warn-line); background: var(--warn-bg); border-radius: var(--r1); padding: var(--s4); font-size: var(--t-small); margin-bottom: var(--s5); }
 .needs-action strong { display: block; margin-bottom: var(--s1); }
 
@@ -966,7 +975,7 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
    Einstellungen: mobil Gruppenliste -> Unterseite, ab 1024px alles mit Sprungliste
    =========================================================================== */
 .set-list { display: none; }
-.set-back { display: none; margin-bottom: var(--s5); }
+.set-back { display: none; margin-bottom: 0; }
 
 @media (max-width: 1023px) {
   /* Gruppenliste sichtbar, solange keine Gruppe gewählt ist */
@@ -1148,8 +1157,25 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
    jede Gruppe stehen und die Suche tat sichtbar gar nichts (gefunden vom Bruchstellen-Audit). */
 .is-filtered { display: none !important; }
 
-.set-search { margin: 0 0 var(--s6); }
-.set-search input { width: 100%; max-width: 420px; }
+/* Das Suchfeld ist der Einstieg in eine Seite mit sieben Gruppen - es darf entsprechend
+   praesent sein. Gleiche Abstaende nach oben (zu "Zurueck zu allen Einstellungen") wie nach
+   unten (zur ersten Gruppe), damit es nicht an einem der beiden klebt. */
+.set-search { position: relative; margin-block: var(--s5); max-width: 520px; }
+.set-search input[type=search] {
+  width: 100%; min-height: 52px;
+  padding-left: calc(var(--s4) + 20px + var(--s3));
+  /* --r1 wie jedes andere Eingabefeld: praesenter soll es ueber Groesse und Lupe wirken,
+     nicht ueber eine abweichende Form. */
+  border-radius: var(--r1);
+  background-color: var(--paper);
+  /* Lupe im Raster-Stil der uebrigen Symbole (Quadrate, kein fremdes Icon-Set). */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 11' shape-rendering='crispEdges'%3E%3Crect x='0' y='0' width='8' height='8' fill='none' stroke='%236B6B66' stroke-width='1.6'/%3E%3Crect x='8' y='8' width='1.5' height='1.5' fill='%236B6B66'/%3E%3Crect x='9.5' y='9.5' width='1.5' height='1.5' fill='%236B6B66'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: var(--s4) center;
+  background-size: 18px 18px;
+}
+.set-search input[type=search]::-webkit-search-decoration,
+.set-search input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 /* --- Analytics am Desktop: die Breite wirklich nutzen --- */
 .an-charts { display: grid; gap: var(--s6); }
@@ -1245,3 +1271,62 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
 /* Aufklapper-Zeilen (details/summary) sind Bedienelemente - mindestens 28px hoch. */
 summary { min-height: 28px; display: list-item; }
 .recover-access > summary, .pp-edit > summary { padding: var(--s1) 0; }
+
+/* ===========================================================================
+   Verbinden-Seite (Instagram, LinkedIn - und jede kuenftige Plattform)
+
+   EINE Vorlage fuer alle Anbieter (providerHtml in panel.js), deshalb steht der
+   Rhythmus hier einmal und nicht je Seite. Jedes Element bringt seinen Abstand
+   selbst mit - nie ueber den Nachbarn, das war schon bei den Einstellungsgruppen
+   die Fehlerquelle.
+
+   Vorher gab es fuer diese Seite ueberhaupt kein CSS: die <ol> wurde vom Browser
+   nummeriert UND gab ihre eigene Zahl aus ("1. 1"), die Schritte hatten keinen
+   Abstand, "Haeufige Fragen" klebte am Text darueber, und der Statuskasten erbte
+   versehentlich .status aus der Uebersicht (flex-direction: column - daher die
+   gestauchte Optik). Der Kasten heisst deshalb jetzt .conn-status.
+   =========================================================================== */
+.provider-page > h2 { margin-top: var(--s7); margin-bottom: var(--s4); }
+.provider-page > .lede { margin-bottom: var(--s4); }
+.provider-page > .notice { margin-block: var(--s4); }
+.provider-page > .actions { margin-top: var(--s5); }
+.provider-page > .fine { margin-top: var(--s4); }
+
+.conn-status {
+  display: flex; align-items: center; gap: var(--s3);
+  border: 1px solid var(--rule); border-radius: var(--r2);
+  padding: var(--s3) var(--s4); margin-block: var(--s5);
+}
+.conn-status.warn { border-color: var(--warn-line); background: var(--warn-bg); }
+.conn-status .who { flex: 1 1 auto; min-width: 0; }
+.conn-status .who strong { display: block; }
+
+/* list-style: none - die Nummer kommt aus dem eigenen <span class="n">, damit sie
+   neben (nicht ueber) dem mehrzeiligen Text sitzt und mitgestaltet werden kann. */
+ol.guide { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s5); }
+ol.guide > li { display: flex; gap: var(--s4); align-items: flex-start; }
+ol.guide .n {
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid var(--rule); display: grid; place-items: center;
+  font-size: var(--t-micro); color: var(--stone); font-variant-numeric: tabular-nums;
+}
+ol.guide h3 { font-size: var(--t-body); margin-bottom: var(--s1); }
+ol.guide p { color: var(--stone); font-size: var(--t-small); max-width: 60ch; margin-bottom: var(--s2); }
+ol.guide a { font-size: var(--t-small); }
+
+.faq { border-top: 1px solid var(--rule); }
+.faq details { border-bottom: 1px solid var(--rule); }
+.faq summary {
+  cursor: pointer; padding: var(--s4) var(--s5) var(--s4) 0; position: relative;
+  list-style: none; font-size: var(--t-body);
+}
+.faq summary::-webkit-details-marker { display: none; }
+/* Eigener Pfeil im Raster-Stil des Panels statt des Browser-Dreiecks. */
+.faq summary::after {
+  content: ""; position: absolute; right: var(--s2); top: 50%;
+  width: 8px; height: 8px; margin-top: -5px;
+  border-right: 2px solid var(--stone); border-bottom: 2px solid var(--stone);
+  transform: rotate(45deg); transition: transform .15s ease;
+}
+.faq details[open] summary::after { transform: rotate(-135deg); margin-top: -2px; }
+.faq details > p { color: var(--stone); font-size: var(--t-small); max-width: 60ch; margin: 0 0 var(--s4); }
