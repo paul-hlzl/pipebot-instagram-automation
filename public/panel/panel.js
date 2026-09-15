@@ -787,6 +787,11 @@
       tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
       igFeedEnabled: true, igStoryEnabled: true, linkedinEnabled: true, hashtagPreference: "wenige", emojisEnabled: true, language: "de",
       contentPillars: [],
+      // Bugfix (15.09.2026): eine abgelehnte Anmeldung rendert das Formular neu, und vorher stand
+      // hier nur dieses leere Standardobjekt - der Interessent fand seine gesamte Eingabe
+      // geloescht vor und musste alles noch einmal tippen. Mit aktivem Turnstile passiert genau
+      // das oefter, weil eine fehlgeschlagene Sicherheitspruefung ein normaler Fall ist.
+      ...(S.signupDraft || {}),
     };
     S.pillarsDraft = (c.contentPillars || []).map((p) => ({ title: p.title || "", description: p.description || "", weight: p.weight || 1 }));
     const edit = !!S.customer;
@@ -1504,6 +1509,18 @@
     loadTurnstileScript(() => {
       const freshContainer = document.getElementById("turnstile-widget");
       if (!freshContainer || freshContainer === turnstileRenderedContainer) return;
+      // Bugfix (15.09.2026, beim Scharfschalten mit echten Keys gefunden): Cloudflare fuehrt
+      // intern Buch ueber jedes gerenderte Widget. Wurde der alte Platzhalter durch render(true)
+      // aus dem DOM geworfen, ohne dass wir das Widget abmelden, meldet die Bibliothek
+      // "Cannot find Widget <id>, consider using turnstile.remove()" - und der folgende
+      // render()-Aufruf legt STILL gar nichts an. Der neue Platzhalter bleibt leer, es entsteht
+      // nie wieder ein Token, und der Kunde kann nach einer abgelehnten Anmeldung nicht mehr
+      // absenden. Das ist derselbe Soft-Lock wie am 13.09., nur eine Ebene tiefer: der Fix von
+      // damals hat unseren eigenen Guard repariert, nicht Cloudflares Buchhaltung.
+      if (turnstileWidgetId !== null && turnstileRenderedContainer?.isConnected && typeof window.turnstile.remove === "function") {
+        try { window.turnstile.remove(turnstileWidgetId); } catch (e) { /* schon weg - unerheblich */ }
+      }
+      turnstileWidgetId = null;
       turnstileWidgetId = window.turnstile.render(freshContainer, { sitekey: S.turnstileSiteKey });
       turnstileRenderedContainer = freshContainer;
     });
@@ -2716,7 +2733,16 @@
     const rail = onboarding ? railHtml() : "";
 
     if (S.step === "dashboard") { stage.innerHTML = dashboardHtml(); loadDashboardExtras(); }
-    else if (S.step === "company") { stage.innerHTML = rail + companyHtml(); updateLivePreview(); updateFirstPostPreview(); }
+    else if (S.step === "company") {
+      stage.innerHTML = rail + companyHtml();
+      updateLivePreview();
+      updateFirstPostPreview();
+      // Hier und nur hier ist der Platzhalter garantiert schon im DOM - egal, ob das Formular
+      // erstmalig, nach einem Seitenwechsel oder nach einer abgelehnten Anmeldung gerendert
+      // wurde. Der Guard in renderTurnstileIfNeeded macht wiederholte Aufrufe folgenlos; nur auf
+      // Seite 2, weil der Platzhalter auf Seite 1 in einem versteckten Block liegt.
+      if (S.formPart === 2) renderTurnstileIfNeeded();
+    }
     else if (S.step === "settings") stage.innerHTML = settingsHtml();
     else if (S.step === "guide") stage.innerHTML = guideHtml();
     else if (S.step === "done") { stage.innerHTML = rail + doneHtml(); }
@@ -4086,13 +4112,15 @@
       btn?.classList.remove("busy");
       if (err.fields) return showFieldErrors(form, err.fields);
       S.banner = { kind: "bad", text: err.message };
+      // Eingaben ueber das Neu-Rendern retten (siehe companyHtml). Nur beim Signup noetig - beim
+      // Bearbeiten kommen die Werte ohnehin aus S.customer zurueck.
+      if (!edit) S.signupDraft = { ...body };
       render(true);
-      // Bugfix (Security/UX-Review 2026-09-13): render(true) just rebuilt the whole form,
-      // including a brand-new empty #turnstile-widget div (see renderTurnstileIfNeeded's
-      // comment) - without this, a rejected signup (Turnstile failure, banned word, rate limit,
-      // anything) permanently lost the CAPTCHA widget and could never be retried without a full
-      // manual page reload. No-op when not on the signup form's page 2 (no container to fill).
-      if (!edit) renderTurnstileIfNeeded();
+      // Das Nachrendern des Turnstile-Widgets sitzt seit 15.09.2026 in renderNow() statt hier:
+      // render() laeuft ueber document.startViewTransition und tauscht das DOM deshalb ERST im
+      // Callback aus. Ein Aufruf an dieser Stelle sah noch den alten Platzhalter, hielt ihn fuer
+      // bereits gerendert und tat nichts - danach stand der neue, leere Platzhalter fuer immer
+      // da. Genau der Soft-Lock, den der Fix vom 13.09. beheben sollte.
     }
   });
 

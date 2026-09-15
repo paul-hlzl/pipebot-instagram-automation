@@ -982,7 +982,7 @@ export function createPanelRouter(): Router {
     // Bot-Anfragen frueh ab, bevor ueberhaupt Validierung/DB-Schreiben passiert. Ohne
     // TURNSTILE_SECRET_KEY komplett uebersprungen (Feature aus, siehe turnstile.ts).
     if (turnstileConfigured()) {
-      const captchaOk = await verifyTurnstileToken(str(req.body?.["cf-turnstile-response"], 3000), clientIp(req));
+      const captchaOk = await verifyTurnstileToken(str(req.body?.["cf-turnstile-response"], 3000), clientIp(req), hostOf(req));
       if (!captchaOk) {
         res.status(400).json({ error: "Sicherheitsprüfung fehlgeschlagen. Bitte laden Sie die Seite neu und versuchen Sie es erneut." });
         return;

@@ -24,13 +24,32 @@ export function turnstileConfigured(): boolean {
 }
 
 /**
+ * Hostnamen, auf denen ein Token geloest worden sein darf. Standard sind die Adressen, unter
+ * denen das Panel selbst ein Signup-Formular ausliefert; ueber TURNSTILE_EXPECTED_HOSTNAMES
+ * (kommagetrennt) anpassbar, ohne neuen Build.
+ */
+function expectedHostnames(): string[] {
+  const roh = process.env.TURNSTILE_EXPECTED_HOSTNAMES?.trim();
+  if (roh) return roh.split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return ["app.pipeflow.at"];
+}
+
+/**
  * true nur bei einer tatsächlich von Cloudflare bestätigten Verifizierung. Bei jedem Fehler
  * (fehlender/leerer Token, Netzwerkfehler, Timeout, von Cloudflare abgelehnt) wird "fail
  * closed" mit false geantwortet - ein Ausfall des Verify-Endpunkts darf nie versehentlich zum
  * Freifahrtschein für Bots werden. Timeout bewusst kurz (5s), damit ein haengender Aufruf nicht
  * das ganze Signup-Formular blockiert.
+ *
+ * 15.09.2026: zusaetzlich wird der von Cloudflare zurueckgemeldete `hostname` geprueft. Die
+ * Domainliste des Widgets verhindert zwar schon, dass das Widget auf einer fremden Seite
+ * ueberhaupt rendert, aber diese Pruefung ist die zweite, serverseitige Haelfte davon und von
+ * Cloudflare ausdruecklich empfohlen: sie schliesst aus, dass ein anderswo geloester Token
+ * (etwa auf einer weiteren, spaeter im selben Widget eingetragenen Domain) hier eingereicht
+ * wird. `requestHost` ist der Host, unter dem das Formular tatsaechlich abgeschickt wurde -
+ * stimmt er mit dem gemeldeten ueberein, ist alles gut, unabhaengig von der Standardliste.
  */
-export async function verifyTurnstileToken(token: string, remoteIp: string): Promise<boolean> {
+export async function verifyTurnstileToken(token: string, remoteIp: string, requestHost?: string): Promise<boolean> {
   const secret = process.env.TURNSTILE_SECRET_KEY?.trim();
   if (!secret) return true; // Feature nicht konfiguriert - Aufrufer entscheidet, ob ueberhaupt geprueft wird.
   if (!token) return false;
@@ -45,11 +64,23 @@ export async function verifyTurnstileToken(token: string, remoteIp: string): Pro
       body,
       signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
     });
-    const data = (await res.json()) as { success?: boolean; "error-codes"?: string[] };
+    const data = (await res.json()) as { success?: boolean; hostname?: string; "error-codes"?: string[] };
     if (!data.success) {
       console.warn("[panel] Turnstile lehnt Token ab:", data["error-codes"]?.join(", ") || "unbekannt");
+      return false;
     }
-    return data.success === true;
+    const gemeldet = (data.hostname ?? "").toLowerCase();
+    const erlaubt = new Set(expectedHostnames());
+    if (requestHost) erlaubt.add(requestHost.toLowerCase());
+    // Ein fehlender Hostname in der Antwort wird durchgelassen (dann bleibt es bei der reinen
+    // success-Pruefung). Cloudflares oeffentliche Test-Keys melden dagegen immer "example.com" -
+    // die Sandbox setzt dafuer TURNSTILE_EXPECTED_HOSTNAMES=example.com, statt dass hier ein
+    // Sonderfall fuer Testschluessel im Produktionscode steht.
+    if (gemeldet && !erlaubt.has(gemeldet)) {
+      console.warn(`[panel] Turnstile: Token wurde auf einem fremden Hostnamen geloest (${gemeldet}) - abgelehnt.`);
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error("[panel] Turnstile-Verifizierung fehlgeschlagen (Netzwerk/Timeout):", err instanceof Error ? err.message : err);
     return false;

@@ -73,6 +73,46 @@ komplett unsichtbar deaktiviert (kein Fehler, kein leeres Widget) - der aktuelle
 sicher, es eilt nicht, aber es ist ein offener Punkt (echte Signups sind bis dahin ohne
 CAPTCHA-Schutz).
 
+## Stand 15.09.2026: scharf geschaltet
+
+Echte Keys liegen in `/root/mcp-server/.env` (`TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`),
+Produktion wurde um 18:06 neu gestartet. Widget: Hostname `app.pipeflow.at`, Modus "Managed".
+
+**Nachgewiesen:**
+- Das Secret ist bei Cloudflare gültig: eine Anmeldung mit erfundenem Token wird mit
+  `invalid-input-response` abgelehnt (bei falschem Secret käme `invalid-input-secret`).
+- Der Hostname ist korrekt hinterlegt: derselbe Site Key liefert auf `mcp.pipebot.at` sofort
+  Fehlercode **110200** ("invalid domain"), auf `app.pipeflow.at` dagegen keinerlei Fehler.
+- Anmeldung ohne Token und mit erfundenem Token werden serverseitig mit 400 abgewiesen.
+- Die CSP erlaubt `challenges.cloudflare.com` in `script-src` und `frame-src` - keine
+  CSP-Verstöße im Browser, keine blockierten Cloudflare-Anfragen.
+
+**Nicht nachweisbar von hier aus:** dass ein Mensch die Prüfung tatsächlich abschließt. Im
+"Managed"-Modus verweigert Cloudflare einem automatisierten Browser die Challenge - das Widget
+bleibt still leer, ohne Fehlercode. Genau dafür ist Turnstile da. Das ist der einzige Schritt,
+den Paul einmal selbst im eigenen Browser bestätigen muss (siehe unten).
+
+**Wieder abschalten, falls das Widget bei echten Besuchern nicht erscheint:** in
+`/root/mcp-server/.env` die beiden `TURNSTILE_*`-Zeilen mit `#` auskommentieren und
+`pm2 restart instagram-mcp --update-env` - danach ist das Feature wie vorher unsichtbar aus, und
+Anmeldungen laufen ohne CAPTCHA weiter.
+
+### Hostname-Prüfung serverseitig
+
+Seit 15.09.2026 prüft `verifyTurnstileToken` zusätzlich den von Cloudflare zurückgemeldeten
+`hostname` gegen den Host, unter dem das Formular abgeschickt wurde (plus die Liste in
+`TURNSTILE_EXPECTED_HOSTNAMES`, Standard `app.pipeflow.at`). Ein anderswo gelöster Token wird
+damit auch dann abgelehnt, wenn später weitere Domains ins selbe Widget eingetragen werden.
+
+### Sandbox
+
+Die Sandbox liegt unter `https://mcp.pipebot.at/panel/sandbox/` (nicht unter
+`app.pipeflow.at/sandbox` - das leitet seit dem 15.09.2026 nur noch dorthin um, siehe
+`docs/ZWEITE_ADRESSE.md`). Sie braucht **keinen eigenen Eintrag bei Cloudflare**: dort laufen
+Cloudflares öffentliche Testschlüssel ("always passes", dazu
+`TURNSTILE_EXPECTED_HOSTNAMES=example.com`, weil Testschlüssel immer `example.com` melden). Der
+echte Site Key würde dort ohnehin mit Fehlercode 110200 scheitern - nachgemessen.
+
 ## Wie man später prüft, dass es wirklich läuft
 
 1. https://mcp.pipebot.at/panel/ öffnen, Signup-Formular bis Seite 2 ("Ihr Stil") durchklicken -

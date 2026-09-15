@@ -113,13 +113,24 @@ async function main() {
     }
   }
 
+  /* 15.09.2026: Sobald Turnstile in der Sandbox konfiguriert ist, lehnt /api/signup jede Anfrage
+     ohne Token ab - die ganze Suite haette sonst keinen Testkunden mehr. Mit Cloudflares
+     "always passes"-Testschluessel ist jeder Tokenwert gueltig, ein Platzhalter genuegt also.
+     Ist Turnstile nicht konfiguriert, wird kein Feld angehaengt und nichts aendert sich. */
+  const turnstileAktiv = await fetch(`${BASE}${MOUNT}/api/providers`)
+    .then((r) => r.json())
+    .then((b) => Boolean(b.turnstileSiteKey))
+    .catch(() => false);
+  const mitCaptcha = (body) => (turnstileAktiv ? { ...body, "cf-turnstile-response": "test-token" } : body);
+  if (turnstileAktiv) console.log("(Turnstile ist in der Sandbox aktiv - Signups der Suite tragen einen Test-Token)");
+
   // --- 1. Signup validation errors ---
   console.log("Signup - Validierung:");
   {
     const res = await fetch(`${BASE}${MOUNT}/api/signup`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify(mitCaptcha({})),
     });
     const body = await res.json();
     ok("kein consent -> 400", res.status === 400, `status=${res.status}`);
@@ -129,7 +140,7 @@ async function main() {
     const res = await fetch(`${BASE}${MOUNT}/api/signup`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ consent: true, company: "", contactName: "", email: "not-an-email" }),
+      body: JSON.stringify(mitCaptcha({ consent: true, company: "", contactName: "", email: "not-an-email" })),
     });
     const body = await res.json();
     ok("ungueltige Pflichtfelder -> 400", res.status === 400, `status=${res.status}`);
@@ -146,7 +157,7 @@ async function main() {
     const res = await fetch(`${BASE}${MOUNT}/api/signup`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(mitCaptcha({
         consent: true,
         company: "Test GmbH",
         contactName: "Test Person",
@@ -154,7 +165,7 @@ async function main() {
         tone: "sachlich",
         frequency: "werktags",
         postTime: "15:00",
-      }),
+      })),
     });
     const body = await res.json();
     ok("erfolgreicher Signup -> 201", res.status === 201, `status=${res.status} body=${JSON.stringify(body)}`);
@@ -915,7 +926,7 @@ async function main() {
     const otherSignupRes = await fetch(`${BASE}${MOUNT}/api/signup`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ consent: true, company: "Anderer Kunde GmbH", contactName: "T", email: otherEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00" }),
+      body: JSON.stringify(mitCaptcha({ consent: true, company: "Anderer Kunde GmbH", contactName: "T", email: otherEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00" })),
     });
     const otherCookie = cookieHeader(otherSignupRes.headers.get("set-cookie"));
 
@@ -1052,7 +1063,7 @@ async function main() {
     const signupRes = await fetch(`${BASE}${MOUNT}/api/signup`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ consent: true, company: "Delete Me GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00" }),
+      body: JSON.stringify(mitCaptcha({ consent: true, company: "Delete Me GmbH", contactName: "T", email, tone: "sachlich", frequency: "werktags", postTime: "15:00" })),
     });
     const delCookie = cookieHeader(signupRes.headers.get("set-cookie"));
 
