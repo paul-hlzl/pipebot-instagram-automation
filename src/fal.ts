@@ -7,7 +7,7 @@ import { uploadImageBase64 } from "./r2.js";
 import { getFontOption, DEFAULT_FONT_ID } from "./fonts.js";
 import { renderGradientBackground, type GradientDirection } from "./gradient.js";
 
-const FAL_ENDPOINT = "https://fal.run/fal-ai/flux/schnell";
+const FAL_ENDPOINT = process.env.FAL_ENDPOINT_OVERRIDE || "https://fal.run/fal-ai/flux/schnell";
 
 /**
  * fal.ai `image_size` per format. "square_hd" for the feed (1:1) is 1024x1024.

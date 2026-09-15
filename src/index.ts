@@ -24,6 +24,7 @@ import { startDailyAnalyticsSnapshotSchedule, startWeeklyAnalyticsSummarySchedul
 import { startCommentAutomationSchedule } from "./panel/comments.js";
 import { startReviewAutomationSchedule } from "./panel/reviews.js";
 import { startVideoSchedule } from "./panel/videos.js";
+import { startStandstillWatch } from "./panel/standstill-watch.js";
 import {
   assertChannelEnabled,
   assertLinkedInHasImage,
@@ -1170,6 +1171,9 @@ async function main(): Promise<void> {
   // Video-Diashow (Reels): eigener Cron mit eigenem Wochenplan (siehe panel/videos.ts). Rendern
   // laeuft ueber eine Warteschlange, damit mehrere Kunden nie gleichzeitig die CPU belegen.
   startVideoSchedule();
+  // Stillstands-Wache: meldet an Paul, wenn fuer einen Kunden trotz Zeitplan lange nichts
+  // veroeffentlicht wurde. Stille ist der gefaehrlichste Fehlerzustand dieses Produkts.
+  startStandstillWatch();
   // Bind to loopback only - Nginx (proxy_pass http://127.0.0.1:3000) is the only
   // intended entry point. Express/Node default to 0.0.0.0 (all interfaces) if no
   // host is given, which would expose this port directly to the internet.

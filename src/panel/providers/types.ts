@@ -69,8 +69,24 @@ export interface Provider {
   refresh?(tokens: TokenSet): Promise<TokenSet>;
 }
 
+/** Node's fetch hat KEINE eingebaute Zeitgrenze - ohne die folgende Zeile haengt ein Aufruf an
+ *  LinkedIn (Token-Erneuerung, Veroeffentlichung) unbegrenzt. Ein Haenger ist schlimmer als ein
+ *  Fehler: er wirft nie, also greift auch kein catch, und der Vorgang bleibt fuer immer offen. */
+const PROVIDER_TIMEOUT_MS = Number(process.env.PROVIDER_HTTP_TIMEOUT_MS ?? 20_000);
+
 export async function requestJson<T>(url: string, init: RequestInit, label: string): Promise<T> {
-  const res = await fetch(url, init);
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(PROVIDER_TIMEOUT_MS) });
+  } catch (err) {
+    const zeitueberschreitung = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    throw new ProviderError(
+      "failed",
+      zeitueberschreitung
+        ? `${label}: keine Antwort innerhalb von ${Math.round(PROVIDER_TIMEOUT_MS / 1000)} Sekunden`
+        : `${label}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   const text = await res.text();
   let data: unknown;
   try {

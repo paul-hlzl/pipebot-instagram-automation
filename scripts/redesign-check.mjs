@@ -9,9 +9,17 @@
 import { chromium } from "/root/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
 import { mkdirSync } from "node:fs";
 
+/** Die Sandbox-Zugangslinks stehen bewusst NICHT mehr im Repo (es ist oeffentlich) - sie kommen
+ *  aus /root/sandbox-keys.env:  set -a && . /root/sandbox-keys.env && set +a */
+function mussGesetztSein(name) {
+  console.error(`${name} fehlt. Zugaenge laden mit:  set -a && . /root/sandbox-keys.env && set +a`);
+  process.exit(2);
+}
+
+
 const BASE = "https://mcp.pipebot.at/panel/sandbox";
-const KEY_PLAIN = "4ld5fnINw5ZeNUEjOZNhRXp-PZTxS4je";
-const KEY_APPROVAL = "cJaCXkVjls9umce3x9Pvg-KA3Q29eBWU";
+const KEY_PLAIN = process.env.SANDBOX_KEY_A ?? mussGesetztSein("SANDBOX_KEY_A");
+const KEY_APPROVAL = process.env.SANDBOX_KEY_B ?? mussGesetztSein("SANDBOX_KEY_B");
 
 const outDir = process.argv[2] || "docs/redesign/after";
 const widths = (process.argv.slice(3).length ? process.argv.slice(3) : ["390", "1440"]).map(Number);

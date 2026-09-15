@@ -8,8 +8,16 @@
  */
 import { chromium } from "/root/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
 
+/** Die Sandbox-Zugangslinks stehen bewusst NICHT mehr im Repo (es ist oeffentlich) - sie kommen
+ *  aus /root/sandbox-keys.env:  set -a && . /root/sandbox-keys.env && set +a */
+function mussGesetztSein(name) {
+  console.error(`${name} fehlt. Zugaenge laden mit:  set -a && . /root/sandbox-keys.env && set +a`);
+  process.exit(2);
+}
+
+
 const BASE = "https://mcp.pipebot.at/panel/sandbox";
-const KEY_APPROVAL = "cJaCXkVjls9umce3x9Pvg-KA3Q29eBWU";
+const KEY_APPROVAL = process.env.SANDBOX_KEY_B ?? mussGesetztSein("SANDBOX_KEY_B");
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) fails++; console.log(`  ${cond ? "ok " : "FAIL"} - ${msg}`); };

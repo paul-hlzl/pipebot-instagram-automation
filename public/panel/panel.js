@@ -12,7 +12,10 @@
   const FILE_PREVIEW = location.protocol === "file:" || /\.html?$/i.test(RAW_PATH);
   const CONFIG = {
     mount: FILE_PREVIEW ? "" : RAW_PATH,
-    privacyUrl: "https://pipebot.at/datenschutz",     // TODO: echte Datenschutzerklärung verlinken
+    // Zeigt auf die eigene Route (siehe router.ts): dort wird assets/datenschutz.html
+    // ausgeliefert, sobald der rechtlich geprüfte Text vorliegt. Vorher stand hier
+    // pipebot.at/datenschutz - diese Seite antwortet mit 404, die Einwilligung verlinkte ins Leere.
+    privacyUrl: (location.pathname.replace(/\/+$/, "") || "/panel") + "/datenschutz",
     nextSteps: "Wir sehen uns Ihre Angaben an und melden uns per E-Mail, bevor der erste Beitrag online geht.",
   };
   const DEMO = FILE_PREVIEW || new URLSearchParams(location.search).has("demo");

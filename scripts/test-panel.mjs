@@ -1479,6 +1479,21 @@ async function main() {
   }
 
   // --- 10. HTTP-Security-Header (Security-Review 2026-09-13) ---
+  {
+    // Die Einwilligung beim Signup verlinkt die Datenschutzerklaerung. Ein toter Link dort ist
+    // kein Schoenheitsfehler - deshalb prueft die Suite, dass die Route ueberhaupt antwortet und
+    // sagt, welcher Zustand gerade gilt (200 = Text da, 503 = Text fehlt noch).
+    const res = await fetch(`${BASE}${MOUNT}/datenschutz`);
+    const text = await res.text();
+    ok(
+      "/datenschutz antwortet (200 mit Text oder 503 mit Erklärung)",
+      res.status === 200 || res.status === 503,
+      `status=${res.status}`,
+    );
+    ok("/datenschutz ist nie leer", text.length > 80, `${text.length} Zeichen`);
+    if (res.status === 503) console.log("  hinweis - assets/datenschutz.html fehlt noch, Seite erklärt das dem Besucher");
+  }
+
   console.log("\nSecurity-Header:");
   {
     const res = await fetch(`${BASE}${MOUNT}/`);

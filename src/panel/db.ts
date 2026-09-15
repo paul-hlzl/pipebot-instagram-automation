@@ -337,6 +337,9 @@ const hadEmailVerifiedColumn = (db.prepare(`PRAGMA table_info(customers)`).all()
 );
 
 migrateColumns("customers", [
+  // Stillstands-Wache: Zeitpunkt der letzten Meldung an Paul, damit pro Stillstands-Phase genau
+  // eine Mail rausgeht statt taeglich einer (siehe panel/standstill-watch.ts).
+  ["standstill_alert_sent_at", "TEXT"],
   ["accent_color", "TEXT"],
   ["watermark_text", "TEXT"],
   ["avoid_topics", "TEXT"],
@@ -585,6 +588,7 @@ migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
 migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
 
 export interface CustomerRow {
+  standstill_alert_sent_at: string | null;
   id: string;
   company: string;
   contact_name: string;

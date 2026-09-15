@@ -246,9 +246,9 @@ sie also unverändert brauchbar; zum Bauen an einer neuen Fassung genügt künft
 in der Staging-Umgebung.
 
 Testkunden (echte Sandbox-Konten, keine Kundendaten):
-- Ohne Freigabe-Modus: `…/panel/sandbox/login?key=4ld5fnINw5ZeNUEjOZNhRXp-PZTxS4je`
+- Ohne Freigabe-Modus: `…/panel/sandbox/login?key=<SANDBOX_KEY_A>`
 - **Mit Freigabe-Modus** (hier liegen Beispiel-Freigaben und geplante Beiträge):
-  `…/panel/sandbox/login?key=cJaCXkVjls9umce3x9Pvg-KA3Q29eBWU`
+  `…/panel/sandbox/login?key=<SANDBOX_KEY_B>`
 
 In diesem zweiten Konto liegen für den Rundgang **3 wartende Freigaben** und **4 geplante
 Beiträge** bereit (direkt in der Staging-DB angelegt, reine Testdaten). Beides ist verbraucht,

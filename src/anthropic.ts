@@ -3,7 +3,15 @@ import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
 
-const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
+// Umlenkbar ueber die Umgebung, damit sich ein Ausfall des Dienstes gegen einen lokalen
+// Stoersender proben laesst (scripts/fault-injector.mjs). Ohne die Variable unveraendert echt.
+// Am Knopf wartet ein Mensch: zwei Versuche a 30 Sekunden bedeuten im Haengefall 62 Sekunden
+// Stillstand vor der Fehlermeldung (gemessen). Interaktive Aufrufe bekommen deshalb EINEN Versuch
+// mit 20 Sekunden Frist - die Hintergrund-Routine behaelt ihre zwei Versuche, dort wartet niemand.
+const INTERAKTIV_TIMEOUT_MS = Number(process.env.ANTHROPIC_INTERACTIVE_TIMEOUT_MS ?? 20_000);
+const INTERAKTIV_VERSUCHE = Number(process.env.ANTHROPIC_INTERACTIVE_ATTEMPTS ?? 1);
+
+const ANTHROPIC_ENDPOINT = process.env.ANTHROPIC_ENDPOINT_OVERRIDE || "https://api.anthropic.com/v1/messages";
 
 export function anthropicAvailable(): boolean {
   return Boolean(getConfig().anthropicApiKey);
@@ -71,10 +79,10 @@ export async function improveBriefing(input: {
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
           },
-          timeout: 30_000,
+          timeout: INTERAKTIV_TIMEOUT_MS,
         },
       ),
-    2,
+    INTERAKTIV_VERSUCHE,
     "Anthropic improve-briefing",
   );
 
@@ -133,10 +141,10 @@ export async function suggestFromWebsite(input: { title: string; description: st
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
           },
-          timeout: 30_000,
+          timeout: INTERAKTIV_TIMEOUT_MS,
         },
       ),
-    2,
+    INTERAKTIV_VERSUCHE,
     "Anthropic analyze-website",
   );
 
@@ -222,10 +230,10 @@ export async function suggestTopics(input: {
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
           },
-          timeout: 30_000,
+          timeout: INTERAKTIV_TIMEOUT_MS,
         },
       ),
-    2,
+    INTERAKTIV_VERSUCHE,
     "Anthropic suggest-topics",
   );
 
@@ -542,10 +550,10 @@ export async function helpChatReply(input: { messages: HelpChatMessage[]; accoun
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
           },
-          timeout: 30_000,
+          timeout: INTERAKTIV_TIMEOUT_MS,
         },
       ),
-    2,
+    INTERAKTIV_VERSUCHE,
     "Anthropic help-chat",
   );
 
@@ -639,10 +647,10 @@ export async function generateAnalyticsSummary(input: AnalyticsSummaryInput): Pr
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
           },
-          timeout: 30_000,
+          timeout: INTERAKTIV_TIMEOUT_MS,
         },
       ),
-    2,
+    INTERAKTIV_VERSUCHE,
     "Anthropic analytics-summary",
   );
 

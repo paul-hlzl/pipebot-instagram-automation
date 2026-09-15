@@ -23,7 +23,11 @@ import axios from "axios";
 import { ToolError } from "./errors.js";
 import { withRetry } from "./retry.js";
 
-const TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize";
+// Die Hoerprobe haengt an einem Knopf - ein Versuch mit 20 Sekunden statt zwei mit je 30.
+const TTS_TIMEOUT_MS = Number(process.env.TTS_TIMEOUT_MS ?? 20_000);
+const TTS_VERSUCHE = Number(process.env.TTS_ATTEMPTS ?? 1);
+
+const TTS_ENDPOINT = process.env.TTS_ENDPOINT_OVERRIDE || "https://texttospeech.googleapis.com/v1/text:synthesize";
 
 /** USD je 1 Mio. Zeichen, nach Stimmen-Stufe (siehe Dateikopf). */
 const PRICE_PER_MILLION_CHARS: Record<VoiceTier, number> = {
@@ -112,9 +116,9 @@ export async function synthesizeSpeech(text: string, voiceId: string, speakingRa
           voice: { languageCode: "de-DE", name: voice.id },
           audioConfig: { audioEncoding: "MP3", speakingRate },
         },
-        { headers: { "content-type": "application/json" }, timeout: 30_000 },
+        { headers: { "content-type": "application/json" }, timeout: TTS_TIMEOUT_MS },
       ),
-    2,
+    TTS_VERSUCHE,
     "Google TTS",
   );
   if (!data.audioContent) throw new ToolError("Sprachausgabe: Google hat keine Audiodaten geliefert.");

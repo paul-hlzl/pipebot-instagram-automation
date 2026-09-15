@@ -15,6 +15,7 @@
  */
 import { execFileSync } from "node:child_process";
 
+const MAIL_TIMEOUT_MS = Number(process.env.PANEL_MAIL_TIMEOUT_MS ?? 20_000);
 const FROM = "Pipeflow <office@pipebot.at>";
 
 export interface MailInput {
@@ -42,7 +43,11 @@ export function sendMail(input: MailInput): void {
     `To: ${input.to}\n` +
     `Subject: ${input.subject}\n` +
     `Content-Type: text/plain; charset=UTF-8\n\n${input.text}`;
-  execFileSync("msmtp", ["-a", "pipebot", "-t"], { input: message });
+  // Ohne Zeitgrenze blockiert ein haengender SMTP-Server den GESAMTEN Node-Prozess: execFileSync
+  // haelt die Ereignisschleife an, das Panel antwortet dann fuer ALLE Kunden nicht mehr und die
+  // stuendliche Routine steht still. 20 Sekunden sind grosszuegig fuer eine Zustellung an den
+  // lokalen msmtp und begrenzen den Schaden auf genau diesen einen Versand.
+  execFileSync("msmtp", ["-a", "pipebot", "-t"], { input: message, timeout: MAIL_TIMEOUT_MS, killSignal: "SIGKILL" });
 }
 
 /** Wie sendMail, aber schluckt Fehler (geloggt, nie geworfen) - für Stellen, an denen ein

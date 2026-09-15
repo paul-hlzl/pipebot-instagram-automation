@@ -59,9 +59,9 @@ Zwei Test-Kunden existieren bereits in der Staging-DB (per echtem Signup-Flow an
 Hand-editierten DB-Zeilen):
 
 - **Testfirma Eins** (`approvalMode: false`, taeglich/09:00) -
-  `https://mcp.pipebot.at/panel/sandbox/login?key=4ld5fnINw5ZeNUEjOZNhRXp-PZTxS4je`
+  `https://mcp.pipebot.at/panel/sandbox/login?key=<SANDBOX_KEY_A>`
 - **Testfirma Zwei (Freigabe-Modus)** (`approvalMode: true`, taeglich/10:00) -
-  `https://mcp.pipebot.at/panel/sandbox/login?key=cJaCXkVjls9umce3x9Pvg-KA3Q29eBWU`
+  `https://mcp.pipebot.at/panel/sandbox/login?key=<SANDBOX_KEY_B>`
 
 Weitere Test-Kunden: einfach ueber `https://mcp.pipebot.at/panel/sandbox/` normal signupen -
 CAPTCHA ist aus, es passiert nichts Echtes (keine E-Mail, keine echte Verbindung moeglich).
@@ -87,3 +87,17 @@ Sandbox-Umgebung zu kopieren.
    ausserhalb des stuendlichen Routine-Zeitfensters (`:43` jede Stunde, siehe bestehende Regel).
 5. Faellt ein Produktions-Deploy doch mitten in ein Routine-Zeitfenster: im Bericht ausdruecklich
    vermerken (moeglicher abgebrochener Lauf in diesem Fenster).
+
+## Zugangslinks (nicht im Repo)
+
+Die beiden Testkonto-Links stehen seit 15.09.2026 **nicht mehr hier** - dieses Repository ist
+oeffentlich. Sie liegen auf dem Server in `/root/sandbox-keys.env` (Rechte 600) und werden fuer
+Testlaeufe so geladen:
+
+```
+set -a && . /root/sandbox-keys.env && set +a
+node scripts/redesign-func-test.mjs
+```
+
+Die zuvor hier dokumentierten Schluessel wurden dabei rotiert und sind ungueltig. Ein neuer Link
+entsteht im Panel unter Einstellungen -> Konto -> "Persoenlichen Link erzeugen" (entwertet den alten).

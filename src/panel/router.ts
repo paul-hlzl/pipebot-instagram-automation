@@ -573,6 +573,24 @@ export function createPanelRouter(): Router {
   // Panel v15: dieselben Schriftdateien, die die Bild-Rendering-Pipeline serverseitig nutzt
   // (fonts.ts/assets/fonts) - hier oeffentlich servierbar, damit das Panel per @font-face eine
   // echte Live-Vorschau zeigen kann, statt die Schrift nur beim Namen zu nennen.
+  // Datenschutzerklaerung: das Panel verlinkt sie in der Einwilligung beim Signup. Bis 15.09.2026
+  // zeigte der Link auf https://pipebot.at/datenschutz - diese Seite antwortet mit 404, die
+  // Einwilligung verwies also ins Leere. Ausgeliefert wird jetzt assets/datenschutz.html, sobald
+  // die Datei existiert; solange nicht, sagt die Antwort klar warum (statt still 404).
+  // Der INHALT kommt von Paul bzw. seiner Rechtsberatung - hier steht nur die Zustellung.
+  router.get("/datenschutz", (_req, res) => {
+    const datei = path.join(PACKAGE_ROOT, "assets/datenschutz.html");
+    if (fs.existsSync(datei)) {
+      res.type("html").sendFile(datei);
+      return;
+    }
+    console.error("[panel] /datenschutz angefragt, aber assets/datenschutz.html fehlt - die Einwilligung verlinkt damit ins Leere.");
+    res
+      .status(503)
+      .type("html")
+      .send("<!doctype html><meta charset=utf-8><title>Datenschutzerklärung</title><p style=\"font:16px system-ui;padding:24px\">Die Datenschutzerklärung wird gerade finalisiert und ist in Kürze hier abrufbar. Fragen jederzeit an office@pipebot.at.</p>");
+  });
+
   router.use("/fonts", express.static(path.join(PACKAGE_ROOT, "assets/fonts"), { maxAge: "7d" }));
 
   // Redesign: das neue Panel ist in index.html + panel.css + panel.js aufgeteilt (die alte
@@ -1724,7 +1742,10 @@ export function createPanelRouter(): Router {
       logUsageCost(c.id, "video-tts", spoken.costUsd);
       res.json({ voice: voice.id, label: voice.label, audioDataUrl: `data:${spoken.mimeType};base64,${spoken.audioBase64}` });
     } catch (err) {
-      res.status(502).json({ error: err instanceof Error ? err.message : "Hörprobe fehlgeschlagen." });
+      // Die technische Meldung des Dienstes ("Request failed with status code 500") hilft dem
+      // Kunden nicht - sie steht im Log, im Panel steht ein Satz, mit dem man etwas anfangen kann.
+      console.error("[voice-preview] Hörprobe fehlgeschlagen:", err instanceof Error ? err.message : err);
+      res.status(502).json({ error: "Die Hörprobe konnte gerade nicht erzeugt werden. Bitte später erneut versuchen." });
     }
   }));
 

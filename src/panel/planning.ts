@@ -83,7 +83,14 @@ interface GeneratedPost {
  * row after the customer changed company/industry/about/tone) - everything from here down is
  * identical for both callers, only what happens to the result (INSERT vs UPDATE) differs.
  */
-async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar: ContentPillar | null): Promise<GeneratedPost> {
+/**
+ * `feature` landet in usage_costs. Wichtig: die Kosten werden SOFORT gebucht, sobald der jeweilige
+ * Schritt bezahlt ist - nicht erst am Ende. Vorher wurden sie in einer lokalen Summe gesammelt und
+ * nur im Erfolgsfall zurueckgegeben: scheiterte die Bildgenerierung nach dem (bezahlten) Text, war
+ * der Text bezahlt, aber nirgends erfasst. Und der normale Tagesplan hat ueberhaupt nie gebucht,
+ * dadurch fehlte in der Kostenuebersicht ausgerechnet der groesste Posten.
+ */
+async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar: ContentPillar | null, feature = "planned-post"): Promise<GeneratedPost> {
   const styleSamples = await getStyleSamples(row.id);
   const bannedWords = splitCommaList(row.banned_words);
   const requiredElements = splitCommaList(row.required_elements);
@@ -106,6 +113,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
 
   let content = await generatePlannedPostContent(baseInput);
   let costUsd = content.costUsd;
+  logUsageCost(row.id, feature, content.costUsd);
   try {
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
@@ -115,6 +123,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
     const avoidNote = err instanceof Error ? err.message : String(err);
     content = await generatePlannedPostContent({ ...baseInput, avoidNote });
     costUsd = costUsd != null && content.costUsd != null ? costUsd + content.costUsd : content.costUsd ?? costUsd;
+    logUsageCost(row.id, feature, content.costUsd);
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
   }
@@ -122,6 +131,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
   const branding = resolveImageBranding(row.id);
   const generated = await generateImageUrl(content.headline, CHANNEL_IMAGE_FORMAT[channel], branding);
   costUsd = costUsd != null ? costUsd + FAL_IMAGE_COST_USD : FAL_IMAGE_COST_USD;
+  logUsageCost(row.id, feature, FAL_IMAGE_COST_USD);
 
   return { headline: content.headline, caption: content.caption, imageUrl: generated.imageUrl, accentColorUsed: branding.accentColor, costUsd };
 }
@@ -179,14 +189,13 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
     }
     const pillar = plan.pillarTitle ? pillars.find((p) => p.title === plan.pillarTitle) ?? { id: "", title: plan.pillarTitle, description: null, weight: 1 } : null;
     try {
-      const generated = await generatePost(row, channel, pillar);
+      const generated = await generatePost(row, channel, pillar, "planned-post-branding-regen");
       overwritePlannedPostContent(plan.id, {
         headline: generated.headline,
         caption: generated.caption,
         imageUrl: generated.imageUrl,
         accentColorUsed: generated.accentColorUsed,
       });
-      logUsageCost(row.id, "planned-post-branding-regen", generated.costUsd);
       updated++;
     } catch (err) {
       errors++;
@@ -366,14 +375,13 @@ export async function ensureFreshPlannedPost(plan: PlannedPost): Promise<Planned
   try {
     const pillars = listContentPillars(row.id);
     const pillar = findPillar(pillars, plan.pillarTitle);
-    const generated = await generatePost(row, plan.channel as PlannableChannel, pillar);
+    const generated = await generatePost(row, plan.channel as PlannableChannel, pillar, "stale-content-guard-regen");
     const updated = overwritePlannedPostContent(plan.id, {
       headline: generated.headline,
       caption: generated.caption,
       imageUrl: generated.imageUrl,
       accentColorUsed: generated.accentColorUsed,
     });
-    logUsageCost(row.id, "stale-content-guard-regen", generated.costUsd);
     return updated;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -424,10 +432,9 @@ export async function getFreshApprovedPendingPosts(): Promise<PendingApproval[]>
       const pillars = listContentPillars(row.id);
       const pillar = findPillar(pillars, approval.pillarTitle);
       const channel = (approval.channel as PlannableChannel) || (approval.provider === "linkedin" ? "linkedin" : "ig_feed");
-      const generated = await generatePost(row, channel, pillar);
+      const generated = await generatePost(row, channel, pillar, "stale-content-guard-regen");
       const updated = overwritePendingApprovalContent(approval.id, { headline: generated.headline, caption: generated.caption, imageUrl: generated.imageUrl });
-      logUsageCost(row.id, "stale-content-guard-regen", generated.costUsd);
-      if (updated) fresh.push(updated);
+        if (updated) fresh.push(updated);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       forceRejectPendingApproval(approval.id);

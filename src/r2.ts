@@ -1,4 +1,5 @@
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { randomUUID } from "node:crypto";
 import { getConfig } from "./config.js";
 import { ToolError } from "./errors.js";
@@ -74,6 +75,10 @@ export async function uploadImageBase64(imageBase64: string): Promise<string> {
       accessKeyId: config.mediaAccessKey,
       secretAccessKey: config.mediaSecretKey,
     },
+    // Ohne diese Grenzen wartet das SDK unbegrenzt: ein nicht antwortender R2-Endpunkt haette
+    // einen Bild-Upload (und damit den Beitrag des Kunden) fuer immer offen gehalten, ohne Fehler
+    // und ohne Log. Die Werte sind bewusst grosszuegig - ein Video darf hochladen duerfen.
+    requestHandler: new NodeHttpHandler({ connectionTimeout: 10_000, requestTimeout: 120_000 }),
   });
 
   try {
@@ -149,6 +154,10 @@ export async function uploadAudioBase64(audioBase64: string): Promise<{ url: str
       accessKeyId: config.mediaAccessKey,
       secretAccessKey: config.mediaSecretKey,
     },
+    // Ohne diese Grenzen wartet das SDK unbegrenzt: ein nicht antwortender R2-Endpunkt haette
+    // einen Bild-Upload (und damit den Beitrag des Kunden) fuer immer offen gehalten, ohne Fehler
+    // und ohne Log. Die Werte sind bewusst grosszuegig - ein Video darf hochladen duerfen.
+    requestHandler: new NodeHttpHandler({ connectionTimeout: 10_000, requestTimeout: 120_000 }),
   });
 
   try {
@@ -182,6 +191,10 @@ export async function deleteObject(key: string): Promise<void> {
       accessKeyId: config.mediaAccessKey,
       secretAccessKey: config.mediaSecretKey,
     },
+    // Ohne diese Grenzen wartet das SDK unbegrenzt: ein nicht antwortender R2-Endpunkt haette
+    // einen Bild-Upload (und damit den Beitrag des Kunden) fuer immer offen gehalten, ohne Fehler
+    // und ohne Log. Die Werte sind bewusst grosszuegig - ein Video darf hochladen duerfen.
+    requestHandler: new NodeHttpHandler({ connectionTimeout: 10_000, requestTimeout: 120_000 }),
   });
   try {
     await client.send(new DeleteObjectCommand({ Bucket: config.mediaBucketName, Key: key }));
