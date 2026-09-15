@@ -42,7 +42,7 @@ import {
   trialDaysLeft,
   updatePlannedPostImage,
   updatePlannedPostText,
-} from "./credentials.js";
+  cancelPostRequest,} from "./credentials.js";
 import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache, logUsageCost, type AnalyticsChannel } from "./analytics.js";
 import { regeneratePlannedPostsForBranding } from "./planning.js";
 import { deleteObject, uploadAudioBase64 } from "../r2.js";
@@ -1522,6 +1522,26 @@ export function createPanelRouter(): Router {
   // schlägt die Prüfung für auch nur einen gewählten Kanal fehl (deaktiviert, schon offen, Tages-
   // Limit), wird die GESAMTE Anfrage abgelehnt statt einen Teil stillschweigend zu verwerfen -
   // vorhersagbarer für den Kunden als eine Mischung aus "teils geklappt, teils nicht".
+  /**
+   * Eine offene Anfrage zuruecknehmen. Vorher blockierte eine haengende Anfrage den Kanal ohne
+   * Ablauf und ohne Ausweg ("schon angefragt", ausgegraut) - genau der Zustand, in dem Pauls
+   * LinkedIn-Kanal am 15.09.2026 feststeckte.
+   */
+  router.post("/api/post-now/cancel", safe((req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const id = typeof req.body?.id === "string" ? req.body.id : undefined;
+    const anzahl = cancelPostRequest(c.id, id);
+    if (!anzahl) {
+      res.status(404).json({ error: "Keine offene Anfrage gefunden." });
+      return;
+    }
+    res.json({ ...publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow), cancelled: anzahl });
+  }));
+
   router.post("/api/post-now", safe((req, res) => {
     const c = currentCustomer(req);
     if (!c) {

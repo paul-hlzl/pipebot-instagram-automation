@@ -13,7 +13,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { db, nowIso, type CustomerRow, type ConnectionRow, type PostRow } from "./db.js";
 import { randomToken, sha256 } from "./crypto.js";
-import { connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.js";
+import { cancelPostRequest, connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.js";
 import { sendMail } from "./mailer.js";
 import { firstPostLiveEmail, pendingApprovalsSummaryEmail, tokenExpiringEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
 import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
@@ -105,6 +105,8 @@ const safe = (fn: Handler) => async (req: Request, res: Response, next: NextFunc
 };
 
 interface CustomerAdminView {
+  /** Wie viele 'Jetzt posten'-Anfragen gerade offen sind - haengt eine, blockiert sie den Kanal. */
+  openPostRequests: number;
   customerId: string;
   company: string;
   contactName: string;
@@ -153,6 +155,10 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     // 30 Tage, keine Kommentar-Inhalte hier (die sieht nur der Kunde selbst im Panel).
     commentAutomationEnabled: Boolean(c.comment_automation_enabled),
     commentStats30d: commentStatsForCustomer(c.id, 30),
+    // Sichtbar machen, was sonst nur der Kunde im Panel merkt: haengt hier eine Anfrage?
+    openPostRequests: (db
+      .prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing')")
+      .get(c.id) as { n: number }).n,
   };
 }
 
@@ -182,6 +188,16 @@ export function createAdminRouter(panelPublicDir?: string): Router {
       }
       startAdminSession(res, req);
       res.json({ ok: true });
+    }),
+  );
+
+  /** Offene "Jetzt posten"-Anfragen eines Kunden zuruecknehmen - der Ausweg, wenn eine Anfrage
+   *  haengt und der Kanal im Panel blockiert bleibt (Vorfall 15.09.2026). */
+  router.post(
+    "/api/customers/:id/cancel-requests",
+    safe((req, res) => {
+      const anzahl = cancelPostRequest(String(req.params.id));
+      res.json({ ok: true, cancelled: anzahl });
     }),
   );
 

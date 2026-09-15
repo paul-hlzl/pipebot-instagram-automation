@@ -546,6 +546,7 @@ tbody tr:hover td { background: var(--wash); }
       <td data-label="Beiträge"><span class="num">${c.postCount}</span>${c.lastPostAt ? `<span class="meta muted small"> · zuletzt ${fmtDate(c.lastPostAt)}</span>` : ""}</td>
       <td data-label="Aktionen"><div class="row-actions">
         <button class="btn btn-quiet btn-small" data-action="details" data-id="${esc(c.customerId)}">Details</button>
+        ${c.openPostRequests ? `<button class="btn btn-quiet btn-small" data-action="cancel-requests" data-id="${esc(c.customerId)}">${c.openPostRequests} offene Anfrage${c.openPostRequests === 1 ? "" : "n"} stornieren</button>` : ""}
         <button class="btn btn-quiet btn-small" data-action="extend" data-id="${esc(c.customerId)}">+7 Tage</button>
         ${!c.trial.unlimited ? `<button class="btn btn-quiet btn-small" data-action="unlimited" data-id="${esc(c.customerId)}">Unbefristet</button>` : ""}
         <button class="btn btn-quiet btn-small" data-action="toggle-status" data-id="${esc(c.customerId)}" data-status="${c.status === "active" ? "paused" : "active"}">${c.status === "active" ? "Pausieren" : "Aktivieren"}</button>
@@ -680,6 +681,12 @@ tbody tr:hover td { background: var(--wash); }
     const action = btn.dataset.action;
     try {
       if (action === "details") return showDetails(id);
+      if (action === "cancel-requests") {
+        if (!(await showConfirm({ title: "Offene Anfragen stornieren?", message: "Der Kanal ist danach wieder frei. Bereits veröffentlichte Beiträge bleiben bestehen.", confirmLabel: "Stornieren" }))) return;
+        btn.classList.add("busy");
+        await api("POST", `/api/customers/${id}/cancel-requests`);
+        await loadOverview();
+      }
       if (action === "extend") {
         // Vorher window.prompt() - das war der letzte Systemdialog auf dieser Seite und sah
         // auf jedem Geraet anders aus als der Rest.

@@ -1629,7 +1629,8 @@
         const r = byChannel[o.id];
         const topicPart = r.topic ? `: "${esc(r.topic)}"` : "";
         return r.status === "pending" || r.status === "processing"
-          ? `<div class="banner" role="status">${esc(o.label)} ausstehend${topicPart} - angefragt am ${esc(fmtDate(r.createdAt))}. Wird in der Regel innerhalb weniger Minuten bearbeitet.</div>`
+          ? `<div class="banner" role="status">${esc(o.label)} ausstehend${topicPart} - angefragt am ${esc(fmtDate(r.createdAt))}.
+               <button type="button" class="link" data-cancel-request="${esc(r.id || "")}">Anfrage zurückziehen</button></div>`
           : `<div class="banner ok" role="status">${esc(o.label)} erledigt${topicPart}.</div>`;
       });
     return lines.join("");
@@ -3436,6 +3437,24 @@
     if (e.target.closest("[data-restart-tour]")) { toggleAcctMenu(false); S.tourIndex = 0; renderTour(); return; }
     if (e.target.closest("[data-reload]")) { render(false); return; }
 
+    const stornieren = e.target.closest("[data-cancel-request]");
+    if (stornieren) {
+      if (!(await showConfirm({
+        title: "Anfrage zurückziehen?",
+        message: "Der Kanal ist danach wieder frei für einen neuen Versuch. Bereits veröffentlichte Beiträge bleiben bestehen.",
+        confirmLabel: "Zurückziehen",
+      }))) return;
+      stornieren.classList.add("busy");
+      try {
+        applyState(await api("POST", "/api/post-now/cancel", { id: stornieren.dataset.cancelRequest || undefined }));
+        toast("Anfrage zurückgezogen.");
+        render();
+      } catch (err) {
+        showError(err.message || "Die Anfrage konnte nicht zurückgezogen werden.");
+        stornieren.classList.remove("busy");
+      }
+      return;
+    }
     const capMore = e.target.closest("[data-caption-more]");
     if (capMore) {
       const box = capMore.closest(".caption");

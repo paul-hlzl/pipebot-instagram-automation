@@ -588,6 +588,14 @@ export function logPost(
     post.videoUrl ?? null,
   );
   savePostMedia("post", id, post.slides);
+  // Eine offene "Jetzt posten"-Anfrage fuer denselben Kanal ist mit dieser Veroeffentlichung
+  // erfuellt - hier schliessen, statt darauf zu vertrauen, dass die externe Routine
+  // mark_post_request_done aufruft (Vorfall 15.09.2026, siehe closeOpenPostRequestAfterPublish).
+  try {
+    closeOpenPostRequestAfterPublish(customerId, provider, post.channel);
+  } catch (err) {
+    console.error("[post-request] Abschluss nach Veroeffentlichung fehlgeschlagen:", err instanceof Error ? err.message : err);
+  }
   if (isFirstPost) maybeSendFirstPostEmail(customerId);
   maybeSendPostPublishedEmail(customerId, post.channel ?? provider);
 }
@@ -935,6 +943,51 @@ export function listOpenPostRequests(): PostRequest[] {
 }
 
 /** Marks a request done once the routine has fulfilled it. Returns false if the id doesn't exist (already handled by someone else, or invalid). */
+/**
+ * Schliesst eine offene "Jetzt posten"-Anfrage, sobald fuer denselben Kunden und Kanal
+ * tatsaechlich veroeffentlicht wurde - unabhaengig davon, ob die externe Routine hinterher
+ * mark_post_request_done aufruft.
+ *
+ * Warum das noetig ist (Vorfall 15.09.2026): Die Routine hatte die LinkedIn-Anfrage von Paul
+ * geclaimt, VIERMAL veroeffentlicht (12:43:54, 12:44:01, 12:44:05, 12:44:09) und danach nie
+ * abgeschlossen. Die Anfrage blieb in 'processing' stehen, blockierte den Kanal im Panel
+ * ("schon angefragt") und waere nach Ablauf der Stale-Frist erneut zur Veroeffentlichung
+ * freigegeben worden. Der Abschluss darf nicht davon abhaengen, dass ein externer Aufrufer sich
+ * korrekt verhaelt: wer veroeffentlicht hat, hat die Anfrage erfuellt.
+ */
+export function closeOpenPostRequestAfterPublish(customerId: string, provider: string, channel?: string): number {
+  const kanal = channel ?? (provider === "linkedin" ? "linkedin" : null);
+  const zeile = kanal
+    ? db
+        .prepare(
+          "SELECT id FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing') AND (channel = ? OR channel IS NULL) ORDER BY created_at LIMIT 1",
+        )
+        .get(customerId, kanal)
+    : db
+        .prepare("SELECT id FROM post_requests WHERE customer_id = ? AND status IN ('pending','processing') ORDER BY created_at LIMIT 1")
+        .get(customerId);
+  if (!zeile) return 0;
+  const id = (zeile as { id: string }).id;
+  db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
+  console.error(`[post-request] ${id} nach Veroeffentlichung (${provider}${channel ? "/" + channel : ""}) automatisch abgeschlossen`);
+  return 1;
+}
+
+/**
+ * Zieht eine offene Anfrage zurueck. Bis 15.09.2026 gab es dafuer keinen Weg: eine haengende
+ * Anfrage blockierte den Kanal ohne Ablauf und ohne Abbruchmoeglichkeit.
+ */
+export function cancelPostRequest(customerId: string, id?: string): number {
+  const result = id
+    ? db
+        .prepare("UPDATE post_requests SET status = 'cancelled', updated_at = ? WHERE id = ? AND customer_id = ? AND status IN ('pending','processing')")
+        .run(nowIso(), id, customerId)
+    : db
+        .prepare("UPDATE post_requests SET status = 'cancelled', updated_at = ? WHERE customer_id = ? AND status IN ('pending','processing')")
+        .run(nowIso(), customerId);
+  return result.changes;
+}
+
 export function markPostRequestDone(id: string): boolean {
   const result = db.prepare("UPDATE post_requests SET status = 'done', updated_at = ? WHERE id = ?").run(nowIso(), id);
   return result.changes > 0;
