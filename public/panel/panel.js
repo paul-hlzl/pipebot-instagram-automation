@@ -2004,6 +2004,13 @@
     return { tone: "ok", text: "Alles läuft.", sub: "Aktuell ist kein Beitrag geplant." };
   }
 
+  /** Zeichnet nur den Statussatz der Uebersicht neu - ohne die bereits geladene Wochenleiste
+   *  und die Beitragskacheln darunter wegzuwerfen. */
+  function aktualisiereStatussatz() {
+    const box = document.getElementById("dash-status");
+    if (box) box.innerHTML = statusSentenceHtml();
+  }
+
   function statusSentenceHtml() {
     const s = statusSentence();
     const a = s.action;
@@ -2042,7 +2049,7 @@
     return `
       ${bannerHtml()}
       ${needsActionHtml()}
-      ${statusSentenceHtml()}
+      <div id="dash-status">${statusSentenceHtml()}</div>
       ${flowHtml()}
       <div class="section">
         <div class="section-head"><h2>Letzte Beiträge</h2>
@@ -2208,7 +2215,18 @@
     try {
       const { approvals } = await api("GET", "/api/approvals");
       const next = (approvals || []).length;
-      if (next !== S.approvalCount) { S.approvalCount = next; renderChrome(); }
+      if (next !== S.approvalCount) {
+        S.approvalCount = next;
+        renderChrome();
+        /* 15.09.2026: renderChrome() zeichnet NUR Navigation und Tableiste neu. Der grosse
+         * Statussatz auf der Uebersicht steckt in #stage und blieb deshalb auf dem Stand vor dem
+         * Nachladen stehen - also auf "Alles laeuft.", obwohl Beitraege auf Freigabe warteten.
+         * Der passende Satz ("2 Beitraege warten auf Ihre Freigabe." samt Knopf "Jetzt ansehen")
+         * war die ganze Zeit vorhanden und wurde nie angezeigt: beim ersten Rendern war der
+         * Zaehler noch 0, danach hat ihn niemand mehr angefasst. Genau daran ist der Testnutzer
+         * gescheitert - das Panel hat ihm gesagt, es sei alles in Ordnung. */
+        aktualisiereStatussatz();
+      }
     } catch { /* Zähler bleibt wie er war - lieber kein Badge als ein falsches */ }
   }
 
@@ -4473,6 +4491,9 @@
       const { approvals } = await api("GET", "/api/comment-approvals");
       S.pendingCommentCount = approvals.length;
       renderMainNav();
+      // Gleicher Grund wie beim Freigabe-Zaehler: der Statussatz auf der Uebersicht haengt an
+      // dieser Zahl und wird von renderMainNav nicht mitgezogen.
+      aktualisiereStatussatz();
     } catch { /* Zahl ist nur ein Hinweis, kein kritischer Zustand */ }
   }
 

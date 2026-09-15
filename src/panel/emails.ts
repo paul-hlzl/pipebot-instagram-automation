@@ -13,6 +13,18 @@ function panelUrl(): string {
   return `${base}${mount}/`;
 }
 
+/**
+ * Direkter Weg in den Freigabe-Bereich (15.09.2026).
+ *
+ * Die Freigabe-Mail zeigte bisher auf die Startseite des Panels. Wer von dort aus suchen musste,
+ * stand vor demselben Problem wie im Panel selbst: "Zur Freigabe" ist ein Reiter INNERHALB von
+ * "Beitraege", also zwei Klicks tief und von aussen nicht sichtbar. Der Hash wird vom Panel beim
+ * Laden ausgewertet (siehe hashFor/POST_TABS) - der Kunde landet direkt auf der Liste.
+ */
+function freigabeUrl(): string {
+  return `${panelUrl()}#beitraege/freigabe`;
+}
+
 /** Panel v6 Aufgabe 2b: Bestätigungs-Mail nach Signup (und beim erneuten Anfordern). */
 export function verificationEmail(input: { to: string; company: string; verifyUrl: string }): MailInput {
   return {
@@ -59,7 +71,7 @@ export function pendingApprovalsSummaryEmail(input: { to: string; company: strin
     text:
       `Hallo,\n\n` +
       `${plural ? "ein Beitrag wartet" : `${input.count} Beiträge warten`} aktuell auf Ihre Freigabe, bevor ${plural ? "er" : "sie"} veröffentlicht werden ${plural ? "kann" : "können"}.\n\n` +
-      `Schauen Sie sich ${plural ? "ihn" : "sie"} im Panel an:\n${panelUrl()}\n\n` +
+      `Schauen Sie sich ${plural ? "ihn" : "sie"} im Panel an:\n${freigabeUrl()}\n\n` +
       `Ohne Ihre Freigabe bleibt ${plural ? "er" : "sie"} liegen - nach der Freigabe wird in der Regel innerhalb weniger Minuten veröffentlicht.\n\n` +
       `Ihr Pipeflow-Team\nPipeline AI Solutions`,
   };
@@ -206,7 +218,7 @@ export function approvalNeededEmail(input: { to: string; company: string; channe
       `Hallo,\n\n` +
       `für "${input.company}" liegt ein neuer ${input.channelLabel}-Beitrag bereit. Sie müssen ihn noch ` +
       `freigeben, bevor er veröffentlicht wird.\n\n` +
-      `Jetzt ansehen und freigeben:\n${panelUrl()}\n\n` +
+      `Jetzt ansehen und freigeben:\n${freigabeUrl()}\n\n` +
       `Sie erhalten diese Benachrichtigung, weil Sie das in Ihren Einstellungen aktiviert haben - jederzeit ` +
       `abschaltbar.\n\n` +
       `Ihr Pipeflow-Team\nPipeline AI Solutions`,
