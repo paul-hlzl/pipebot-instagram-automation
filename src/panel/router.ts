@@ -949,7 +949,18 @@ export function createPanelRouter(): Router {
       res.status(401).json({ error: "Nicht angemeldet" });
       return;
     }
-    const { data, errors } = parseBriefing(req.body ?? {});
+    // Teil-Patch statt Komplettersatz (15.09.2026): parseBriefing fuellt jedes fehlende Feld mit
+    // seinem Standard - ein PATCH ohne z. B. commentAutomationEnabled hat die Einstellung also
+    // still auf "aus" gesetzt. Diese Falle hat dreimal zugeschlagen (Merge, zwei Testsuiten) und
+    // konnte jederzeit echte Kundeneinstellungen loeschen, sobald irgendein Aufrufer ein Feld
+    // weglaesst. Deshalb kommt der aktuelle Stand als Grundlage, und nur tatsaechlich
+    // mitgeschickte Felder ueberschreiben ihn. Ein leeres {} aendert damit nichts mehr; ein
+    // ausdruecklich mitgeschicktes "" oder false loescht/deaktiviert weiterhin wie bisher.
+    const incoming = (req.body ?? {}) as Record<string, unknown>;
+    const currentBriefing = publicState(c).customer as unknown as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...currentBriefing };
+    for (const [key, value] of Object.entries(incoming)) if (value !== undefined) merged[key] = value;
+    const { data, errors } = parseBriefing(merged);
     if (Object.keys(errors).length) {
       res.status(400).json({ error: "Bitte prüfen Sie Ihre Angaben.", fields: errors });
       return;

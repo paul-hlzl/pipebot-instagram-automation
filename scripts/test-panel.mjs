@@ -620,8 +620,14 @@ async function main() {
     const notFoundRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/does-not-exist`, { method: "PATCH", headers: { "content-type": "application/json", cookie: sessionCookie }, body: JSON.stringify({ headline: "x" }) });
     ok("PATCH auf unbekannte id -> 404", notFoundRes.status === 404);
 
-    // approvalMode wurde durch das PATCH oben nicht gesetzt (voller Replace, Default false) -
-    // "Jetzt schon freigeben" muss serverseitig ablehnen.
+    // Seit dem Teil-Patch bleibt ein nicht mitgeschicktes Feld stehen - der Freigabe-Modus wird
+    // hier deshalb ausdruecklich abgeschaltet, statt sich auf das alte Zuruecksetzen zu verlassen.
+    await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ approvalMode: false }),
+    });
+    // "Jetzt schon freigeben" muss serverseitig ablehnen, wenn der Freigabe-Modus aus ist.
     const approveRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}/approve`, { method: "POST", headers: { cookie: sessionCookie } });
     ok("Freigeben ohne approvalMode -> 400", approveRes.status === 400, `status=${approveRes.status}`);
 
@@ -1162,8 +1168,12 @@ async function main() {
     ok("Sternezahl 0 fällt zurück auf 4 (nie 'ab 1 Stern')", zeroStars?.googleReviewPostMinStars === 4, String(zeroStars?.googleReviewPostMinStars));
 
     // Standard fuer das Content-Recycling bleibt aus, wenn nichts mitgeschickt wird.
-    const defaults = await patch({});
-    ok("Beide Schalter sind ohne Angabe aus", defaults?.googleReviewAutomationEnabled === false && defaults?.googleReviewPostsEnabled === false, JSON.stringify([defaults?.googleReviewAutomationEnabled, defaults?.googleReviewPostsEnabled]));
+    // Seit dem Teil-Patch (15.09.2026) aendert ein leeres {} NICHTS mehr - vorher setzte es das
+    // ganze Briefing auf Standard zurueck und hat dabei schon dreimal Einstellungen verschluckt.
+    const unchanged = await patch({});
+    ok("Leerer Patch laesst Bewertungs-Einstellungen unveraendert", unchanged?.googleReviewPostsEnabled === true && unchanged?.googleReviewPostMinStars === 4, JSON.stringify([unchanged?.googleReviewPostsEnabled, unchanged?.googleReviewPostMinStars]));
+    const off = await patch({ googleReviewAutomationEnabled: false, googleReviewPostsEnabled: false });
+    ok("Ausdrueckliches false schaltet weiterhin ab", off?.googleReviewAutomationEnabled === false && off?.googleReviewPostsEnabled === false, JSON.stringify([off?.googleReviewAutomationEnabled, off?.googleReviewPostsEnabled]));
   }
   {
     const approveRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/does-not-exist/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" } });
@@ -1266,13 +1276,14 @@ async function main() {
     const noDays = await patch({ videoEnabled: true, videoWeekdays: "" });
     ok("ohne gewählte Tage gibt es keinen nächsten Video-Termin", noDays?.nextVideoPostAt === null, String(noDays?.nextVideoPostAt));
 
-    const off = await patch({});
-    ok("Video-Diashow ist ohne Angabe aus", off?.videoEnabled === false, JSON.stringify(off?.videoEnabled));
-    // PATCH /api/me ersetzt IMMER das ganze Briefing: die leeren patch({}) in diesem und im
-    // Bewertungs-Block haben damit auch die Kommentar-Automatik abgeschaltet, die der
-    // Admin-Abschnitt weiter unten erwartet. Hier einmal wiederherstellen, statt die Reihenfolge
-    // der beiden zusammengefuehrten Suiten zu verschraenken.
-    await patch({ commentAutomationEnabled: true, commentAutomationMode: "auto" });
+    const stillOn = await patch({});
+    ok("Leerer Patch laesst die Video-Einstellung unveraendert", stillOn?.videoEnabled === true, JSON.stringify(stillOn?.videoEnabled));
+    const videoOff = await patch({ videoEnabled: false });
+    ok("Ausdrueckliches false schaltet die Video-Diashow ab", videoOff?.videoEnabled === false, JSON.stringify(videoOff?.videoEnabled));
+    // Zusatzprobe genau fuer die Falle, die dreimal zugeschlagen hat: ein Patch, der NUR ein
+    // fremdes Feld setzt, darf eine andere Einstellung nicht mitreissen.
+    const keep = await patch({ industry: "Teilpatch-Probe" });
+    ok("Fremdes Feld patchen laesst die Kommentar-Automatik stehen", keep?.commentAutomationEnabled === true, JSON.stringify(keep?.commentAutomationEnabled));
   }
   {
     const res = await fetch(`${BASE}${MOUNT}/api/voice-preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voice: "de-DE-Wavenet-H" }) });

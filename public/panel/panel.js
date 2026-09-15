@@ -144,7 +144,7 @@
    * `.dictate-wrap` mit angehaengtem Mikrofon-Button - das ist die einzige Stelle, die jedes
    * Feld beim Rendern aufruft, keine Kopien der Button-/Icon-Auszeichnung an den einzelnen
    * Feld-Stellen. Der Klick-Handler (siehe zentraler document-Click-Listener) findet das
-   * Zielfeld ueber `.closest(".dictate-wrap")` + `querySelector("input, textarea")` - bewusst
+   * Zielfeld ueber `.closest(".with-dictate")` + `querySelector("input, textarea")` - bewusst
    * NICHT ueber eine id, weil manche Felder (Content-Saeulen-Zeilen, Vorausplanungs-Karten pro
    * Beitrag) mehrfach auf derselben Seite vorkommen bzw. Formulare mit identischer Feld-id an
    * zwei Stellen parallel existieren (Einrichtungs-Assistent vs. Einstellungen).
@@ -2783,8 +2783,6 @@
     });
     const none = $("#set-noresult");
     if (none) none.hidden = anyVisible;
-    const hint = $("#set-search-hint");
-    if (hint) hint.textContent = q ? `Gefiltert nach „${rawQuery.trim()}“ - Feld leeren, um wieder alles zu sehen.` : "Zeigt sofort nur die passenden Einstellungen an.";
   }
 
   // Panel v11: "settings:aussehen" springt zur Einstellungs-Ansicht UND dort zur Gruppe - so kann
@@ -3471,10 +3469,6 @@
       if (input) { input.value = chatStarter.dataset.chatStarter; input.focus(); }
       return;
     }
-    if (e.target.closest("#help-chat-close")) {
-      closeHelpChat();
-      return;
-    }
 
     const swatch = e.target.closest("[data-swatch]");
     if (swatch) {
@@ -3543,7 +3537,7 @@
     }
     const ppSwatch = e.target.closest("[data-pp-swatch]");
     if (ppSwatch) {
-      const colorInput = ppSwatch.closest(".preview-card-body")?.querySelector("[data-pp-color]");
+      const colorInput = ppSwatch.closest(".card-body, .preview-card-body")?.querySelector("[data-pp-color]");
       if (colorInput) colorInput.value = ppSwatch.dataset.ppSwatch;
       return;
     }
@@ -3570,7 +3564,7 @@
     const ppRegen = e.target.closest("[data-pp-regenerate]");
     if (ppRegen) {
       const id = ppRegen.dataset.ppRegenerate;
-      const colorInput = ppRegen.closest(".preview-card-body")?.querySelector("[data-pp-color]");
+      const colorInput = ppRegen.closest(".card-body, .preview-card-body")?.querySelector("[data-pp-color]");
       const accentColor = colorInput ? colorInput.value : "#0a0e1a";
       const oldLabel = ppRegen.textContent;
       ppRegen.disabled = true;
@@ -3810,7 +3804,7 @@
       try {
         await api("POST", `/api/comment-approvals/${id}/${action}`, body);
         card?.remove();
-        const box = $("#dash-comment-approvals");
+        const box = $("#approvals-list");
         if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
         refreshPendingCommentBadge();
       } catch (err) {

@@ -1144,6 +1144,10 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
 
 /* --- Einstellungs-Suche: ein Feld, das sich der Breite anpasst (vorher lief der Diktat-Knopf
        daneben aus dem Layout) --- */
+/* Die Einstellungs-Suche setzt .is-filtered auf alles, was nicht passt - ohne diese Regel blieb
+   jede Gruppe stehen und die Suche tat sichtbar gar nichts (gefunden vom Bruchstellen-Audit). */
+.is-filtered { display: none !important; }
+
 .set-search { margin: 0 0 var(--s6); }
 .set-search input { width: 100%; max-width: 420px; }
 
