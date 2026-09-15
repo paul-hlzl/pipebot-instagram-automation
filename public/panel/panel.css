@@ -408,7 +408,12 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 
 /* Flow-Leiste: 7 Tage */
 .flow { margin-top: var(--s4); }
-.flow-track { display: grid; grid-template-columns: repeat(7, 1fr); align-items: center; }
+/* minmax(0, 1fr) statt 1fr: eine Grid-Spur darf sonst nicht unter ihren Inhalt schrumpfen
+   (min-width: auto). Bei einem Kunden mit drei Beitraegen an einem Tag wurde der Wochenstreifen
+   dadurch breiter als das Handy-Display - gemessen 394px bei 360px Fensterbreite, die ganze
+   Seite liess sich seitlich schieben. Faellt nur auf einem vollen Konto auf, deshalb erst bei
+   der Kontrolle auf Produktion aufgefallen. */
+.flow-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: center; }
 .flow-day {
   display: flex; flex-direction: column; align-items: center; gap: var(--s2);
   background: none; border: 0; padding: var(--s2) 0; font: inherit; cursor: pointer; color: inherit;
@@ -417,7 +422,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .flow-day:active { transform: scale(.94); }
 .flow-day .d { font-size: var(--t-micro); font-weight: 500; color: var(--stone); }
 .flow-day[aria-current="date"] .d { color: var(--ink); font-weight: 700; }
-.flow-nodes { position: relative; display: flex; gap: 3px; align-items: center; justify-content: center; min-height: 22px; }
+.flow-nodes { position: relative; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; justify-content: center; min-height: 22px; }
 .flow-legend { display: flex; flex-wrap: wrap; gap: var(--s4); margin-top: var(--s4); font-size: var(--t-micro); color: var(--stone); }
 .flow-legend span { display: inline-flex; align-items: center; gap: var(--s2); }
 
