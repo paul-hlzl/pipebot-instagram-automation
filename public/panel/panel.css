@@ -1193,7 +1193,7 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
 /* --- Erklaerung hinter einem Fragezeichen, statt drei Zeilen Grau --- */
 .info { margin-top: var(--s2); }
 .info > summary {
-  display: inline-grid; place-content: center; width: 22px; height: 22px; border-radius: 50%;
+  display: inline-grid; place-content: center; width: 28px; height: 28px; border-radius: 50%;
   border: 1px solid var(--line-strong); color: var(--stone);
   font-size: var(--t-micro); font-weight: 700; cursor: pointer; list-style: none;
 }
@@ -1221,3 +1221,27 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
 }
 .caption-more, .caption-tags { font-size: var(--t-small); margin-top: var(--s2); margin-right: var(--s4); }
 .caption-taglist { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s2); overflow-wrap: anywhere; }
+
+/* --- Tap-Ziele (Responsive-Matrix 15.09.2026): alles, was man antippt, mindestens 40px hoch,
+       Textlinks mindestens 24px (WCAG 2.5.8). Gefunden bei 360/390/768/1440. --- */
+.acct { width: 40px; height: 40px; }
+.dictate { width: 40px; height: 40px; }
+.segmented button { min-height: 40px; }
+.swatch { width: 36px; height: 36px; }
+.link { display: inline-block; min-height: 24px; line-height: 24px; }
+.card-kicker .link, .caption .link { line-height: 1.45; }
+/* Der Griff am Sheet ist optisch ein 4px-Balken, als Schliess-Knopf aber 4px hoch gewesen.
+   Die Trefferflaeche ist jetzt 24px hoch, der Balken wird darin gezeichnet. */
+.sheet-grip {
+  height: 32px; background: none; display: grid; place-content: center; margin: 0 auto var(--s3);
+}
+.sheet-grip::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong); }
+
+/* Die Schritt-Knoten der Einrichtungs-Kette sind optisch 24px - als Knopf waren sie damit auch
+   nur 24px gross. Die Trefferflaeche wird unsichtbar auf 44px erweitert, die Optik bleibt. */
+.rail .pipe-node { position: relative; }
+.rail .pipe-node::before { content: ""; position: absolute; inset: -10px; }
+
+/* Aufklapper-Zeilen (details/summary) sind Bedienelemente - mindestens 28px hoch. */
+summary { min-height: 28px; display: list-item; }
+.recover-access > summary, .pp-edit > summary { padding: var(--s1) 0; }
