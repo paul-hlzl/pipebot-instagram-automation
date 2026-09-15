@@ -831,6 +831,11 @@ export function createPanelRouter(): Router {
    * unter zwei Cent, waehrend im Formular realistisch ein bis drei gebraucht werden: einmal
    * probieren, Adresse korrigieren, nochmal. Die alte Minutensperre traf genau diesen Ablauf.
    */
+  /* Fehlermeldungen an den Kunden kommen ab hier nur noch aus ToolError - unserer eigenen Klasse
+     mit bewusst formulierten, deutschen Texten. `err instanceof Error` (wie es vorher an fuenf
+     Stellen stand) laesst dagegen JEDE interne Meldung durch: einen Axios-Text wie "Request failed
+     with status code 529" ebenso wie "Invalid authentication tag length: 1". Das ist dieselbe
+     Fehlerklasse wie "Failed to fetch" im Browser, nur auf der Serverseite. */
   const ANALYZE_MAX_PRO_STUNDE = 5;
   router.post(
     "/api/analyze-website",
@@ -865,7 +870,7 @@ export function createPanelRouter(): Router {
         res.json({ suggestion });
       } catch (err) {
         console.error("[panel] analyze-website fehlgeschlagen:", err);
-        res.status(502).json({ error: err instanceof Error ? err.message : "Die Website konnte nicht analysiert werden." });
+        res.status(502).json({ error: err instanceof ToolError ? err.message : "Die Website konnte gerade nicht analysiert werden. Bitte versuchen Sie es in einer Minute noch einmal." });
       }
     }),
   );
@@ -1191,7 +1196,7 @@ export function createPanelRouter(): Router {
         res.json({ ...result, posts: listPlannedPosts(c.id, today, to), maxRegenerate: PLANNED_POST_MAX_REGENERATE });
       } catch (err) {
         console.error("[panel] Branding-Neugenerierung fehlgeschlagen:", err);
-        res.status(502).json({ error: err instanceof Error ? err.message : "Die Neugenerierung konnte gerade nicht durchgeführt werden." });
+        res.status(502).json({ error: err instanceof ToolError ? err.message : "Die Neugenerierung konnte gerade nicht durchgeführt werden." });
       }
     }),
   );
@@ -1434,7 +1439,7 @@ export function createPanelRouter(): Router {
         assertNoBannedWords(c.id, ...checkTexts);
         assertRequiredElements(c.id, ...checkTexts);
       } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : "Ungültiger Text." });
+        res.status(400).json({ error: err instanceof ToolError ? err.message : "Der Text konnte nicht gespeichert werden - bitte prüfen Sie ihn noch einmal." });
         return;
       }
       const updated = updatePlannedPostText(plan.id, { headline, caption });
@@ -1793,7 +1798,7 @@ export function createPanelRouter(): Router {
         res.status(429).json({ error: err.message });
         return;
       }
-      res.status(502).json({ error: err instanceof Error ? err.message : "Antwort konnte nicht gesendet werden." });
+      res.status(502).json({ error: err instanceof ToolError ? err.message : "Antwort konnte nicht gesendet werden. Bitte versuchen Sie es später noch einmal." });
     }
   }));
 
@@ -1842,7 +1847,7 @@ export function createPanelRouter(): Router {
         res.status(429).json({ error: err.message });
         return;
       }
-      res.status(502).json({ error: err instanceof Error ? err.message : "Antwort konnte nicht gesendet werden." });
+      res.status(502).json({ error: err instanceof ToolError ? err.message : "Antwort konnte nicht gesendet werden. Bitte versuchen Sie es später noch einmal." });
     }
   }));
 
