@@ -761,6 +761,49 @@ async function main() {
       `${brandingChangedAt1} -> ${brandingChangedAt2}`,
     );
 
+    // 15.09.2026: Themenschwerpunkte gehoeren zum inhaltlichen Profil - sie steuern, WOVON ein
+    // Beitrag handelt. Vorher zaehlten nur Firmenname/Branche/Beschreibung/Tonalitaet, wer nur
+    // seine Saeulen austauschte bekam weder ein Angebot noch galten seine geplanten Beitraege
+    // danach als veraltet.
+    await new Promise((r) => setTimeout(r, 20));
+    const patchPillarsRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ contentPillars: [{ title: "Ganz neues Thema", description: "Frisch dazugekommen", weight: 3 }] }),
+    });
+    const patchPillarsBody = await patchPillarsRes.json();
+    ok(
+      "Geänderte Themenschwerpunkte lösen ein brandingRegenOffer aus",
+      Boolean(patchPillarsBody.brandingRegenOffer?.changedFields?.includes("contentPillars")),
+      JSON.stringify(patchPillarsBody.brandingRegenOffer),
+    );
+    const brandingChangedAt3 = db.prepare("SELECT branding_last_changed_at FROM customers WHERE id = ?").get(customerId).branding_last_changed_at;
+    ok(
+      "Geänderte Themenschwerpunkte setzen branding_last_changed_at",
+      brandingChangedAt3 !== brandingChangedAt2 && Date.now() - Date.parse(brandingChangedAt3) < 10_000,
+      `${brandingChangedAt2} -> ${brandingChangedAt3}`,
+    );
+
+    // Dieselben Saeulen nochmal speichern (andere Reihenfolge, gleiche Inhalte) darf NICHT
+    // nochmal als Aenderung zaehlen - sonst gilt nach jedem Speichern alles als veraltet und
+    // die naechtliche Auffrischung schriebe jede Nacht die ganze Woche neu.
+    await new Promise((r) => setTimeout(r, 20));
+    const patchSamePillarsRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ contentPillars: [{ title: "Ganz neues Thema", description: "Frisch dazugekommen", weight: 3 }] }),
+    });
+    const patchSamePillarsBody = await patchSamePillarsRes.json();
+    ok(
+      "Unveränderte Themenschwerpunkte lösen kein neues Angebot aus",
+      !patchSamePillarsBody.brandingRegenOffer?.changedFields?.includes("contentPillars"),
+      JSON.stringify(patchSamePillarsBody.brandingRegenOffer),
+    );
+    ok(
+      "Unveränderte Themenschwerpunkte lassen branding_last_changed_at unverändert",
+      db.prepare("SELECT branding_last_changed_at FROM customers WHERE id = ?").get(customerId).branding_last_changed_at === brandingChangedAt3,
+    );
+
     const noAuthRegenRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/regenerate-for-branding`, {
       method: "POST",
       headers: { "content-type": "application/json" },

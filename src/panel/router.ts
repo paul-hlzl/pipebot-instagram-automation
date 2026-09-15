@@ -355,7 +355,26 @@ const BRANDING_REGEN_FIELD_LABELS: Record<string, string> = {
   industry: "Branche",
   about: "Beschreibung",
   tone: "Tonalität",
+  contentPillars: "Themenschwerpunkte",
 };
+
+/**
+ * Vergleichbare Form der Content-Saeulen - genau so normalisiert, wie setContentPillars sie
+ * ablegt (trimmen, kuerzen, Gewicht auf 1..5), damit ein Speichern ohne echte Aenderung nicht
+ * faelschlich als Profilaenderung zaehlt. Die Reihenfolge ist egal, deshalb sortiert.
+ */
+function pillarFingerprint(pillars: { title: string; description?: string | null; weight?: number }[]): string {
+  return pillars
+    .map((p) => ({
+      title: (p.title ?? "").trim().slice(0, 60),
+      description: (p.description ?? "").trim().slice(0, 300),
+      weight: Math.min(5, Math.max(1, Math.round(p.weight ?? 1))),
+    }))
+    .filter((p) => p.title)
+    .map((p) => `${p.title}|${p.description}|${p.weight}`)
+    .sort()
+    .join("\n");
+}
 
 /**
  * Which BriefingInput fields are "content-relevant" enough that changing them should offer to
@@ -1030,6 +1049,13 @@ export function createPanelRouter(): Router {
       return;
     }
     const changedBrandingFields = brandingFieldsChanged(c, data);
+    // Die Themenschwerpunkte steuern unmittelbar, WOVON ein Beitrag handelt - sie gehoeren damit
+    // genauso zum inhaltlichen Profil wie Branche oder Beschreibung. Bis 15.09.2026 fehlten sie
+    // hier: wer nur seine Saeulen austauschte, bekam weder das Angebot zum Neugenerieren, noch
+    // galten seine schon geplanten Beitraege danach als veraltet.
+    if (pillarFingerprint(listContentPillars(c.id)) !== pillarFingerprint(data.contentPillars)) {
+      changedBrandingFields.push("contentPillars");
+    }
     const now = nowIso();
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,

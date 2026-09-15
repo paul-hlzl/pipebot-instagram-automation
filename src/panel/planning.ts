@@ -213,6 +213,10 @@ export interface PlanningRunSummary {
   customersChecked: number;
   planned: number;
   skippedExisting: number;
+  /** Bestehende 'planned'-Zeilen, die dieser Lauf neu geschrieben hat (veraltetes Profil oder Alter). */
+  refreshed: number;
+  /** Auffrischungen, die fehlgeschlagen sind - alter Stand blieb stehen, siehe planning_errors. */
+  refreshFailed: number;
   errors: number;
 }
 
@@ -228,11 +232,13 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
   let customersChecked = 0;
   let planned = 0;
   let skippedExisting = 0;
+  let refreshed = 0;
+  let refreshFailed = 0;
   let errors = 0;
 
   if (!anthropicAvailable()) {
     logPlanningError(null, null, null, "ANTHROPIC_API_KEY fehlt - Vorausplanung komplett übersprungen.");
-    return { startedAt, finishedAt: nowIso(), customersChecked: 0, planned: 0, skippedExisting: 0, errors: 1 };
+    return { startedAt, finishedAt: nowIso(), customersChecked: 0, planned: 0, skippedExisting: 0, refreshed: 0, refreshFailed: 0, errors: 1 };
   }
 
   const rows = db.prepare("SELECT * FROM customers WHERE status = 'active'").all() as CustomerRow[];
@@ -247,6 +253,13 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
 
     const scheduleInput = scheduleInputFor(row);
     const pillars = listContentPillars(row.id);
+
+    // Erst aufraeumen, dann planen: die Schleife darunter ueberspringt jeden Tag, fuer den schon
+    // eine Zeile existiert - eine veraltete Zeile wuerde dort also fuer immer liegen bleiben.
+    const aufgefrischt = await refreshStalePlannedPosts(row, pillars);
+    refreshed += aufgefrischt.refreshed;
+    refreshFailed += aufgefrischt.failed;
+
     // Tracks the pillar assigned to the previous planned day/channel THIS run, so a freshly
     // generated 7-day week rotates pillars instead of all landing on the same one -
     // pickPillarForToday's DB-based "avoid last real post" check can't see that, since no new
@@ -284,7 +297,7 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
     }
   }
 
-  return { startedAt, finishedAt: nowIso(), customersChecked, planned, skippedExisting, errors };
+  return { startedAt, finishedAt: nowIso(), customersChecked, planned, skippedExisting, refreshed, refreshFailed, errors };
 }
 
 function msUntilNextUtcHour(hourUtc: number): number {
@@ -339,6 +352,111 @@ export function isBrandingStale(versionAtGeneration: string | null, brandingLast
   if (!brandingLastChangedAt) return false;
   if (!versionAtGeneration) return true;
   return versionAtGeneration < brandingLastChangedAt;
+}
+
+/* ========== Auffrischung liegengebliebener Tagesplaene (15.09.2026) ==========
+ *
+ * Das Sicherheitsnetz darunter greift erst in dem Moment, in dem die Routine einen Beitrag
+ * abholt. Was der Kunde die Tage davor im Kalender SIEHT, war damit weiterhin der alte Stand -
+ * genau die Beschwerde, die diese Aenderung ausgeloest hat: ein am 12.09. unter dem alten
+ * Firmenprofil geschriebener Beitrag stand am 15.09. immer noch fuer den 18.09. in der Vorschau.
+ * planUpcomingPosts() ueberspringt jeden Tag, fuer den schon eine Zeile existiert (Absicht: der
+ * Kunde soll nicht jeden Morgen anderen Text vorfinden), und niemand hat die alte Zeile je
+ * angefasst. Deshalb frischt der naechtliche Lauf jetzt zuerst auf, bevor er neue Tage plant.
+ *
+ * Aufgefrischt wird ausschliesslich Status 'planned': ein 'edited' ist die Handarbeit des Kunden,
+ * 'approved'/'submitted' hat er freigegeben, 'published' ist raus, 'rejected' hat er abgelehnt -
+ * alles davon zu ueberschreiben waere ein Fehler, keine Verbesserung.
+ */
+
+/**
+ * Ab welchem Alter ein unangetasteter Tagesplan allein wegen der Zeit neu geschrieben wird.
+ *
+ * Warum 14 und nicht weniger: vorausgeplant wird LOOKAHEAD_DAYS = 7 Tage. Im Normalbetrieb ist
+ * ein Beitrag am Tag seiner Veroeffentlichung also hoechstens 7 Tage alt. Ein Schwellwert
+ * darunter wuerde Nacht fuer Nacht Beitraege neu schreiben, die der planende Lauf selbst gerade
+ * erst erzeugt hat - Kosten fuer jeden Kunden jede Nacht, und der Kunde saehe genau das staendig
+ * wechselnde Programm, das die Ueberspring-Regel verhindern soll. 14 Tage = doppelte Planweite
+ * und feuert deshalb im geregelten Betrieb nie; es faengt die Faelle ab, in denen eine Zeile
+ * wirklich liegen bleibt: pausierter Kunde, der wieder aktiv wird, ein Kanal, der erst spaeter
+ * wieder eingeschaltet wird, ein gescheiterter Versand, oder eine spaeter groessere Planweite.
+ *
+ * Der eigentliche Auslöser fuer "veraltet" ist nicht das Alter, sondern das geaenderte
+ * Kundenprofil - das deckt die Branding-Regel unten praezise ab, und zwar sofort statt nach
+ * Tagen. Das Alter ist nur die grobe Rueckfallebene fuer alles, was sonst durchrutscht.
+ * Ueber PLANNED_POST_MAX_AGE_DAYS anpassbar, ohne neuen Build.
+ */
+export const PLANNED_POST_MAX_AGE_DAYS = (() => {
+  const raw = Number(process.env.PLANNED_POST_MAX_AGE_DAYS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 14;
+})();
+
+export type StaleReason = "branding" | "alter";
+
+/**
+ * Entscheidet fuer genau eine Zeile, ob und warum sie neu geschrieben gehoert - reine
+ * Zeitstempel-Arithmetik, keine DB, kein Netz, damit der naechtliche Lauf das ueber alle Kunden
+ * durchziehen kann, ohne teuer zu werden.
+ *
+ * Als Schreibzeitpunkt zaehlt branding_version_at_generation und ersatzweise created_at, bewusst
+ * NICHT updated_at: updated_at wandert auch bei reinen Statuswechseln mit und wuerde eine alte
+ * Zeile faelschlich frisch aussehen lassen.
+ */
+export function plannedPostStaleReason(
+  plan: Pick<PlannedPost, "status" | "brandingVersionAtGeneration" | "createdAt">,
+  brandingLastChangedAt: string | null,
+  now: number = Date.now(),
+): StaleReason | null {
+  if (plan.status !== "planned") return null;
+  if (isBrandingStale(plan.brandingVersionAtGeneration, brandingLastChangedAt)) return "branding";
+  const geschriebenAm = Date.parse(plan.brandingVersionAtGeneration ?? plan.createdAt);
+  if (!Number.isFinite(geschriebenAm)) return null;
+  return now - geschriebenAm >= PLANNED_POST_MAX_AGE_DAYS * 86_400_000 ? "alter" : null;
+}
+
+export interface RefreshResult {
+  refreshed: number;
+  failed: number;
+}
+
+/**
+ * Schreibt die veralteten 'planned'-Zeilen eines Kunden im Vorschaufenster neu - gleicher Tag,
+ * gleicher Kanal, gleiche Content-Saeule, nur frischer Text und frisches Bild aus dem AKTUELLEN
+ * Profil. Laeuft fuer jeden Kunden automatisch, niemand muss einen Einzelfall erkennen.
+ *
+ * Ein Fehlschlag bleibt folgenlos: die alte Zeile bleibt stehen, wird protokolliert und beim
+ * naechsten Lauf erneut versucht - und falls sie bis zu ihrem Tag ueberlebt, faengt sie das
+ * Sicherheitsnetz in ensureFreshPlannedPost ab, bevor irgendetwas Veraltetes veroeffentlicht wird.
+ */
+export async function refreshStalePlannedPosts(row: CustomerRow, pillars: ContentPillar[]): Promise<RefreshResult> {
+  const von = viennaDateStr();
+  const bis = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
+  const jetzt = Date.now();
+  let refreshed = 0;
+  let failed = 0;
+
+  for (const plan of listPlannedPosts(row.id, von, bis)) {
+    const grund = plannedPostStaleReason(plan, row.branding_last_changed_at, jetzt);
+    if (!grund) continue;
+    const channel = plan.channel as PlannableChannel;
+    if (!(channel in CHANNEL_SCHEDULE)) continue;
+    try {
+      const generated = await generatePost(row, channel, findPillar(pillars, plan.pillarTitle), `planned-post-stale-refresh-${grund}`);
+      overwritePlannedPostContent(plan.id, {
+        headline: generated.headline,
+        caption: generated.caption,
+        imageUrl: generated.imageUrl,
+        accentColorUsed: generated.accentColorUsed,
+      });
+      refreshed++;
+    } catch (err) {
+      failed++;
+      const message = err instanceof Error ? err.message : String(err);
+      logPlanningError(row.id, channel, plan.scheduledFor, `Auffrischung (${grund}) fehlgeschlagen, alter Stand bleibt vorerst stehen: ${message}`);
+      console.error(`[panel] Auffrischung fehlgeschlagen für ${row.id}/${channel}/${plan.scheduledFor}:`, message);
+    }
+  }
+  return { refreshed, failed };
 }
 
 function getCustomerRowById(customerId: string): CustomerRow | undefined {

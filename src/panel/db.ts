@@ -587,6 +587,17 @@ if (!(db.prepare(`PRAGMA table_info(analytics_account_snapshots)`).all() as { na
 migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
 migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
 
+// 15.09.2026: Zeilen aus der Zeit VOR dieser Spalte bekommen created_at nachgetragen. Fuer sie
+// ist created_at exakt der Moment, in dem ihr Text geschrieben wurde - jeder Weg, der einen Text
+// spaeter ersetzt, setzt die Spalte naemlich mit. Ohne diesen Nachtrag gilt "NULL" als "Alter
+// unbekannt, im Zweifel veraltet": bei einem Kunden mit Profilwechsel waere damit die ganze
+// Woche veraltet gewesen, auch die Beitraege, die nach dem Wechsel und damit schon korrekt
+// erzeugt wurden - die haette die naechtliche Auffrischung einmal komplett neu geschrieben
+// (Kosten und, schlimmer, ein grundlos anderes Wochenprogramm fuer den Kunden).
+for (const tabelle of ["planned_posts", "pending_approvals"]) {
+  db.prepare(`UPDATE ${tabelle} SET branding_version_at_generation = created_at WHERE branding_version_at_generation IS NULL`).run();
+}
+
 export interface CustomerRow {
   standstill_alert_sent_at: string | null;
   id: string;
