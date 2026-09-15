@@ -6,7 +6,7 @@ import sharp from "sharp";
 import { PACKAGE_ROOT, getConfig } from "../config.js";
 import { db, nowIso, type CustomerRow, type ConnectionRow } from "./db.js";
 import { assertEncryptionKey, encrypt, randomToken, sha256 } from "./crypto.js";
-import { providers, getProvider } from "./providers/index.js";
+import { getProvider, visibleProviders } from "./providers/index.js";
 import { ProviderError } from "./providers/types.js";
 import {
   activateSavedTheme,
@@ -49,12 +49,16 @@ import { deleteObject, uploadAudioBase64 } from "../r2.js";
 import { estimateTranscriptionCostUsd, transcribeAudioUrl } from "../audio-transcribe.js";
 import { ToolError } from "../errors.js";
 import { approveCommentReply, CommentRateLimitError, listPendingCommentApprovals, rejectCommentReply } from "./comments.js";
+import { approveReviewReply, listPendingReviewApprovals, rejectReviewReply, ReviewRateLimitError } from "./reviews.js";
+import { runVideoPass } from "./videos.js";
+import { DEFAULT_VOICE_ID, getVoiceOption, synthesizeSpeech, ttsAvailable, VOICE_OPTIONS, VOICE_PREVIEW_TEXT } from "../tts.js";
+import { DEFAULT_VIDEO_LENGTH, VIDEO_LENGTHS, ZOOM_DIRECTIONS } from "../video.js";
 import { createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { accessRecoveryEmail, verificationEmail } from "./emails.js";
-import { isDue, isDueForChannel, nextPostAt, viennaDateStr } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, nextVideoPostAt, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, helpChatReply, improveBriefing, suggestPillarsWithSearch, suggestTopics, type HelpChatMessage } from "../anthropic.js";
 import { subscribeToCommentWebhook } from "../instagram-comments.js";
 import { CAROUSEL_MIN_SLIDES, CAROUSEL_MAX_SLIDES } from "../instagram.js";
@@ -81,6 +85,8 @@ const FREQUENCIES = ["3x-woche", "werktags", "taeglich"];
 const CTAS = ["link_bio", "anrufen", "nachricht", "termin", "keiner"];
 const HASHTAG_PREFS = ["keine", "wenige", "viele"];
 const COMMENT_AUTOMATION_MODES = ["auto", "approval"];
+/** Gleiche zwei Modi wie bei Kommentaren, aber ein eigener Schalter - siehe reviews.ts. */
+const REVIEW_AUTOMATION_MODES = ["auto", "approval"];
 const LANGUAGES = ["de", "en"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 // Panel v6 Aufgabe 2b: einheitliche Meldung ueberall dort, wo ein angemeldeter, aber noch nicht
@@ -173,6 +179,17 @@ interface BriefingInput {
   notifyWeeklyReport: boolean;
   commentAutomationEnabled: boolean;
   commentAutomationMode: string;
+  googleReviewAutomationEnabled: boolean;
+  googleReviewMode: string;
+  googleReviewPostsEnabled: boolean;
+  googleReviewPostMinStars: number;
+  videoEnabled: boolean;
+  videoWeekdays: string;
+  videoPostTime: string;
+  videoLengthSeconds: number;
+  videoZoomDirection: string;
+  videoVoice: string;
+  videoVoiceEnabled: boolean;
   carouselSlideCount: number;
   carouselAutoFrequency: string;
   fontChoice: string;
@@ -242,6 +259,17 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     notifyWeeklyReport: bool(body.notifyWeeklyReport, false),
     commentAutomationEnabled: bool(body.commentAutomationEnabled, false),
     commentAutomationMode: str(body.commentAutomationMode, 20) || "approval",
+    googleReviewAutomationEnabled: bool(body.googleReviewAutomationEnabled, false),
+    googleReviewMode: str(body.googleReviewMode, 20) || "approval",
+    googleReviewPostsEnabled: bool(body.googleReviewPostsEnabled, false),
+    googleReviewPostMinStars: Number.isFinite(Number(body.googleReviewPostMinStars)) ? Math.round(Number(body.googleReviewPostMinStars)) : 4,
+    videoEnabled: bool(body.videoEnabled, false),
+    videoWeekdays: cleanWeekdayList(body.videoWeekdays, 20),
+    videoPostTime: str(body.videoPostTime, 5),
+    videoLengthSeconds: Number.isFinite(Number(body.videoLengthSeconds)) ? Math.round(Number(body.videoLengthSeconds)) : DEFAULT_VIDEO_LENGTH,
+    videoZoomDirection: str(body.videoZoomDirection, 20) || "alternate",
+    videoVoice: str(body.videoVoice, 60) || DEFAULT_VOICE_ID,
+    videoVoiceEnabled: bool(body.videoVoiceEnabled, true),
     carouselSlideCount: Number.isFinite(Number(body.carouselSlideCount)) ? Math.round(Number(body.carouselSlideCount)) : 5,
     carouselAutoFrequency: str(body.carouselAutoFrequency, 20) || "off",
     fontChoice: str(body.fontChoice, 20) || "inter",
@@ -251,6 +279,14 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
   };
   const errors: Record<string, string> = {};
   if (!COMMENT_AUTOMATION_MODES.includes(data.commentAutomationMode)) data.commentAutomationMode = "approval";
+  if (!REVIEW_AUTOMATION_MODES.includes(data.googleReviewMode)) data.googleReviewMode = "approval";
+  // 1-5 Sterne; alles andere faellt auf den Standard 4 zurueck (nicht auf 1 - "ab 1 Stern einen
+  // Lob-Beitrag bauen" waere das Letzte, was ein Tippfehler ausloesen duerfte).
+  if (data.googleReviewPostMinStars < 1 || data.googleReviewPostMinStars > 5) data.googleReviewPostMinStars = 4;
+  if (!(VIDEO_LENGTHS as readonly number[]).includes(data.videoLengthSeconds)) data.videoLengthSeconds = DEFAULT_VIDEO_LENGTH;
+  if (!ZOOM_DIRECTIONS.includes(data.videoZoomDirection as (typeof ZOOM_DIRECTIONS)[number])) data.videoZoomDirection = "alternate";
+  if (!VOICE_OPTIONS.some((v) => v.id === data.videoVoice)) data.videoVoice = DEFAULT_VOICE_ID;
+  if (data.videoPostTime && !/^([01]\d|2[0-3]):([0-5]\d)$/.test(data.videoPostTime)) data.videoPostTime = "";
   if (data.carouselSlideCount < CAROUSEL_MIN_SLIDES || data.carouselSlideCount > CAROUSEL_MAX_SLIDES) data.carouselSlideCount = 5;
   if (!CAROUSEL_AUTO_FREQUENCIES.includes(data.carouselAutoFrequency)) data.carouselAutoFrequency = "off";
   if (!FONT_OPTIONS.some((f) => f.id === data.fontChoice)) data.fontChoice = DEFAULT_FONT_ID;
@@ -339,6 +375,19 @@ function publicState(c: CustomerRow) {
       notifyWeeklyReport: Boolean(c.notify_weekly_report),
       commentAutomationEnabled: Boolean(c.comment_automation_enabled),
       commentAutomationMode: c.comment_automation_mode || "approval",
+      googleReviewAutomationEnabled: Boolean(c.google_review_automation_enabled),
+      googleReviewMode: c.google_review_mode || "approval",
+      googleReviewPostsEnabled: Boolean(c.google_review_posts_enabled),
+      googleReviewPostMinStars: c.google_review_post_min_stars || 4,
+      videoEnabled: Boolean(c.video_enabled),
+      videoWeekdays: c.video_weekdays,
+      videoPostTime: c.video_post_time ?? "",
+      videoLengthSeconds: c.video_length_seconds || DEFAULT_VIDEO_LENGTH,
+      videoZoomDirection: c.video_zoom_direction || "alternate",
+      videoVoice: c.video_voice || DEFAULT_VOICE_ID,
+      videoVoiceEnabled: Boolean(c.video_voice_enabled),
+      // null = keine Video-Tage gewaehlt, dann entsteht auch nie automatisch eines.
+      nextVideoPostAt: nextVideoPostAt(scheduleInputFor(c)),
       // Panel v11: steuert nur, ob der einmalige Erst-Rundgang noch angeboten wird - die
       // "Was kann Pipeflow?"-Ansicht selbst ist davon unabhaengig immer erreichbar.
       tourDone: Boolean(c.tour_done_at),
@@ -423,7 +472,8 @@ export function createPanelRouter(): Router {
       // Livegang am 15.09.2026 ist die letzte Seite umgestellt, die noch Google Fonts geladen hat
       // (das alte public/panel/index.html); fonts.googleapis.com und fonts.gstatic.com sind
       // deshalb jetzt auch in der CSP raus - das Panel laedt damit nichts mehr von Dritten.
-      `default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'`,
+      // media-src kommt aus v22 (Video-Diashow): die Videos liegen wie die Bilder auf R2.
+      `default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: ${mediaOrigin}; media-src 'self' data: ${mediaOrigin}; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'`,
     );
     next();
   });
@@ -547,10 +597,15 @@ export function createPanelRouter(): Router {
 
   router.get("/api/providers", (_req, res) => {
     res.json({
-      providers: providers.map((p) => ({
+      providers: visibleProviders().map((p) => ({
         id: p.id, name: p.name, tagline: p.tagline, notice: p.notice ?? null, guide: p.guide, available: p.isConfigured(),
       })),
       aiAvailable: anthropicAvailable(),
+      // Video-Diashow: Stimmen-Auswahl fuers Panel. `voicePreviewAvailable` sagt dem Frontend, ob
+      // der Vorhoer-Knopf ueberhaupt etwas liefern kann (ohne GOOGLE_TTS_API_KEY nicht).
+      videoVoices: VOICE_OPTIONS.map((v) => ({ id: v.id, label: v.label, description: v.description, tier: v.tier })),
+      voicePreviewAvailable: ttsAvailable(),
+      videoLengths: VIDEO_LENGTHS,
       trialDays: trialDays(),
       turnstileSiteKey: turnstileSiteKey(),
       // Dauerhafte Staging-Testadresse (/panel/sandbox) - steuert nur den Testversion-Banner und
@@ -906,7 +961,10 @@ export function createPanelRouter(): Router {
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
          ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
          active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
-         comment_automation_enabled=?, comment_automation_mode=?, carousel_slide_count=?, carousel_auto_frequency=?,
+         comment_automation_enabled=?, comment_automation_mode=?,
+         google_review_automation_enabled=?, google_review_mode=?, google_review_posts_enabled=?, google_review_post_min_stars=?,
+         video_enabled=?, video_weekdays=?, video_post_time=?, video_length_seconds=?, video_zoom_direction=?, video_voice=?, video_voice_enabled=?,
+         carousel_slide_count=?, carousel_auto_frequency=?,
          font_choice=?, gradient_enabled=?, gradient_color2=?, gradient_direction=?, updated_at=?
          ${changedBrandingFields.length ? ", branding_last_changed_at=?" : ""}
        WHERE id=?`,
@@ -917,7 +975,10 @@ export function createPanelRouter(): Router {
         data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
         data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
         data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
-        data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode, data.carouselSlideCount, data.carouselAutoFrequency,
+        data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
+        data.googleReviewAutomationEnabled ? 1 : 0, data.googleReviewMode, data.googleReviewPostsEnabled ? 1 : 0, data.googleReviewPostMinStars,
+        data.videoEnabled ? 1 : 0, data.videoWeekdays || null, data.videoPostTime || null, data.videoLengthSeconds, data.videoZoomDirection, data.videoVoice, data.videoVoiceEnabled ? 1 : 0,
+        data.carouselSlideCount, data.carouselAutoFrequency,
         data.fontChoice, data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection,
         now,
         ...(changedBrandingFields.length ? [now] : []),
@@ -1434,6 +1495,12 @@ export function createPanelRouter(): Router {
     const format = ["carousel", "video_slideshow"].includes(requestedFormat) ? requestedFormat : "single";
     channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single"));
     triggerRoutineNow("post-now");
+    // Video-Diashows macht der Server selbst (videos.ts) - die externe Routine sieht sie gar nicht.
+    // Deshalb hier sofort anstossen statt bis zum naechsten Video-Cron zu warten: der Kunde hat
+    // gerade auf "Jetzt posten" geklickt. Fire-and-forget, ein Fehler darf die Antwort nie kippen.
+    if (format === "video_slideshow" && channels.includes("ig_feed")) {
+      runVideoPass().catch((err) => console.error("[panel] Sofort-Video nach 'Jetzt posten' fehlgeschlagen:", err));
+    }
     res.json(publicState(c));
   }));
 
@@ -1570,6 +1637,85 @@ export function createPanelRouter(): Router {
     }
     res.json({ ok: true, approval });
   });
+
+  // Google-Bewertungen im Freigabe-Modus (google_review_mode = "approval") - eigene Endpunkte aus
+  // demselben Grund wie bei den Kommentaren oben: "Freigeben" schickt die Antwort hier sofort
+  // selbst an Google, statt nur einen Status zu setzen, den eine externe Routine spaeter abholt.
+  router.get("/api/review-approvals", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    res.json({ approvals: listPendingReviewApprovals(c.id) });
+  });
+
+  router.post("/api/review-approvals/:id/approve", safe(async (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const editedReply = typeof req.body?.reply === "string" ? req.body.reply : undefined;
+    try {
+      const approval = await approveReviewReply(c.id, String(req.params.id), editedReply);
+      if (!approval) {
+        res.status(404).json({ error: "Bewertung nicht gefunden oder schon bearbeitet." });
+        return;
+      }
+      res.json({ ok: true, approval });
+    } catch (err) {
+      if (err instanceof ReviewRateLimitError) {
+        res.status(429).json({ error: err.message });
+        return;
+      }
+      res.status(502).json({ error: err instanceof Error ? err.message : "Antwort konnte nicht gesendet werden." });
+    }
+  }));
+
+  router.post("/api/review-approvals/:id/reject", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const approval = rejectReviewReply(c.id, String(req.params.id));
+    if (!approval) {
+      res.status(404).json({ error: "Bewertung nicht gefunden oder schon bearbeitet." });
+      return;
+    }
+    res.json({ ok: true, approval });
+  });
+
+  /**
+   * Stimme vorhören (Video-Diashow). Erzeugt einen kurzen Beispielsatz mit der gewählten Stimme
+   * und liefert ihn als Data-URL zurück - das Panel spielt ihn direkt ab, ohne dass irgendwo eine
+   * Audiodatei liegen bleibt. Strenges Limit pro Kunde: das ist ein Vorhör-Knopf, keine
+   * Sprachsynthese-API. Kosten sind winzig (ein Satz), werden aber trotzdem geloggt.
+   */
+  router.post("/api/voice-preview", safe(async (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    if (!ttsAvailable()) {
+      res.status(503).json({ error: "Die Sprachausgabe ist gerade nicht verfügbar." });
+      return;
+    }
+    if (rateLimited(`voice-preview:${c.id}`, 12, 10 * 60_000)) {
+      res.status(429).json({ error: "Zu viele Hörproben. Bitte in ein paar Minuten erneut versuchen." });
+      return;
+    }
+    const voice = getVoiceOption(str(req.body?.voice, 60));
+    try {
+      const spoken = await synthesizeSpeech(VOICE_PREVIEW_TEXT, voice.id);
+      logUsageCost(c.id, "video-tts", spoken.costUsd);
+      res.json({ voice: voice.id, label: voice.label, audioDataUrl: `data:${spoken.mimeType};base64,${spoken.audioBase64}` });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : "Hörprobe fehlgeschlagen." });
+    }
+  }));
 
   // Schritt 1 OAuth: zur Plattform weiterleiten
   router.get("/connect/:provider", (req, res) => {

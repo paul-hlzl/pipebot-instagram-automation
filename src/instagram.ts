@@ -7,6 +7,9 @@ import { checkRecentDuplicate, writeLastPost } from "./dedupe.js";
 const GRAPH_BASE = "https://graph.instagram.com/v21.0";
 const POLL_INTERVAL_MS = 4000;
 const POLL_TIMEOUT_MS = 60_000;
+/** Video braucht mehr Geduld als ein Bild - Instagram transkodiert jedes Reel erst (siehe createReelContainer). */
+const VIDEO_POLL_INTERVAL_MS = 5000;
+const VIDEO_POLL_TIMEOUT_MS = 300_000;
 
 /** Overrides the .env-configured account. Passed through from a tool's optional `customer_id`. */
 export interface InstagramCredentials {
@@ -416,6 +419,86 @@ export async function publishCarouselToInstagram(
  * and Stories are expected to closely follow (and duplicate the visual of) the feed post
  * they accompany, so the "did we just post this?" warning would just be noise here.
  */
+/**
+ * Reels-Container (Video-Diashow). Drei Unterschiede zu Bildern, die alle aus Metas
+ * Content-Publishing-Doku stammen und hier bewusst ausgeschrieben sind:
+ *   - `media_type: REELS` + `video_url` statt `image_url`; Reels sind der einzige Weg, ein Video
+ *     in den Feed zu bekommen (ein eigener "VIDEO"-Typ existiert für den Feed nicht mehr).
+ *   - Die Verarbeitung dauert deutlich länger als bei einem Bild (Instagram transkodiert das
+ *     Video), deshalb das großzügigere Polling unten statt der 60-Sekunden-Grenze für Bilder.
+ *   - `share_to_feed` sorgt dafür, dass das Reel auch im normalen Feed/Profilraster auftaucht
+ *     und nicht nur im Reels-Tab - für einen Unternehmensaccount ist das der Normalfall.
+ */
+async function createReelContainer(videoUrl: string, caption: string, creds?: InstagramCredentials): Promise<string> {
+  const igUserId = await resolveIgUserId(creds);
+  const { data } = await client().post<GraphIdResponse>(
+    `${GRAPH_BASE}/${igUserId}/media`,
+    null,
+    {
+      params: {
+        ...tokenParams(creds),
+        media_type: "REELS",
+        video_url: videoUrl,
+        caption,
+        share_to_feed: true,
+      },
+    },
+  );
+  if (!data.id) {
+    throw new ToolError("Instagram hat keinen Reels-Container angelegt (keine ID in der Antwort).");
+  }
+  return data.id;
+}
+
+/** Wie waitForContainer, nur mit einem Zeitfenster, das zur Video-Transkodierung passt (siehe
+ *  createReelContainer). Eigene Funktion statt eines Parameters an waitForContainer, damit der
+ *  Bild-Pfad unveraendert bleibt und niemand versehentlich 5 Minuten auf ein kaputtes Bild wartet. */
+async function waitForVideoContainer(containerId: string, creds?: InstagramCredentials): Promise<void> {
+  const deadline = Date.now() + VIDEO_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const status = await getContainerStatus(containerId, creds);
+    if (status === "FINISHED") return;
+    if (status === "ERROR") {
+      throw new ToolError(
+        `Reels-Container ${containerId} ist im Status ERROR. Video-URL, Format (MP4/H.264/AAC, 9:16) und oeffentliche Erreichbarkeit pruefen.`,
+      );
+    }
+    if (status === "EXPIRED") {
+      throw new ToolError(`Reels-Container ${containerId} ist EXPIRED (nicht innerhalb von 24h veroeffentlicht).`);
+    }
+    await sleep(VIDEO_POLL_INTERVAL_MS);
+  }
+  throw new ToolError(
+    `Timeout: Reels-Container ${containerId} wurde innerhalb von ${VIDEO_POLL_TIMEOUT_MS / 1000}s nicht FINISHED - Instagram verarbeitet das Video noch oder es ist etwas schiefgelaufen.`,
+  );
+}
+
+/** Veroeffentlicht ein fertig gerendertes Video als Reel. `videoUrl` muss oeffentlich erreichbar
+ *  sein (R2-Bucket, siehe r2.ts's uploadVideoBuffer). */
+export async function publishReelToInstagram(
+  videoUrl: string,
+  caption: string,
+  creds?: InstagramCredentials,
+  customerId?: string,
+): Promise<PublishResult> {
+  const duplicateWarning = checkRecentDuplicate(customerId);
+  await assertPublishingQuota(creds);
+
+  const result = await withRetry(
+    async () => {
+      const containerId = await createReelContainer(videoUrl, caption, creds);
+      await waitForVideoContainer(containerId, creds);
+      const postId = await publishContainer(containerId, creds);
+      return { postId, containerId, hostedImageUrl: videoUrl };
+    },
+    2,
+    "Instagram Reel publish",
+  );
+
+  writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);
+  return duplicateWarning ? { ...result, warning: duplicateWarning } : result;
+}
+
 export async function publishStoryToInstagram(
   imageUrl: string,
   creds?: InstagramCredentials,

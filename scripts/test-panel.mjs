@@ -1096,6 +1096,207 @@ async function main() {
     db.close();
   }
 
+  // --- Google-Bewertungen (automatische Antworten + Content-Recycling) ---
+  // Wie bei den Kommentaren: KEIN echter Aufruf an Google. Geprueft wird nur, was im eigenen
+  // Server passiert - Einstellungen speichern/validieren, Zugriffsschutz, Freigeben/Ablehnen.
+  console.log("\nGoogle-Bewertungen:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const body = await res.json();
+    const google = (body.providers || []).find((p) => p.id === "google");
+    // Ohne GOOGLE_CLIENT_ID/SECRET darf der Kanal im Panel gar nicht auftauchen (hiddenUntilConfigured) -
+    // sonst saehe jeder Kunde einen Verbinden-Knopf, der nur in einen Fehler laufen kann.
+    ok(
+      "Google taucht nur auf, wenn er konfiguriert ist",
+      process.env.GOOGLE_CLIENT_ID ? Boolean(google) : google === undefined,
+      `google=${JSON.stringify(google?.id ?? null)}, GOOGLE_CLIENT_ID gesetzt=${Boolean(process.env.GOOGLE_CLIENT_ID)}`,
+    );
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/review-approvals`);
+    ok("/api/review-approvals ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/review-approvals`, { headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("/api/review-approvals mit Login -> 200", res.status === 200, `status=${res.status}`);
+    ok("approvals ist ein leeres Array ohne Bewertungen", Array.isArray(body.approvals) && body.approvals.length === 0, JSON.stringify(body.approvals));
+  }
+  {
+    const base = {
+      company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+    };
+    const patch = async (extra) => {
+      const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: sessionCookie },
+        body: JSON.stringify({ ...base, ...extra }),
+      });
+      return (await res.json()).customer;
+    };
+
+    const saved = await patch({ googleReviewAutomationEnabled: true, googleReviewMode: "auto", googleReviewPostsEnabled: true, googleReviewPostMinStars: 5 });
+    ok("PATCH /api/me speichert googleReviewAutomationEnabled", saved?.googleReviewAutomationEnabled === true, JSON.stringify(saved?.googleReviewAutomationEnabled));
+    ok("PATCH /api/me speichert googleReviewMode", saved?.googleReviewMode === "auto", saved?.googleReviewMode);
+    ok("PATCH /api/me speichert googleReviewPostsEnabled", saved?.googleReviewPostsEnabled === true, JSON.stringify(saved?.googleReviewPostsEnabled));
+    ok("PATCH /api/me speichert googleReviewPostMinStars", saved?.googleReviewPostMinStars === 5, String(saved?.googleReviewPostMinStars));
+
+    const badMode = await patch({ googleReviewAutomationEnabled: true, googleReviewMode: "nicht-echt" });
+    ok("Ungültiger googleReviewMode fällt zurück auf 'approval'", badMode?.googleReviewMode === "approval", badMode?.googleReviewMode);
+
+    const badStars = await patch({ googleReviewPostsEnabled: true, googleReviewPostMinStars: 9 });
+    ok("Ungültige Sternezahl fällt zurück auf 4", badStars?.googleReviewPostMinStars === 4, String(badStars?.googleReviewPostMinStars));
+
+    const zeroStars = await patch({ googleReviewPostsEnabled: true, googleReviewPostMinStars: 0 });
+    ok("Sternezahl 0 fällt zurück auf 4 (nie 'ab 1 Stern')", zeroStars?.googleReviewPostMinStars === 4, String(zeroStars?.googleReviewPostMinStars));
+
+    // Standard fuer das Content-Recycling bleibt aus, wenn nichts mitgeschickt wird.
+    const defaults = await patch({});
+    ok("Beide Schalter sind ohne Angabe aus", defaults?.googleReviewAutomationEnabled === false && defaults?.googleReviewPostsEnabled === false, JSON.stringify([defaults?.googleReviewAutomationEnabled, defaults?.googleReviewPostsEnabled]));
+  }
+  {
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/does-not-exist/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" } });
+    ok("Freigeben einer unbekannten Bewertung -> 404", approveRes.status === 404, `status=${approveRes.status}`);
+    const rejectRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/does-not-exist/reject`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Ablehnen einer unbekannten Bewertung -> 404", rejectRes.status === 404, `status=${rejectRes.status}`);
+  }
+  if (!customerId) {
+    ok("Freigabe-/Ablehn-Test mit echten Bewertungen übersprungen (customerId unbekannt)", false, "customerId leer");
+  } else {
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(STAGING_DB);
+    const seed = (id, status) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO google_reviews (id, review_name, customer_id, location_name, reviewer_name, star_rating, review_text,
+           review_created_at, generated_reply, status, reply_state, policy_violation, rejected_notified_at,
+           social_post_status, social_post_id, created_at, updated_at)
+         VALUES (?, ?, ?, 'accounts/1/locations/2', 'Testkundin', 5, 'Sehr freundliche Beratung, gerne wieder.', ?, 'Vielen Dank für Ihre Rückmeldung!', ?, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+      ).run(id, `accounts/1/locations/2/reviews/${id}`, customerId, now, status, now, now);
+    };
+
+    const rejectId = "grev_test_reject";
+    seed(rejectId, "pending_approval");
+    const rejectRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/${rejectId}/reject`, { method: "POST", headers: { cookie: sessionCookie } });
+    const rejectBody = await rejectRes.json();
+    ok("Ablehnen einer echten wartenden Bewertung -> 200, status rejected", rejectRes.status === 200 && rejectBody.approval?.status === "rejected", JSON.stringify(rejectBody));
+
+    const approveId = "grev_test_approve";
+    seed(approveId, "pending_approval");
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/${approveId}/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({}) });
+    ok("Freigeben ohne Google-Verbindung -> 502 statt Absturz", approveRes.status === 502, `status=${approveRes.status}`);
+
+    // Eigene Liste: der wartende Entwurf muss auftauchen, der schon abgelehnte nicht mehr.
+    // (Ein zweiter Kunde wird hier bewusst NICHT angelegt - die Signup-Sperre erlaubt nur 5
+    // Anmeldungen pro Stunde und IP, und der Testlauf verbraucht davon schon vier. Die
+    // Kunden-Eingrenzung selbst ist dieselbe SQL-Bedingung wie bei den Kommentar-Freigaben.)
+    const listBody = await (await fetch(`${BASE}${MOUNT}/api/review-approvals`, { headers: { cookie: sessionCookie } })).json();
+    const ids = (listBody.approvals || []).map((a) => a.id);
+    ok("wartende Bewertung steht in der eigenen Liste", ids.includes(approveId), JSON.stringify(ids));
+    ok("abgelehnte Bewertung steht nicht mehr in der Liste", !ids.includes(rejectId), JSON.stringify(ids));
+    ok("Bewertungstext und Sterne kommen mit", (listBody.approvals || []).every((a) => typeof a.reviewText === "string" && typeof a.starRating === "number"), JSON.stringify(listBody.approvals?.[0] ?? null));
+
+    db.prepare("DELETE FROM google_reviews WHERE customer_id = ?").run(customerId);
+    db.close();
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/connect/google`, { redirect: "manual" });
+    const location = res.headers.get("location") ?? "";
+    ok("/connect/google ohne Session -> redirect error=session", location.includes("error=session"), `location=${location}`);
+  }
+
+  // --- Video-Diashow (Reels per ffmpeg + Sprachausgabe) ---
+  // Kein echtes Rendern hier (das dauert ~30s CPU und gehoert in scripts/test-video.mjs) - hier nur
+  // der Panel-Teil: Einstellungen speichern/validieren und der Vorhoer-Endpunkt.
+  console.log("\nVideo-Diashow:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const body = await res.json();
+    ok("/api/providers liefert die Stimmen-Auswahl", Array.isArray(body.videoVoices) && body.videoVoices.length > 0, JSON.stringify(body.videoVoices?.length));
+    ok("jede Stimme hat einen sprechenden Namen statt nur der technischen ID",
+      (body.videoVoices || []).every((v) => v.id && v.label && v.label !== v.id && v.description),
+      JSON.stringify(body.videoVoices?.[0] ?? null));
+    ok("verfügbare Videolängen werden mitgeliefert", Array.isArray(body.videoLengths) && body.videoLengths.includes(10), JSON.stringify(body.videoLengths));
+    ok("voicePreviewAvailable ist ein boolean", typeof body.voicePreviewAvailable === "boolean", String(body.voicePreviewAvailable));
+  }
+  {
+    const base = { company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00" };
+    const patch = async (extra) => {
+      const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: sessionCookie },
+        body: JSON.stringify({ ...base, ...extra }),
+      });
+      return (await res.json()).customer;
+    };
+
+    const saved = await patch({ videoEnabled: true, videoWeekdays: "1,4", videoPostTime: "18:30", videoLengthSeconds: 15, videoZoomDirection: "out", videoVoice: "de-DE-Wavenet-G", videoVoiceEnabled: false });
+    ok("PATCH /api/me speichert videoEnabled", saved?.videoEnabled === true, JSON.stringify(saved?.videoEnabled));
+    ok("eigener Video-Wochenplan wird gespeichert", saved?.videoWeekdays === "1,4", String(saved?.videoWeekdays));
+    ok("eigene Video-Uhrzeit wird gespeichert", saved?.videoPostTime === "18:30", String(saved?.videoPostTime));
+    ok("Videolänge 15s wird gespeichert", saved?.videoLengthSeconds === 15, String(saved?.videoLengthSeconds));
+    ok("Zoomrichtung wird gespeichert", saved?.videoZoomDirection === "out", String(saved?.videoZoomDirection));
+    ok("Stimme wird gespeichert", saved?.videoVoice === "de-DE-Wavenet-G", String(saved?.videoVoice));
+    ok("Sprachausgabe lässt sich abschalten", saved?.videoVoiceEnabled === false, JSON.stringify(saved?.videoVoiceEnabled));
+    ok("nächster Video-Termin wird berechnet", typeof saved?.nextVideoPostAt === "string" && !Number.isNaN(Date.parse(saved.nextVideoPostAt)), String(saved?.nextVideoPostAt));
+
+    const badLength = await patch({ videoEnabled: true, videoWeekdays: "1", videoLengthSeconds: 42 });
+    ok("Ungültige Videolänge fällt auf 10 Sekunden zurück", badLength?.videoLengthSeconds === 10, String(badLength?.videoLengthSeconds));
+
+    const badZoom = await patch({ videoEnabled: true, videoWeekdays: "1", videoZoomDirection: "diagonal-hüpfend" });
+    ok("Ungültige Zoomrichtung fällt auf 'alternate' zurück", badZoom?.videoZoomDirection === "alternate", String(badZoom?.videoZoomDirection));
+
+    const badVoice = await patch({ videoEnabled: true, videoWeekdays: "1", videoVoice: "de-DE-GibtsNicht" });
+    ok("Unbekannte Stimme fällt auf die Standardstimme zurück", badVoice?.videoVoice === "de-DE-Wavenet-H", String(badVoice?.videoVoice));
+
+    const badTime = await patch({ videoEnabled: true, videoWeekdays: "1", videoPostTime: "25:99" });
+    ok("Ungültige Uhrzeit wird verworfen (leer = wie normale Beiträge)", !badTime?.videoPostTime, String(badTime?.videoPostTime));
+
+    const noDays = await patch({ videoEnabled: true, videoWeekdays: "" });
+    ok("ohne gewählte Tage gibt es keinen nächsten Video-Termin", noDays?.nextVideoPostAt === null, String(noDays?.nextVideoPostAt));
+
+    const off = await patch({});
+    ok("Video-Diashow ist ohne Angabe aus", off?.videoEnabled === false, JSON.stringify(off?.videoEnabled));
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/voice-preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ voice: "de-DE-Wavenet-H" }) });
+    ok("/api/voice-preview ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/voice-preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ voice: "de-DE-Wavenet-H" }),
+    });
+    if (process.env.GOOGLE_TTS_API_KEY) {
+      const body = await res.json();
+      ok("/api/voice-preview liefert abspielbares Audio", res.status === 200 && String(body.audioDataUrl || "").startsWith("data:audio/"), `status=${res.status}`);
+    } else {
+      // Ohne Schluessel muss der Endpunkt sauber 503 sagen statt zu haengen oder abzustuerzen.
+      ok("/api/voice-preview ohne GOOGLE_TTS_API_KEY -> 503", res.status === 503, `status=${res.status}`);
+    }
+  }
+  {
+    // Video-Anfragen werden serverseitig abgearbeitet und duerfen deshalb NIE in der Liste
+    // auftauchen, die die externe Routine abholt - sonst entstuenden zwei Beitraege.
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(STAGING_DB);
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format) VALUES ('preq_video_test', ?, 'Testthema', 'ig_feed', 'pending', ?, ?, 'video_slideshow')",
+    ).run(customerId, now, now);
+    const mcpRes = await fetch(`${BASE}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: "Bearer falsch" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_post_requests", arguments: {} } }),
+    });
+    ok("MCP bleibt ohne gültigen Token verschlossen (Video-Anfrage nicht abgreifbar)", mcpRes.status === 401, `status=${mcpRes.status}`);
+    const stillPending = db.prepare("SELECT status FROM post_requests WHERE id = 'preq_video_test'").get();
+    ok("Video-Anfrage bleibt offen, bis der Server sie selbst verarbeitet", stillPending?.status === "pending", JSON.stringify(stillPending));
+    db.prepare("DELETE FROM post_requests WHERE id = 'preq_video_test'").run();
+    db.close();
+  }
+
   // --- Struktur/Rundgang (Panel v11) - der Rundgang-Status liegt bewusst serverseitig, damit er
   // nicht bei jedem Login/Geraetewechsel wieder auftaucht (im Browser-Speicher war genau das bei
   // "Später verbinden" schon einmal die Fehlerursache). Die Oberflaeche selbst (Navigation,

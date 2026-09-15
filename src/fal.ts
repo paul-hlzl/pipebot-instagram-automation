@@ -272,6 +272,32 @@ export interface ImageBranding {
   gradient?: { color2: string; direction: GradientDirection };
 }
 
+/**
+ * Nur der HINTERGRUND, ohne Headline und ohne Wasserzeichen - für die Video-Diashow (video.ts),
+ * die ihren Text selbst als eigene, ein- und ausblendbare Ebene setzt und deshalb ein textfreies
+ * Bild braucht. Derselbe Entscheidungsbaum wie in generateImageUrl darunter: Kunde mit Farbverlauf
+ * bekommt den deterministisch gerenderten Verlauf (kostet nichts), alle anderen ein fal.ai-Bild.
+ * `costUsd` sagt dem Aufrufer, ob dieses Bild tatsächlich Geld gekostet hat.
+ */
+export async function generateBackgroundImage(
+  format: PostFormat,
+  branding?: ImageBranding,
+): Promise<{ buffer: Buffer; costUsd: number; prompt: string }> {
+  if (branding?.gradient && branding.accentColor && HEX_COLOR.test(branding.accentColor) && HEX_COLOR.test(branding.gradient.color2)) {
+    const { width, height } = GRADIENT_IMAGE_SIZE[format];
+    const buffer = await renderGradientBackground(branding.accentColor, branding.gradient.color2, branding.gradient.direction, width, height);
+    return { buffer, costUsd: 0, prompt: `Farbverlauf ${branding.accentColor} -> ${branding.gradient.color2}` };
+  }
+  const prompt = buildImageStylePrompt(branding?.accentColor);
+  const rawImageUrl = await withRetry(() => requestFalImage(prompt, format), 3, "fal.ai generate");
+  const { data } = await withRetry(
+    () => axios.get<ArrayBuffer>(rawImageUrl, { responseType: "arraybuffer", timeout: 30_000 }),
+    3,
+    "fal.ai image download",
+  );
+  return { buffer: Buffer.from(data), costUsd: FAL_IMAGE_COST_USD, prompt };
+}
+
 export async function generateImageUrl(
   headline: string,
   format: PostFormat = "feed",

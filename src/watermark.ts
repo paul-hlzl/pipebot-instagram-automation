@@ -27,7 +27,7 @@ function getHeadlineSafeZone(format: PostFormat): SafeZone {
   return { left: 0.18, right: 0.82, top: 0, bottom: 1 };
 }
 
-function escapeXml(text: string): string {
+export function escapeXml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -42,9 +42,9 @@ function escapeXml(text: string): string {
 // constant calibrated only for Liberation Serif - a condensed font like Bebas Neue or a script
 // font like Caveat has a very different average glyph width, and the estimate feeds directly
 // into how many lines a headline wraps onto.
-const DEFAULT_GLYPH_WIDTH_FACTOR = 0.56;
+export const DEFAULT_GLYPH_WIDTH_FACTOR = 0.56;
 
-function estimateTextWidth(text: string, fontSize: number, glyphWidthFactor: number = DEFAULT_GLYPH_WIDTH_FACTOR): number {
+export function estimateTextWidth(text: string, fontSize: number, glyphWidthFactor: number = DEFAULT_GLYPH_WIDTH_FACTOR): number {
   return text.length * fontSize * glyphWidthFactor;
 }
 
@@ -59,7 +59,7 @@ function estimateTextWidth(text: string, fontSize: number, glyphWidthFactor: num
  * to break it on) - the render-time `textLength` safety net in addHeadlineText still keeps it
  * from actually overflowing the image.
  */
-function wrapHeadline(headline: string, fontSize: number, maxWidth: number, glyphWidthFactor: number): string[] {
+export function wrapHeadline(headline: string, fontSize: number, maxWidth: number, glyphWidthFactor: number): string[] {
   const words = headline.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return [""];
   const lines: string[] = [];

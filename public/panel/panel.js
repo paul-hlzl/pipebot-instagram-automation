@@ -111,7 +111,7 @@
   };
 
   /* ================= Zustand ================= */
-  const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram",
+  const S = { providers: [], videoVoices: [], voicePreviewAvailable: false, videoLengths: [5, 10, 15], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram",
     // Redesign: aktiver Reiter im Bereich "Beiträge" und Anzahl offener Freigaben (speist den
     // Status-Satz und die Zähler in Navigation/Bottom-Bar aus derselben Quelle).
     postTab: "geplant", approvalCount: 0,
@@ -943,6 +943,95 @@
      hier; das Onboarding-Formular (companyHtml) zeigt sie nur noch bei der Erstanmeldung.
      Der Konto-Block steht bewusst AUSSERHALB des Formulars: er enthaelt nur Aktionen
      (Zugangslink/Abmelden/Loeschen), die nie mitgespeichert werden sollen. */
+  /* Aus Panel v21/v22 uebernommen (Merge 15.09.2026): dieselben Feldnamen wie vorher, aber in den
+     Komponenten des neuen Panels - .choices statt zweier Radio-Zeilen, .daypicker statt der
+     alten Kaestchen-Reihe, kuerzere Erklaerungen. Wichtig ist vor allem, dass die Felder
+     ueberhaupt im Formular stehen: PATCH /api/me sendet das ganze Briefing, ein fehlendes Feld
+     wuerde die Einstellung beim naechsten Speichern stillschweigend zuruecksetzen. */
+  function googleReviewSettingsHtml(c) {
+    if (!prov("google")) return "";
+    const missing = !conn("google");
+    const dis = missing ? " disabled" : "";
+    return `
+      <label class="check${missing ? " is-disabled" : ""}"><input type="checkbox" name="googleReviewAutomationEnabled" ${c.googleReviewAutomationEnabled ? "checked" : ""}${dis}><span>Google-Bewertungen automatisch mit KI beantworten</span></label>
+      ${missing
+        ? `<p class="locked">Dafür muss Ihr Google-Unternehmensprofil verbunden sein. <button type="button" class="link" data-go="google">Jetzt verbinden</button>.</p>`
+        : `<span class="consequence"><strong>Jede</strong> Bewertung bekommt eine Antwort - auch schlechte. Auf Kritik wird sachlich geantwortet, nie gestritten.</span>`}
+      <div class="field">
+        <label>Wie mit den Antworten umgehen?</label>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="googleReviewMode" value="approval" ${(c.googleReviewMode || "approval") === "approval" ? "checked" : ""}${dis}><span><strong>Erst zur Freigabe</strong><em>Sie sehen jede Antwort vorher.</em></span></label>
+          <label class="choice"><input type="radio" name="googleReviewMode" value="auto" ${c.googleReviewMode === "auto" ? "checked" : ""}${dis}><span><strong>Automatisch abschicken</strong><em>Antworten gehen sofort online, höchstens 10 pro Stunde.</em></span></label>
+        </div>
+      </div>
+      <label class="check${missing ? " is-disabled" : ""}"><input type="checkbox" name="googleReviewPostsEnabled" ${c.googleReviewPostsEnabled ? "checked" : ""}${dis}><span>Aus guten Bewertungen Beitragsvorschläge erstellen</span></label>
+      <span class="consequence">Der Vorschlag geht <strong>immer</strong> erst zu Ihrer Freigabe.</span>
+      <div class="field">
+        <label for="f-googleReviewPostMinStars">Ab wie vielen Sternen?</label>
+        <select id="f-googleReviewPostMinStars" name="googleReviewPostMinStars"${dis}>
+          <option value="5" ${Number(c.googleReviewPostMinStars) === 5 ? "selected" : ""}>Nur 5 Sterne</option>
+          <option value="4" ${Number(c.googleReviewPostMinStars || 4) === 4 ? "selected" : ""}>Ab 4 Sternen</option>
+          <option value="3" ${Number(c.googleReviewPostMinStars) === 3 ? "selected" : ""}>Ab 3 Sternen</option>
+        </select>
+        <p class="hint">Ob ein Bewertungstext weiterveröffentlicht werden darf, hängt vom Einzelfall ab - das ist ein Hinweis, keine Rechtsberatung.</p>
+      </div>`;
+  }
+
+  function videoSettingsHtml(c) {
+    // Erst anzeigen, wenn der Server die Funktion ueberhaupt kennt (/api/providers liefert dann
+    // videoVoices). Solange Produktion noch den Stand vor dem Merge laeuft, bleibt der Block weg,
+    // statt ein leeres Stimmen-Auswahlfeld zu zeigen.
+    if (!(S.videoVoices || []).length) return "";
+    const voices = S.videoVoices || [];
+    const chosenVoice = c.videoVoice || (voices[0] && voices[0].id) || "";
+    const lengths = S.videoLengths || [5, 10, 15];
+    const igMissing = !conn("instagram");
+    return `
+      <label class="check${igMissing ? " is-disabled" : ""}"><input type="checkbox" name="videoEnabled" ${c.videoEnabled ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Video-Diashows automatisch erstellen</span></label>
+      ${igMissing
+        ? `<p class="locked">Dafür muss Instagram verbunden sein. <button type="button" class="link" data-go="instagram">Jetzt verbinden</button>.</p>`
+        : `<span class="consequence">Videos laufen nach ihrem eigenen Zeitplan - ohne angehakten Tag entsteht keines.</span>`}
+      <fieldset class="field">
+        <legend>Tage für Videos</legend>
+        <div class="daypicker" data-weekday-channel="video">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${(c.videoWeekdays || "").split(",").includes(String(i + 1)) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+      </fieldset>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-videoPostTime">Um wie viel Uhr? <span class="opt">(optional)</span></label>
+          <input id="f-videoPostTime" name="videoPostTime" type="time" value="${esc(c.videoPostTime || "")}" step="900">
+          <p class="hint">Leer = wie Ihre Beiträge (${esc(c.postTime || "15:00")} Uhr).</p>
+        </div>
+        <div class="field">
+          <label for="f-videoLengthSeconds">Wie lang?</label>
+          <select id="f-videoLengthSeconds" name="videoLengthSeconds">
+            ${lengths.map((l) => `<option value="${l}" ${Number(c.videoLengthSeconds || 10) === l ? "selected" : ""}>${l} Sekunden</option>`).join("")}
+          </select>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-videoZoomDirection">Bildbewegung</label>
+          <select id="f-videoZoomDirection" name="videoZoomDirection">
+            <option value="alternate" ${(c.videoZoomDirection || "alternate") === "alternate" ? "selected" : ""}>Abwechselnd</option>
+            <option value="in" ${c.videoZoomDirection === "in" ? "selected" : ""}>Langsam hinein</option>
+            <option value="out" ${c.videoZoomDirection === "out" ? "selected" : ""}>Langsam heraus</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-videoVoice">Stimme</label>
+          <select id="f-videoVoice" name="videoVoice">
+            ${voices.map((v) => `<option value="${esc(v.id)}" ${chosenVoice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}
+          </select>
+          <p class="hint" id="voice-desc">${esc((voices.find((v) => v.id === chosenVoice) || {}).description || "")}</p>
+          ${S.voicePreviewAvailable
+            ? `<p class="hint"><button type="button" class="link" id="voice-preview">Stimme anhören</button> <span id="voice-preview-state"></span></p>`
+            : ""}
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" name="videoVoiceEnabled" ${c.videoVoiceEnabled !== false ? "checked" : ""}><span>Text im Video vorlesen lassen</span></label>
+      <span class="consequence">Der Text steht <strong>immer auch im Bild</strong> - ohne Sprachausgabe entsteht dasselbe Video stumm.</span>`;
+  }
+
   const SETTINGS_GROUPS = [
     { id: "unternehmen", label: "Mein Unternehmen" },
     { id: "aussehen", label: "Aussehen" },
@@ -1179,7 +1268,8 @@
                 <label>Posting vorübergehend anhalten</label>
                 <p class="hint" style="margin:0 0 10px">${c.customerPaused ? "Aktuell pausiert - es wird nichts veröffentlicht, bis Sie fortsetzen." : "Läuft. Anhalten geht jederzeit."}</p>
                 <button type="button" class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
-              </div>`)}
+              </div>
+              ${videoSettingsHtml(c) ? `<div class="field"><h3>Video-Diashow</h3>${videoSettingsHtml(c)}</div>` : ""}`)}
 
             ${group("automatik", "Was ohne Ihr Zutun passiert - und was vorher über Ihren Tisch geht.", `
               <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben</span></label>
@@ -1199,7 +1289,8 @@
                 ${c.commentAutomationEnabled && c.commentAutomationMode === "auto"
                   ? `<span class="consequence" style="margin-top:10px">Aktuell automatisch: Antworten gehen <strong>sofort und ungeprüft</strong> unter Ihrem Namen online (höchstens 10 pro Stunde).</span>`
                   : ""}
-              </div>`)}
+              </div>              ${googleReviewSettingsHtml(c) ? `<div class="field"><h3>Google-Bewertungen</h3>${googleReviewSettingsHtml(c)}</div>` : ""}
+`)}
 
             ${group("mail", "Alle E-Mails an einer Stelle. Standardmäßig ist alles aus - Sie bekommen nur, was Sie hier anhaken.", `
               <label class="check"><input type="checkbox" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""}><span>E-Mail, wenn ein Beitrag veröffentlicht wird${c.approvalMode ? " (bzw. sobald einer auf Ihre Freigabe wartet)" : ""}</span></label>
@@ -2923,6 +3014,12 @@
     // Auswahlfelder, Haken und Wochentage loesen kein "input" aus, veraendern die Vorschau aber
     // genauso (Kanal, Uhrzeit, Hashtags, Emojis, Sprache, Ton).
     if (e.target.closest && e.target.closest("#company")) updateFirstPostPreview();
+    // Stimmen-Beschreibung zur Auswahl (aus v22)
+    if (e.target.id === "f-videoVoice") {
+      const desc = document.getElementById("voice-desc");
+      const v = (S.videoVoices || []).find((x) => x.id === e.target.value);
+      if (desc) desc.textContent = (v && v.description) || "";
+    }
   });
 
   let pendingLogoDataUrl = null;
@@ -3337,6 +3434,26 @@
     const formPartBtn = e.target.closest("[data-formpart]");
     if (formPartBtn) return switchFormPart(Number(formPartBtn.dataset.formpart));
     if (e.target.closest("#ai-improve")) return improveBriefing();
+    if (e.target.closest("#voice-preview")) {
+      const btn = e.target.closest("#voice-preview");
+      const voice = document.querySelector('[name="videoVoice"]')?.value || "";
+      const state = $("#voice-preview-state");
+      btn.classList.add("busy");
+      if (state) state.textContent = "wird erzeugt …";
+      try {
+        const { audioDataUrl } = await api("POST", "/api/voice-preview", { voice });
+        const audio = new Audio(audioDataUrl);
+        if (state) state.textContent = "spielt ab";
+        audio.onended = () => { if (state) state.textContent = ""; };
+        await audio.play();
+      } catch (err) {
+        if (state) state.textContent = "";
+        showError(err.message || "Hörprobe fehlgeschlagen.");
+      } finally {
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#analyze-website")) return analyzeWebsiteSuggestion();
     if (e.target.closest("#suggest-topics")) return suggestTopicsUi();
     if (e.target.closest("#analytics-summary-btn")) return analyticsSummaryUi();
@@ -3832,12 +3949,18 @@
     body.notifyWeeklyReport = checked("notifyWeeklyReport");
     body.commentAutomationEnabled = checked("commentAutomationEnabled");
     body.gradientEnabled = checked("gradientEnabled");
+    // Aus v21/v22 - ohne diese Zeilen kaeme das Feld nie im PATCH an und der Server setzte es zurueck.
+    body.googleReviewAutomationEnabled = checked("googleReviewAutomationEnabled");
+    body.googleReviewPostsEnabled = checked("googleReviewPostsEnabled");
+    body.videoEnabled = checked("videoEnabled");
+    body.videoVoiceEnabled = checked("videoVoiceEnabled");
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());
     const igDays = Array.from(form.querySelectorAll('[data-weekday-channel="instagram"] input:checked')).map((el) => Number(el.value));
     const liDays = Array.from(form.querySelectorAll('[data-weekday-channel="linkedin"] input:checked')).map((el) => Number(el.value));
     body.instagramWeekdays = igDays.join(",");
     body.linkedinWeekdays = liDays.join(",");
+    body.videoWeekdays = Array.from(form.querySelectorAll('[data-weekday-channel="video"] input:checked')).map((el) => Number(el.value)).join(",");
     body.activeWeekdays = body.instagramWeekdays;
     body.frequency = classifyFrequency(igDays.length ? igDays : [1, 2, 3, 4, 5]);
 
@@ -3933,6 +4056,9 @@
       const p = await api("GET", "/api/providers");
       S.providers = p.providers;
       S.aiAvailable = Boolean(p.aiAvailable);
+      S.videoVoices = p.videoVoices || [];
+      S.voicePreviewAvailable = Boolean(p.voicePreviewAvailable);
+      S.videoLengths = p.videoLengths || [5, 10, 15];
       S.trialDays = Number(p.trialDays) || 7;
       S.turnstileSiteKey = p.turnstileSiteKey || null;
       S.sandbox = Boolean(p.sandbox);

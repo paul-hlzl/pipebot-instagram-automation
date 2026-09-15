@@ -20,7 +20,9 @@
     "test:watermark": "node scripts/test-watermark.mjs",
     "test:linkedin-analytics": "node scripts/test-linkedin-analytics.mjs",
     "backup:db": "node scripts/backup-db.mjs",
-    "subscribe:webhooks": "node scripts/subscribe-webhooks.mjs"
+    "subscribe:webhooks": "node scripts/subscribe-webhooks.mjs",
+    "test:reviews": "node scripts/test-reviews.mjs",
+    "test:video": "node scripts/test-video.mjs"
   },
   "keywords": [
     "mcp",
