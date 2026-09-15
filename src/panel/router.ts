@@ -825,11 +825,11 @@ export function createPanelRouter(): Router {
    * und schickt den Text an Anthropic.
    *
    * Grenze: 5 ERFOLGREICHE Abrufe pro Stunde und IP (bis 15.09.2026: 1 pro Minute, jeder Versuch
-   * gezaehlt). Begruendung der Zahl: Geld kostet nur der erfolgreiche Abruf, und der liegt mit
-   * rund 1000 Eingabe- und maximal 500 Ausgabe-Token in derselben Groessenordnung wie ein
-   * Beitragstext - gemessen $0.0034. Fuenf Abrufe pro Stunde und IP sind also im schlimmsten Fall
-   * unter zwei Cent, waehrend im Formular realistisch ein bis drei gebraucht werden: einmal
-   * probieren, Adresse korrigieren, nochmal. Die alte Minutensperre traf genau diesen Ablauf.
+   * gezaehlt). Begruendung der Zahl mit gemessenen Werten: Geld kostet nur der erfolgreiche
+   * Abruf, und der liegt bei $0.00196 im Schnitt (17 protokollierte Aufrufe in usage_costs).
+   * Fuenf Abrufe pro Stunde und IP sind damit rund ein Cent - waehrend im Formular realistisch
+   * ein bis drei gebraucht werden: einmal probieren, Adresse korrigieren, nochmal. Genau diesen
+   * Ablauf hat die alte Minutensperre getroffen.
    */
   /* Fehlermeldungen an den Kunden kommen ab hier nur noch aus ToolError - unserer eigenen Klasse
      mit bewusst formulierten, deutschen Texten. `err instanceof Error` (wie es vorher an fuenf
