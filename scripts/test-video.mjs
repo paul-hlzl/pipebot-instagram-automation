@@ -46,12 +46,16 @@ const {
   probeDurationSeconds,
   runQueued,
   renderQueueDepth,
+  backgroundLuminance,
   VIDEO_WIDTH,
   VIDEO_HEIGHT,
 } = await import("../dist/video.js");
 const { VOICE_OPTIONS, getVoiceOption, estimateTtsCostUsd, DEFAULT_VOICE_ID } = await import("../dist/tts.js");
 const { isVideoDue, nextVideoPostAt } = await import("../dist/panel/schedule.js");
 const { renderGradientBackground } = await import("../dist/gradient.js");
+const { execFile } = await import("node:child_process");
+const { promisify } = await import("node:util");
+const execFileAsync = promisify(execFile);
 
 console.log("Aufbau je Videolänge:");
 {
@@ -167,6 +171,17 @@ console.log("\nWarteschlange (ein Rendering zur Zeit):");
   ok("Aufträge laufen sauber nacheinander", order.join(",") === "a-start,a-ende,b-start,b-ende,c-start,c-ende", order.join(","));
 }
 
+console.log("\nOptik: Text ohne Kasten, Farbe passt sich dem Hintergrund an:");
+{
+  const sharp = (await import("sharp")).default;
+  const solid = (r, g, b) => sharp({ create: { width: 200, height: 400, channels: 3, background: { r, g, b } } }).jpeg().toBuffer();
+
+  ok("schwarzer Hintergrund misst ~0", (await backgroundLuminance(await solid(0, 0, 0))) < 0.02);
+  ok("weißer Hintergrund misst ~1", (await backgroundLuminance(await solid(255, 255, 255))) > 0.98);
+  ok("dunkles Marken-Navy gilt als dunkel", (await backgroundLuminance(await solid(10, 14, 26))) < 0.55);
+  ok("helles Beige gilt als hell", (await backgroundLuminance(await solid(232, 217, 181))) > 0.55);
+}
+
 console.log("\nEchtes Rendering (ffmpeg):");
 if (!(await videoRenderingAvailable())) {
   console.log("  skip - ffmpeg/ffprobe nicht installiert (dann läuft auch das Feature selbst nicht)");
@@ -195,9 +210,6 @@ if (!(await videoRenderingAvailable())) {
   const probed = await probeDurationSeconds(outFile);
   ok("ffprobe liest dieselbe Dauer aus der Datei", Math.abs(probed - rendered.durationSeconds) < 0.3, String(probed));
 
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const execFileAsync = promisify(execFile);
   const { stdout } = await execFileAsync("ffprobe", [
     "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,codec_name,pix_fmt", "-of", "csv=p=0", outFile,
   ]);
@@ -205,6 +217,37 @@ if (!(await videoRenderingAvailable())) {
   const [codec, width, height, pixFmt] = stdout.trim().split(",");
   ok("Hochformat 1080x1920 (Instagram Reels)", Number(width) === VIDEO_WIDTH && Number(height) === VIDEO_HEIGHT, stdout.trim());
   ok("H.264 in yuv420p (von Instagram akzeptiert)", codec === "h264" && pixFmt === "yuv420p", stdout.trim());
+
+  // Die Schriftfarbe muss sich am Hintergrund orientieren (siehe backgroundLuminance): auf einem
+  // hellen Hintergrund darf nicht weiß auf weiß stehen. Geprueft am echten Videobild, nicht an der
+  // Absicht im Code - dafuer wird ein Bild aus dem Textbereich gezogen und geschaut, ob dort
+  // ueberhaupt dunkle Pixel vorkommen.
+  const sharp2 = (await import("sharp")).default;
+  const frameOf = async (file) => {
+    const frame = path.join(tmpDir, "frame.png");
+    await execFileAsync("ffmpeg", ["-y", "-v", "error", "-ss", "1.2", "-i", file, "-frames:v", "1", frame]);
+    const meta = await sharp2(frame).metadata();
+    return sharp2(frame)
+      .extract({ left: 0, top: Math.round((meta.height ?? 1920) * 0.4), width: meta.width ?? 1080, height: Math.round((meta.height ?? 1920) * 0.16) })
+      .stats();
+  };
+
+  const darkStats = await frameOf(outFile);
+  ok("auf dunklem Hintergrund steht helle Schrift", Math.max(...darkStats.channels.map((c) => c.max)) > 200, JSON.stringify(darkStats.channels.map((c) => c.max)));
+
+  const lightBg = await renderGradientBackground("#e8d9b5", "#f7efe0", "diagonal", 768, 1344);
+  const lightRender = await renderSlideshowVideo({
+    background: lightBg,
+    segments: [{ kind: "hook", text: "Heller Hintergrund" }, { kind: "cta", text: "Fertig" }],
+    audio: null,
+    targetSeconds: 5,
+    zoom: "in",
+    branding: { watermarkText: "Testfirma", fontId: "inter" },
+  });
+  const lightFile = path.join(tmpDir, "hell.mp4");
+  fs.writeFileSync(lightFile, lightRender.videoBuffer);
+  const lightStats = await frameOf(lightFile);
+  ok("auf hellem Hintergrund steht dunkle Schrift", Math.min(...lightStats.channels.map((c) => c.min)) < 80, JSON.stringify(lightStats.channels.map((c) => c.min)));
   console.log(`  (Renderzeit für 5 Sekunden Video: ${((Date.now() - started) / 1000).toFixed(1)}s auf dieser Maschine)`);
 }
 

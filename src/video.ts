@@ -136,21 +136,58 @@ export function buildTimeline(
 }
 
 /**
+ * Wie hell ist der Hintergrund dort, wo gleich der Text steht? Gemessen wird nur das mittlere
+ * Drittel - genau der Bereich, in dem die Textkarten liegen; die Ecken sind egal.
+ *
+ * Braucht man, weil es keinen Kasten hinter dem Text mehr gibt: weiße Schrift mit Schatten ist auf
+ * einem dunklen Marken-Hintergrund perfekt lesbar, auf einer hellen Akzentfarbe (Beige, Creme,
+ * helles Grau) dagegen nur noch knapp. Statt den Kasten zurückzuholen, dreht sich die Schrift
+ * dann einfach um: dunkler Text mit hellem Schein.
+ *
+ * Rückgabewert 0 (schwarz) bis 1 (weiß), nach der üblichen Luminanz-Gewichtung.
+ */
+export async function backgroundLuminance(background: Buffer): Promise<number> {
+  try {
+    const meta = await sharp(background).metadata();
+    const width = meta.width ?? 768;
+    const height = meta.height ?? 1344;
+    const stats = await sharp(background)
+      .extract({ left: 0, top: Math.round(height * 0.33), width, height: Math.round(height * 0.34) })
+      .stats();
+    const [r, g, b] = stats.channels.map((c) => c.mean);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  } catch {
+    // Im Zweifel "dunkel" annehmen - das ist der Normalfall für die Marken-Hintergründe hier.
+    return 0;
+  }
+}
+
+/**
  * Eine Textkarte als transparentes PNG. Gleiche Umbruch-/Schrumpf-Logik wie addHeadlineText
- * (watermark.ts), plus ein halbtransparenter dunkler Balken hinter dem Text: der garantiert
- * Lesbarkeit auch auf einem hellen Hintergrundbild - der Auftrag verlangt ausdrücklich
- * ausreichend Kontrast, weil viele Reels ohne Ton geschaut werden.
+ * (watermark.ts).
+ *
+ * KEIN Kasten hinter dem Text (bis v22 war einer da): eine eigene dunkle Kachel auf dem
+ * Hintergrund sah nach zwei gestapelten Ebenen aus statt nach einem durchgehenden Bild. Für die
+ * Lesbarkeit sorgt stattdessen ein weicher Schlagschatten - derselbe Trick, mit dem Instagram
+ * seine Story-Untertitel lesbar hält, ohne das Bild zu zerschneiden.
+ *
+ * Der Schatten entsteht in zwei sharp-Durchgängen (schwarzer Text -> weichzeichnen -> weißer Text
+ * darüber) statt über einen SVG-Filter: `feDropShadow` hängt davon ab, was die im System
+ * installierte librsvg-Version unterstützt, und ein stillschweigend ignorierter Filter wäre hier
+ * besonders unangenehm - dann stünde weißer Text ohne jeden Kontrast auf einem hellen Hintergrund.
+ * Der Weg über sharp funktioniert garantiert und kostet pro Karte wenige Millisekunden.
  *
  * Die Karte ist NUR so groß wie der Textblock, nicht bildfüllend, und bringt ihre Position selbst
  * mit. Das ist kein Detail, sondern der teuerste Hebel beim Rendern: ffmpeg legt jede Textebene
  * für jedes einzelne Bild neu über das Video, und eine 1080x1920-Ebene kostet dabei ein Vielfaches
- * einer 900x400-Ebene. Gemessen hat allein diese Änderung die Renderzeit eines 10-Sekunden-Videos
- * ungefähr halbiert (siehe Session-Bericht).
+ * einer 900x400-Ebene. Gemessen hat allein das die Renderzeit ungefähr halbiert.
  */
 async function renderTextCard(
   text: string,
   kind: VideoSegment["kind"],
   branding: VideoBranding,
+  /** 0-1, siehe backgroundLuminance - entscheidet über helle oder dunkle Schrift. */
+  luminance: number,
 ): Promise<{ buffer: Buffer; x: number; y: number }> {
   const font = getFontOption(branding.fontId ?? DEFAULT_FONT_ID);
   // Reels-Sicherheitszone: oben Profilzeile, unten Beschreibung/Buttons - Text bleibt in der Mitte.
@@ -172,35 +209,48 @@ async function renderTextCard(
 
   const lineHeight = fontSize * 1.2;
   const blockHeight = lineHeight * lines.length;
-  const padX = Math.round(fontSize * 0.5);
-  const padY = Math.round(fontSize * 0.42);
   const widestLine = Math.min(
     Math.max(...lines.map((l) => estimateTextWidth(l, fontSize, font.glyphWidthFactor))),
     maxTextWidth,
   );
-  const cardWidth = Math.min(VIDEO_WIDTH, Math.round(widestLine + padX * 2));
-  const cardHeight = Math.round(blockHeight + padY * 2);
-  // Etwas Rand, damit die Aufwärtsbewegung (siehe renderSlideshowVideo) den Text nicht abschneidet.
-  const margin = 24;
-  const canvasWidth = Math.min(VIDEO_WIDTH, cardWidth + margin * 2);
-  const canvasHeight = cardHeight + margin * 2;
-  const cardX = Math.round((canvasWidth - cardWidth) / 2);
-  const firstBaseline = margin + padY + fontSize * 0.8;
+  // Rand groß genug, dass der weichgezeichnete Schatten nicht an der Kartenkante abgeschnitten
+  // wird (sonst entstünde genau die harte Kante, die hier gerade verschwinden soll).
+  const blurSigma = Math.max(3, fontSize * 0.09);
+  const margin = Math.round(blurSigma * 4 + 20);
+  const canvasWidth = Math.min(VIDEO_WIDTH, Math.round(widestLine) + margin * 2);
+  const canvasHeight = Math.round(blockHeight) + margin * 2;
+  const firstBaseline = margin + fontSize * 0.8;
 
-  const tspans = lines
-    .map((line, i) => {
-      const clamped = Math.min(estimateTextWidth(line, fontSize, font.glyphWidthFactor), maxTextWidth);
-      return `<tspan x="${canvasWidth / 2}" y="${Math.round(firstBaseline + i * lineHeight)}" textLength="${Math.round(clamped)}" lengthAdjust="spacingAndGlyphs">${escapeXml(line)}</tspan>`;
-    })
-    .join("");
+  const tspans = (): string =>
+    lines
+      .map((line, i) => {
+        const clamped = Math.min(estimateTextWidth(line, fontSize, font.glyphWidthFactor), maxTextWidth);
+        return `<tspan x="${canvasWidth / 2}" y="${Math.round(firstBaseline + i * lineHeight)}" textLength="${Math.round(clamped)}" lengthAdjust="spacingAndGlyphs">${escapeXml(line)}</tspan>`;
+      })
+      .join("");
 
-  const svg = `<svg width="${canvasWidth}" height="${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
-    <rect x="${cardX}" y="${margin}" width="${cardWidth}" height="${cardHeight}" rx="${Math.round(fontSize * 0.3)}" fill="#000000" fill-opacity="0.38"/>
-    <text font-family="${escapeXml(font.cssFamily)}" font-size="${fontSize}" font-weight="${font.weight}" fill="#ffffff" text-anchor="middle">${tspans}</text>
-  </svg>`;
+  const textSvg = (fill: string, opacity: number): Buffer =>
+    Buffer.from(
+      `<svg width="${canvasWidth}" height="${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
+        <text font-family="${escapeXml(font.cssFamily)}" font-size="${fontSize}" font-weight="${font.weight}" fill="${fill}" fill-opacity="${opacity}" text-anchor="middle">${tspans()}</text>
+      </svg>`,
+    );
+
+  // Heller Hintergrund -> dunkle Schrift mit hellem Schein, sonst helle Schrift mit dunklem
+  // Schatten. Die Schwelle liegt bewusst eher niedrig: ein mittelheller Hintergrund trägt weiße
+  // Schrift noch, ein wirklich heller nicht mehr.
+  const lightBackground = luminance > 0.55;
+  const textColor = lightBackground ? "#14161c" : "#ffffff";
+  const shadowColor = lightBackground ? "#ffffff" : "#000000";
+  // 1. Schatten: eingefärbter Text, weichgezeichnet. 2. Der eigentliche Text darüber.
+  const shadow = await sharp(textSvg(shadowColor, lightBackground ? 0.95 : 0.85)).blur(blurSigma).png().toBuffer();
+  const buffer = await sharp(shadow)
+    .composite([{ input: textSvg(textColor, 1), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
 
   return {
-    buffer: await sharp(Buffer.from(svg)).png().toBuffer(),
+    buffer,
     x: Math.round((VIDEO_WIDTH - canvasWidth) / 2),
     y: Math.round(VIDEO_HEIGHT * 0.47 - canvasHeight / 2),
   };
@@ -209,7 +259,7 @@ async function renderTextCard(
 /** Dauerhaft eingeblendete Markenecke: eigenes Logo, sonst der Wasserzeichen-Text. Bleibt bewusst
  *  bildfüllend (eine einzige, dauerhaft sichtbare Ebene ohne Ein-/Ausblendung - der Zuschnitt
  *  würde hier nichts sparen, was den zusätzlichen Positions-Code rechtfertigt). */
-async function renderBrandCard(branding: VideoBranding): Promise<Buffer | null> {
+async function renderBrandCard(branding: VideoBranding, luminance: number): Promise<Buffer | null> {
   const font = getFontOption(branding.fontId ?? DEFAULT_FONT_ID);
   const margin = Math.round(VIDEO_WIDTH * 0.06);
 
@@ -230,8 +280,9 @@ async function renderBrandCard(branding: VideoBranding): Promise<Buffer | null> 
   const label = (branding.watermarkText || "").trim();
   if (!label) return null;
   const fontSize = Math.round(VIDEO_HEIGHT * 0.022);
+  // Gleiche Umkehrung wie beim Haupttext (siehe backgroundLuminance).
   const svg = `<svg width="${VIDEO_WIDTH}" height="${VIDEO_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-    <text x="${VIDEO_WIDTH - margin}" y="${VIDEO_HEIGHT - margin}" text-anchor="end" font-family="${escapeXml(font.cssFamily)}" font-size="${fontSize}" font-weight="${font.weight}" fill="#ffffff" fill-opacity="0.82">${escapeXml(label)}</text>
+    <text x="${VIDEO_WIDTH - margin}" y="${VIDEO_HEIGHT - margin}" text-anchor="end" font-family="${escapeXml(font.cssFamily)}" font-size="${fontSize}" font-weight="${font.weight}" fill="${luminance > 0.55 ? "#14161c" : "#ffffff"}" fill-opacity="0.82">${escapeXml(label)}</text>
   </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -289,17 +340,18 @@ export async function renderSlideshowVideo(input: {
 
     const bgPath = path.join(workDir, "bg.jpg");
     await fs.writeFile(bgPath, input.background);
+    const luminance = await backgroundLuminance(input.background);
 
     const cardPaths: string[] = [];
     const cardPositions: { x: number; y: number }[] = [];
     for (const [i, seg] of timeline.entries()) {
-      const card = await renderTextCard(seg.text, seg.kind, input.branding);
+      const card = await renderTextCard(seg.text, seg.kind, input.branding, luminance);
       const p = path.join(workDir, `card${i}.png`);
       await fs.writeFile(p, card.buffer);
       cardPaths.push(p);
       cardPositions.push({ x: card.x, y: card.y });
     }
-    const brandCard = await renderBrandCard(input.branding);
+    const brandCard = await renderBrandCard(input.branding, luminance);
     let brandPath: string | null = null;
     if (brandCard) {
       brandPath = path.join(workDir, "brand.png");

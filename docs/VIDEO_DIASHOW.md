@@ -65,6 +65,29 @@ Zwei Dinge wurden beim Bauen gemessen und dann geändert, weil sie teuer waren:
 Das x264-Preset bringt hier **nichts** (veryfast 27,8 s vs. medium 29,0 s bei identischem Inhalt) -
 der Aufwand steckt im Filtergraph, nicht im Encoder. Deshalb bleibt es bei `medium`.
 
+## 3b. Optik (Stand v23)
+
+Der Text steht **direkt auf dem Marken-Hintergrund**, ohne eigene Box oder Kachel dahinter - eine
+solche Kachel sah nach zwei gestapelten Ebenen aus statt nach einem durchgehenden Bild. Lesbar
+bleibt er durch zwei Dinge:
+
+- **Weicher Schlagschatten** statt harter Kante (zwei sharp-Durchgänge: eingefärbter Text ->
+  weichzeichnen -> eigentlicher Text darüber; bewusst nicht `feDropShadow`, weil dessen
+  Unterstützung von der installierten librsvg-Version abhängt und ein still ignorierter Filter hier
+  weiße Schrift ohne jeden Kontrast bedeuten würde).
+- **Schriftfarbe richtet sich nach dem Hintergrund**: gemessen wird die Helligkeit des mittleren
+  Drittels des Hintergrundbildes - genau dort, wo der Text liegt. Über einem hellen Hintergrund
+  (Beige, Creme, helles Grau) dreht sich die Schrift auf dunkel mit hellem Schein um, sonst bleibt
+  sie weiß mit dunklem Schatten. Ohne das wäre weiße Schrift auf einer hellen Akzentfarbe nur noch
+  knapp lesbar - genau der Grund, aus dem die Box ursprünglich da war.
+
+Beides ist mit Tests abgesichert, die am **fertigen Videobild** prüfen (nicht an der Absicht im
+Code), ob im Textbereich tatsächlich helle bzw. dunkle Pixel vorkommen.
+
+> Randnotiz für später: Die **Bild**-Pipeline (`addHeadlineText` in watermark.ts) setzt Headlines
+> weiterhin immer in Weiß. Für Kunden mit heller Akzentfarbe gilt dort dasselbe Kontrastproblem.
+> Nicht in diesem Auftrag angefasst, wäre aber dieselbe kleine Änderung.
+
 ## 4. Was ein Video kostet
 
 Pro Beitrag, bei Standardeinstellungen (10 s, WaveNet-Stimme):
