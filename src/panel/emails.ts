@@ -112,6 +112,29 @@ export function postPublishedEmail(input: { to: string; company: string; channel
 }
 
 /**
+ * Panel v19: Stale-Content-Sicherheitsnetz (siehe Session-Bericht - Andrea/Physiotherapie-Vorfall,
+ * cus_bW0p_HapELUZ). Verschickt sich NUR im Ausnahmefall: ein vorbereiteter Beitrag war veraltet
+ * (Firmenname/Branche/Beschreibung/Tonalität haben sich seither geändert) UND die automatische
+ * Neu-Generierung ist selbst fehlgeschlagen (z.B. KI-Dienst gerade nicht erreichbar) - der
+ * Normalfall (Neu-Generierung gelingt) verschickt gar keine Mail, der Beitrag geht einfach mit
+ * frischem Inhalt raus.
+ */
+export function stalePostSkippedEmail(input: { to: string; company: string; channelLabel: string }): MailInput {
+  return {
+    to: input.to,
+    subject: `Ein vorbereiteter ${input.channelLabel}-Beitrag wurde übersprungen - Pipeflow`,
+    text:
+      `Hallo,\n\n` +
+      `ein für "${input.company}" vorbereiteter ${input.channelLabel}-Beitrag wurde NICHT veröffentlicht, weil er ` +
+      `nicht mehr zu Ihren aktuellen Angaben (Firmenname, Branche, Beschreibung oder Tonalität) passte - und die ` +
+      `automatische Neu-Generierung mit den neuen Angaben gerade nicht möglich war.\n\n` +
+      `Nichts Veraltetes wurde veröffentlicht. Im Panel unter "Die nächsten 7 Tage" können Sie jederzeit einen ` +
+      `neuen Beitrag für diesen Platz vorbereiten:\n${panelUrl()}\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
+/**
  * Panel v9 Aufgabe 5: wöchentlicher Analytics-Bericht (opt-in, notify_weekly_report - eigener
  * Schalter neben notify_on_publish, siehe styleguide/Session-Bericht). Zahlen + KI-Zusammenfassung
  * kommen fertig vom Aufrufer (runWeeklyAnalyticsSummaries in analytics.ts) - diese Funktion baut

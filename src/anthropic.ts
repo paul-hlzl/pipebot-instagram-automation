@@ -263,6 +263,9 @@ const HASHTAG_GUIDANCE: Record<string, string> = {
 export interface PlannedPostContent {
   headline: string;
   caption: string;
+  /** Panel v18: cost of THIS call only - a caller that retries once on a banned-word/required-
+   *  element violation (see planning.ts's planOnePost) must sum both calls' costUsd itself. */
+  costUsd: number | null;
 }
 
 /**
@@ -373,7 +376,7 @@ export async function generatePlannedPostContent(input: {
   if (!headline) {
     throw new ToolError("Die KI hat keine Schlagzeile geliefert.");
   }
-  return { headline, caption };
+  return { headline, caption, costUsd: estimateCostUsd(anthropicModel, data.usage) };
 }
 
 export interface SuggestedPillar {

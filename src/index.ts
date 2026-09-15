@@ -28,10 +28,10 @@ import {
   assertNoBannedWords,
   assertRequiredElements,
   getCustomerOverview,
+  getPlannedPost,
   getPlannedPostByChannelDate,
   getStyleSamples,
   listCustomers,
-  listApprovedPendingPosts,
   listOpenPostRequests,
   logPost,
   markPendingApprovalPublished,
@@ -44,6 +44,7 @@ import {
   submitPlannedPostForApproval,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
+import { ensureFreshPlannedPost, getFreshApprovedPendingPosts } from "./panel/planning.js";
 import {
   checkLinkedInToken,
   publishLinkedInImagePost,
@@ -952,7 +953,11 @@ function createServer(): McpServer {
     },
     async () => {
       try {
-        return textResult({ approvals: listApprovedPendingPosts() });
+        // Panel v19: applies the stale-content safety net (see planning.ts) before returning
+        // anything - a row that turned out to no longer match the customer's current branding
+        // was either transparently refreshed in place, or force-rejected + skipped (with the
+        // customer emailed), and is never included here either way.
+        return textResult({ approvals: await getFreshApprovedPendingPosts() });
       } catch (error) {
         console.error("list_approved_pending_posts:", toToolMessage(error));
         return errorResult(error);
@@ -1004,7 +1009,13 @@ function createServer(): McpServer {
     },
     async ({ customer_id, channel, date }) => {
       try {
-        return textResult({ post: getPlannedPostByChannelDate(customer_id, channel, date) });
+        const plan = getPlannedPostByChannelDate(customer_id, channel, date);
+        // Panel v19: stale-content safety net (see planning.ts's ensureFreshPlannedPost) -
+        // transparently refreshes the content in place if it no longer matches the customer's
+        // current branding, so the routine never sees (or publishes) the stale version. Returns
+        // null on an unrecoverable regeneration failure, same contract as "nothing prepared".
+        const fresh = plan ? await ensureFreshPlannedPost(plan) : null;
+        return textResult({ post: fresh });
       } catch (error) {
         console.error("get_planned_post:", toToolMessage(error));
         return errorResult(error);
@@ -1051,6 +1062,12 @@ function createServer(): McpServer {
     },
     async ({ id }) => {
       try {
+        // Panel v19: defense in depth - the normal flow already ran get_planned_post (which
+        // applies the stale-content guard) before the routine ever reaches this tool, but this
+        // re-checks in case it's ever called directly, so filing something stale into the
+        // approval queue is never possible through this path either.
+        const plan = getPlannedPost(id);
+        if (plan) await ensureFreshPlannedPost(plan);
         const approval = submitPlannedPostForApproval(id);
         if (!approval) {
           return errorResult(new Error("Planned post not found, or already submitted/approved/rejected/published - do not retry, skip like any other K9 case."));

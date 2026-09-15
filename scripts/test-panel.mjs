@@ -594,6 +594,14 @@ async function main() {
     });
     const okPatchBody = await okPatchRes.json();
     ok("PATCH mit gültigem Text -> 200, status 'edited'", okPatchRes.status === 200 && okPatchBody.post?.status === "edited", JSON.stringify(okPatchBody));
+    // Panel v19: ein Kunden-eigener Edit zaehlt als frisch fuer das Stale-Content-Sicherheitsnetz
+    // (siehe planning.ts's isBrandingStale/ensureFreshPlannedPost) - muss branding_version_at_generation
+    // auf "gerade eben" setzen, nicht auf den urspruenglichen Erstellungs-Zeitpunkt stehen lassen.
+    ok(
+      "PATCH mit gültigem Text aktualisiert branding_version_at_generation (Stale-Content-Sicherheitsnetz)",
+      Boolean(okPatchBody.post?.brandingVersionAtGeneration) && Date.now() - Date.parse(okPatchBody.post.brandingVersionAtGeneration) < 10_000,
+      JSON.stringify(okPatchBody.post?.brandingVersionAtGeneration),
+    );
 
     const noAuthPatchRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/${planId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ headline: "x" }) });
     ok("PATCH ohne Login -> 401", noAuthPatchRes.status === 401);
@@ -657,6 +665,94 @@ async function main() {
     });
 
     db.prepare("DELETE FROM planned_posts WHERE id IN (?, ?, ?)").run(planId, planIdMax, planIdApprove);
+  }
+
+  // --- 3f-3. Branding-Neugenerierungs-Angebot (v18) - reines Zählen/Vergleichen in PATCH
+  // /api/me, kein echter Anthropic-/fal.ai-Aufruf (der lebt hinter dem eigenen
+  // /api/planned-posts/regenerate-for-branding-Endpunkt, der hier bewusst nur am 401-Guard
+  // geprüft wird, siehe "no real calls"-Regel oben im Dateikopf).
+  console.log("\nBranding-Neugenerierungs-Angebot:");
+  {
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(STAGING_DB);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna" }).format(new Date());
+    const farFuture = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna" }).format(new Date(Date.now() + 30 * 86_400_000));
+    const nowIso = new Date().toISOString();
+
+    const planPlanned = "plan_brand1"; // status 'planned' in range -> must count toward eligibleCount
+    const planEdited = "plan_brand2"; // status 'edited' in range -> must count toward editedCount, not eligibleCount
+    const planPublished = "plan_brand3"; // already published -> must never be offered for overwrite
+    const planOutOfRange = "plan_brand4"; // 'planned' but 30 days out -> outside the 7-day preview window
+
+    const insertPlanned = db.prepare(
+      `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
+       VALUES (?, ?, 'ig_feed', ?, ?, 'H', 'Text #Pflicht', NULL, NULL, NULL, 0, ?, ?)`,
+    );
+    insertPlanned.run(planPlanned, customerId, today, "planned", nowIso, nowIso);
+    insertPlanned.run(planEdited, customerId, today, "edited", nowIso, nowIso);
+    insertPlanned.run(planPublished, customerId, today, "published", nowIso, nowIso);
+    insertPlanned.run(planOutOfRange, customerId, farFuture, "planned", nowIso, nowIso);
+
+    const patchRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        about: "Neue Beschreibung nach Branding-Änderung",
+      }),
+    });
+    const patchBody = await patchRes.json();
+    ok("PATCH /api/me mit geänderter Beschreibung -> brandingRegenOffer vorhanden", Boolean(patchBody.brandingRegenOffer), JSON.stringify(patchBody.brandingRegenOffer));
+    ok("brandingRegenOffer nennt 'about' als geändertes Feld", Boolean(patchBody.brandingRegenOffer?.changedFields?.includes("about")), JSON.stringify(patchBody.brandingRegenOffer));
+    ok(
+      "brandingRegenOffer zählt genau den einen offenen 'planned'-Beitrag (nicht published, nicht außerhalb der 7 Tage)",
+      patchBody.brandingRegenOffer?.eligibleCount === 1,
+      JSON.stringify(patchBody.brandingRegenOffer),
+    );
+    ok("brandingRegenOffer zählt genau den einen 'edited'-Beitrag separat", patchBody.brandingRegenOffer?.editedCount === 1, JSON.stringify(patchBody.brandingRegenOffer));
+
+    // Panel v19: Stale-Content-Sicherheitsnetz - dieselbe Aenderung, die das Angebot ausloest,
+    // muss auch branding_last_changed_at des Kunden setzen (die Grundlage fuer den harten Check
+    // in planning.ts's isBrandingStale/ensureFreshPlannedPost, unabhaengig davon ob der Kunde das
+    // Angebot annimmt).
+    const brandingChangedAt1 = db.prepare("SELECT branding_last_changed_at FROM customers WHERE id = ?").get(customerId).branding_last_changed_at;
+    ok(
+      "PATCH /api/me mit geänderter Beschreibung setzt branding_last_changed_at (frisch)",
+      Boolean(brandingChangedAt1) && Date.now() - Date.parse(brandingChangedAt1) < 10_000,
+      String(brandingChangedAt1),
+    );
+
+    // Erneutes Speichern mit UNVERÄNDERTEM Inhalt, nur einer rein optischen Einstellung dazu -
+    // darf kein Angebot mehr auslösen (accentColor steuert nur ein Bild-Re-Rendering, kein
+    // Neu-Texten, siehe brandingFieldsChanged in router.ts) UND darf branding_last_changed_at
+    // nicht nochmal anfassen.
+    await new Promise((r) => setTimeout(r, 20));
+    const patchVisualRes = await fetch(`${BASE}${MOUNT}/api/me`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({
+        company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+        about: "Neue Beschreibung nach Branding-Änderung", accentColor: "#334455",
+      }),
+    });
+    const patchVisualBody = await patchVisualRes.json();
+    ok("Rein optische Änderung (Akzentfarbe) allein löst kein brandingRegenOffer aus", !patchVisualBody.brandingRegenOffer, JSON.stringify(patchVisualBody.brandingRegenOffer));
+    const brandingChangedAt2 = db.prepare("SELECT branding_last_changed_at FROM customers WHERE id = ?").get(customerId).branding_last_changed_at;
+    ok(
+      "Rein optische Änderung lässt branding_last_changed_at unverändert",
+      brandingChangedAt2 === brandingChangedAt1,
+      `${brandingChangedAt1} -> ${brandingChangedAt2}`,
+    );
+
+    const noAuthRegenRes = await fetch(`${BASE}${MOUNT}/api/planned-posts/regenerate-for-branding`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ includeEdited: false }),
+    });
+    ok("POST /api/planned-posts/regenerate-for-branding ohne Login -> 401", noAuthRegenRes.status === 401, `status=${noAuthRegenRes.status}`);
+
+    db.prepare("DELETE FROM planned_posts WHERE id IN (?, ?, ?, ?)").run(planPlanned, planEdited, planPublished, planOutOfRange);
+    db.close();
   }
 
   // --- 3f. Mehrere Farbthemen (v4) ---

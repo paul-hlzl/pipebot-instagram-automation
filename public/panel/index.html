@@ -1982,7 +1982,7 @@
 
   /** Channel ids with a currently pending "Jetzt posten"-request - those can't be requested again yet. */
   function postNowOpenChannels(c) {
-    return new Set((c.postRequests || []).filter((r) => r.status === "pending" && r.channel).map((r) => r.channel));
+    return new Set((c.postRequests || []).filter((r) => (r.status === "pending" || r.status === "processing") && r.channel).map((r) => r.channel));
   }
 
   /** True once every channel this customer has enabled already has an open request - nothing left to submit. */
@@ -2009,7 +2009,7 @@
       .map((o) => {
         const r = byChannel[o.id];
         const topicPart = r.topic ? `: "${esc(r.topic)}"` : "";
-        return r.status === "pending"
+        return r.status === "pending" || r.status === "processing"
           ? `<div class="banner" role="status">${esc(o.label)} ausstehend${topicPart} - angefragt am ${esc(fmtDate(r.createdAt))}. Wird in der Regel innerhalb weniger Minuten bearbeitet.</div>`
           : `<div class="banner ok" role="status">${esc(o.label)} erledigt${topicPart}.</div>`;
       });
@@ -2638,6 +2638,61 @@
     const i = previewCache.posts.findIndex((p) => p.id === updated.id);
     if (i >= 0) previewCache.posts[i] = updated;
     renderPreview();
+  }
+
+  /** n + a German noun, switched singular/plural - same pattern as the emails.ts server templates. */
+  function pluralDe(n, singular, plural) { return `${n} ${n === 1 ? singular : plural}`; }
+
+  /**
+   * "Diese Änderung betrifft deine noch nicht veröffentlichten Beiträge - jetzt neu generieren?"
+   * (Panel v18) - shown after saving settings that changed a content-relevant field (see
+   * router.ts's brandingFieldsChanged). Never automatic: the customer explicitly confirms here,
+   * and again separately if any of the affected posts were already hand-edited by them - both
+   * gates exist because a re-generation costs real Anthropic/fal.ai money and could otherwise
+   * silently discard a manual edit.
+   */
+  async function offerBrandingRegen(offer) {
+    let message = `Sie haben ${offer.changedFieldLabels.join(", ")} geändert. `;
+    if (offer.eligibleCount > 0) {
+      message += `Das betrifft ${pluralDe(offer.eligibleCount, "noch nicht veröffentlichten Beitrag", "noch nicht veröffentlichte Beiträge")} der nächsten 7 Tage. `;
+    }
+    if (offer.editedCount > 0) {
+      message += `${pluralDe(offer.editedCount, "Beitrag davon haben Sie", "Beiträge davon haben Sie")} bereits selbst bearbeitet - dafür fragen wir gleich noch einmal gesondert nach.`;
+    }
+    const wantsRegen = await showConfirm({
+      title: "Vorbereitete Beiträge aktualisieren?",
+      message: message.trim(),
+      confirmLabel: "Jetzt neu generieren",
+      cancelLabel: "Nicht jetzt",
+    });
+    if (!wantsRegen) return;
+
+    let includeEdited = false;
+    if (offer.editedCount > 0) {
+      includeEdited = await showConfirm({
+        title: "Bereits bearbeitete Beiträge auch überschreiben?",
+        message: `${pluralDe(offer.editedCount, "Beitrag wurde", "Beiträge wurden")} von Ihnen bereits bearbeitet. Sollen auch diese mit den neuen Angaben überschrieben werden? Ihre bisherige Bearbeitung geht dabei verloren.`,
+        confirmLabel: "Auch überschreiben",
+        cancelLabel: "Bearbeitete behalten",
+      });
+    }
+    if (offer.eligibleCount === 0 && !includeEdited) return; // nothing left to regenerate
+
+    S.banner = { kind: "ok", text: "Beiträge werden mit den neuen Angaben neu generiert …" };
+    render(true);
+    try {
+      const result = await api("POST", "/api/planned-posts/regenerate-for-branding", { includeEdited });
+      previewCache = { posts: result.posts, maxRegenerate: result.maxRegenerate };
+      if (S.step === "preview") renderPreview();
+      S.banner = {
+        kind: result.errors ? "bad" : "ok",
+        text: `${pluralDe(result.updated, "Beitrag", "Beiträge")} aktualisiert${result.errors ? `, ${pluralDe(result.errors, "Beitrag", "Beiträge")} fehlgeschlagen` : ""}.`,
+      };
+      render(true);
+    } catch (err) {
+      S.banner = { kind: "bad", text: err.message || "Die Neugenerierung konnte gerade nicht durchgeführt werden." };
+      render(true);
+    }
   }
 
   async function suggestPillarsUi() {
@@ -3725,13 +3780,19 @@
     const btn = form.querySelector("button[type=submit]");
     btn?.classList.add("busy");
     try {
-      applyState(await api(edit ? "PATCH" : "POST", edit ? "/api/me" : "/api/signup", body));
+      const saveRes = await api(edit ? "PATCH" : "POST", edit ? "/api/me" : "/api/signup", body);
+      applyState(saveRes);
       // Panel v11: Aus den Einstellungen heraus bleibt man nach dem Speichern in den Einstellungen
       // (und in derselben Gruppe) - vorher sprang das Formular zurueck aufs Dashboard, was genau
       // das "wo bin ich jetzt?"-Gefuehl erzeugt hat, um das es in dieser Runde geht.
       S.step = edit ? (S.step === "settings" ? "settings" : landingStep()) : S.providers[0]?.id || "done";
       S.banner = edit ? { kind: "ok", text: "Angaben gespeichert." } : null;
       render(true);
+      // Panel v18: Firmenname/Branche/Beschreibung/Tonalität geändert - bietet an, die noch nicht
+      // veröffentlichte 7-Tage-Vorschau mit den neuen Angaben neu zu schreiben (siehe
+      // offerBrandingRegen). Bewusst NACH dem render(true) oben, nie blockierend fürs Speichern
+      // selbst - ein "Nein" hier darf die gespeicherten Einstellungen nicht in Frage stellen.
+      if (edit && saveRes.brandingRegenOffer) offerBrandingRegen(saveRes.brandingRegenOffer);
     } catch (err) {
       btn?.classList.remove("busy");
       if (err.fields) return showFieldErrors(form, err.fields);

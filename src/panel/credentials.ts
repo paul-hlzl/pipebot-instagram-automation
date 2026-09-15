@@ -460,7 +460,7 @@ function getPostMedia(ownerType: "post" | "pending_approval" | "planned_post", o
  *  Fließtext-Satz. "instagram" (ohne Feed/Story-Unterscheidung) deckt alte Posts ab, die vor
  *  dieser Funktion geloggt wurden bzw. Aufrufer, die keinen genaueren Kanal übergeben.
  */
-const EMAIL_CHANNEL_LABEL: Record<string, string> = {
+export const EMAIL_CHANNEL_LABEL: Record<string, string> = {
   ig_feed: "Instagram-Feed",
   ig_story: "Instagram-Story",
   linkedin: "LinkedIn",
@@ -736,14 +736,21 @@ export const POST_REQUEST_MAX_PER_DAY = 3;
  * selected channel independently (see POST_REQUEST_MAX_OPEN's new per-channel meaning below).
  */
 export function openPostRequestCount(customerId: string, channel?: string | null): number {
+  // 'processing' counts as open too (claimed by an in-flight routine run, not fulfilled yet) -
+  // otherwise a customer could queue a second "Jetzt posten" for the same channel while the
+  // first is mid-publish, the moment listOpenPostRequests() claims it.
   if (channel) {
     return (
-      db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status = 'pending' AND channel = ?").get(customerId, channel) as {
-        n: number;
-      }
+      db
+        .prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status IN ('pending', 'processing') AND channel = ?")
+        .get(customerId, channel) as { n: number }
     ).n;
   }
-  return (db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status = 'pending'").get(customerId) as { n: number }).n;
+  return (
+    db.prepare("SELECT COUNT(*) as n FROM post_requests WHERE customer_id = ? AND status IN ('pending', 'processing')").get(customerId) as {
+      n: number;
+    }
+  ).n;
 }
 
 /** How many requests (any status) this customer created today (server-local calendar day - a soft daily cap, precision doesn't matter). */
@@ -791,9 +798,45 @@ export function listRecentPostRequestsForCustomer(customerId: string, limit = 10
   return rows.map(toPostRequest);
 }
 
-/** All still-open requests across all customers, oldest first - what the routine should process before its regular customer loop. */
+/**
+ * A request stuck in 'processing' this long is assumed abandoned (the routine run that claimed
+ * it crashed, timed out, or otherwise never reached mark_post_request_done) and becomes claimable
+ * again - generous enough to cover one full hourly routine run plus retries without ever
+ * matching the routine's own ~1h cadence (which is exactly what caused the incident this
+ * constant fixes: a request that stayed 'pending' forever was re-read and re-published by every
+ * single hourly run, see docs/incidents - 14 duplicate carousel posts for cus_bW0p_HapELUZ on
+ * 2026-09-14/15 before Instagram's own abuse detection started rejecting further publishes).
+ */
+const POST_REQUEST_STALE_PROCESSING_MS = 3 * 3_600_000;
+
+/**
+ * All still-open requests across all customers, oldest first - what the routine should process
+ * before its regular customer loop. Atomically CLAIMS them (flips 'pending' -> 'processing' in
+ * the same call) so a request is only ever handed to ONE routine run at a time: previously this
+ * was a plain SELECT with no claim, so a request the routine forgot (or failed) to pass to
+ * mark_post_request_done stayed 'pending' forever and got silently re-published by every
+ * subsequent hourly run - unbounded, since nothing here ever verified whether a near-identical
+ * post had already gone out. A 'processing' row that's older than
+ * POST_REQUEST_STALE_PROCESSING_MS is treated as abandoned and reclaimed for one more attempt,
+ * so a genuine crash mid-run still eventually gets retried instead of being stuck forever.
+ */
 export function listOpenPostRequests(): PostRequest[] {
-  const rows = db.prepare("SELECT * FROM post_requests WHERE status = 'pending' ORDER BY created_at").all() as PostRequestRow[];
+  const staleBefore = new Date(Date.now() - POST_REQUEST_STALE_PROCESSING_MS).toISOString();
+  const claimable = db
+    .prepare("SELECT id FROM post_requests WHERE status = 'pending' OR (status = 'processing' AND updated_at < ?) ORDER BY created_at")
+    .all(staleBefore) as { id: string }[];
+  if (claimable.length === 0) return [];
+
+  const now = nowIso();
+  const claim = db.prepare("UPDATE post_requests SET status = 'processing', updated_at = ? WHERE id = ?");
+  const claimAll = db.transaction((ids: string[]) => {
+    for (const id of ids) claim.run(now, id);
+  });
+  claimAll(claimable.map((r) => r.id));
+
+  const rows = db
+    .prepare(`SELECT * FROM post_requests WHERE id IN (${claimable.map(() => "?").join(",")}) ORDER BY created_at`)
+    .all(...claimable.map((r) => r.id)) as PostRequestRow[];
   return rows.map(toPostRequest);
 }
 
@@ -824,6 +867,11 @@ export interface PendingApproval {
   /** Panel v14: full slide list for a carousel/video-slideshow approval - empty for 'single'. The
    *  customer's approval-card preview needs every slide, not just the cover `imageUrl`. */
   slides: PostMediaSlide[];
+  /** Panel v19: when this row's headline/caption text was last written (fresh generation, a
+   *  server-side stale-regen, or copied over from a planned_post's own timestamp) - see
+   *  planning.ts's isBrandingStale / getFreshApprovedPendingPosts. Null for rows written before
+   *  this field existed. */
+  brandingVersionAtGeneration: string | null;
 }
 
 function toPendingApproval(r: PendingApprovalRow): PendingApproval {
@@ -842,6 +890,7 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
     updatedAt: r.updated_at,
     format: r.format,
     slides: r.format === "single" ? [] : getPostMedia("pending_approval", r.id),
+    brandingVersionAtGeneration: r.branding_version_at_generation,
   };
 }
 
@@ -894,13 +943,18 @@ export function savePendingApproval(input: {
   format?: string;
   /** Full slide list for a carousel/video-slideshow approval - `imageUrl` above stays the cover/first slide. */
   slides?: { imageUrl: string; overlayText?: string }[];
+  /** Panel v19: when this content's text was actually written - defaults to now (a fresh, on-the-spot
+   *  generation, the overwhelmingly common case for this function). submitPlannedPostForApproval
+   *  passes the SOURCE planned_post's own timestamp instead, since it's copying existing content
+   *  verbatim, not generating anything new - see its call site. */
+  brandingVersionAtGeneration?: string;
 }): PendingApproval | null {
   if (hasPendingOrApprovedToday(input.customerId, input.channel)) return null;
   const id = `appr_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at, format)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+    `INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, pillar_title, source, status, created_at, updated_at, format, branding_version_at_generation)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
   ).run(
     id,
     input.customerId,
@@ -914,6 +968,7 @@ export function savePendingApproval(input: {
     now,
     now,
     input.format ?? "single",
+    input.brandingVersionAtGeneration ?? now,
   );
   savePostMedia("pending_approval", id, input.slides);
   maybeSendApprovalsSummaryEmail(input.customerId);
@@ -987,6 +1042,32 @@ export function markPendingApprovalPublished(id: string): boolean {
   return result.changes > 0;
 }
 
+/**
+ * Panel v19: overwrites an 'approved' pending_approval's text+image after the stale-content guard
+ * regenerated it (see planning.ts's getFreshApprovedPendingPosts) - keeps its status 'approved'
+ * (the customer's approval of THIS SLOT still stands, only the actual wording/image changes to
+ * match their current branding) and bumps branding_version_at_generation to now.
+ */
+export function overwritePendingApprovalContent(id: string, fields: { headline: string; caption: string; imageUrl: string }): PendingApproval | null {
+  const now = nowIso();
+  const result = db
+    .prepare("UPDATE pending_approvals SET headline = ?, caption = ?, image_url = ?, updated_at = ?, branding_version_at_generation = ? WHERE id = ? AND status = 'approved'")
+    .run(fields.headline, fields.caption, fields.imageUrl, now, now, id);
+  if (result.changes === 0) return null;
+  return toPendingApproval(db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow);
+}
+
+/**
+ * Panel v19: force-rejects an approved pending_approval that turned out stale AND couldn't be
+ * safely regenerated (e.g. a carousel/video-slideshow, which has no server-side text generator) -
+ * unlike setPendingApprovalStatus, this isn't the customer's own approve/reject action and isn't
+ * restricted to status 'pending', so it works on an already-'approved' row.
+ */
+export function forceRejectPendingApproval(id: string): boolean {
+  const result = db.prepare("UPDATE pending_approvals SET status = 'rejected', updated_at = ? WHERE id = ?").run(nowIso(), id);
+  return result.changes > 0;
+}
+
 export interface PlannedPost {
   id: string;
   customerId: string;
@@ -1001,6 +1082,12 @@ export interface PlannedPost {
   regenerateCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Panel v19: when this row's headline/caption text was last written - first generation, a
+   *  server-side regeneration (branding-regen feature or the stale-content guard), or the
+   *  customer's own manual edit all bump this. Null for rows written before this field existed -
+   *  see planning.ts's isBrandingStale, which treats that as "unknown age, assume stale" once the
+   *  customer has ANY recorded branding change. */
+  brandingVersionAtGeneration: string | null;
 }
 
 function toPlannedPost(r: PlannedPostRow): PlannedPost {
@@ -1018,6 +1105,7 @@ function toPlannedPost(r: PlannedPostRow): PlannedPost {
     regenerateCount: r.regenerate_count,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    brandingVersionAtGeneration: r.branding_version_at_generation,
   };
 }
 
@@ -1038,8 +1126,8 @@ export function createPlannedPost(input: {
   const id = `plan_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 0, ?, ?)`,
+    `INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, pillar_title, accent_color_used, regenerate_count, created_at, updated_at, branding_version_at_generation)
+     VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
   ).run(
     id,
     input.customerId,
@@ -1050,6 +1138,7 @@ export function createPlannedPost(input: {
     input.imageUrl ?? null,
     input.pillarTitle ?? null,
     input.accentColorUsed ?? null,
+    now,
     now,
     now,
   );
@@ -1088,7 +1177,9 @@ export function getPlannedPostForCustomer(customerId: string, id: string): Plann
  * Edits headline/caption on a planned post (customer edit in the "Vorschau" tab). Moves a plain
  * 'planned' row to 'edited' so the routine/panel can tell it was customer-touched; a row already
  * past that (approved/rejected/published) keeps its status - editing text after approval doesn't
- * silently un-approve it.
+ * silently un-approve it. Also bumps branding_version_at_generation to now - this is the
+ * customer's OWN freshly-written text, so it counts as current regardless of when the row was
+ * first generated (see planning.ts's isBrandingStale).
  */
 export function updatePlannedPostText(id: string, fields: { headline?: string; caption?: string }): PlannedPost | null {
   const row = db.prepare("SELECT * FROM planned_posts WHERE id = ?").get(id) as PlannedPostRow | undefined;
@@ -1096,7 +1187,14 @@ export function updatePlannedPostText(id: string, fields: { headline?: string; c
   const headline = fields.headline !== undefined ? fields.headline : row.headline;
   const caption = fields.caption !== undefined ? fields.caption : row.caption;
   const nextStatus = row.status === "planned" ? "edited" : row.status;
-  db.prepare("UPDATE planned_posts SET headline = ?, caption = ?, status = ?, updated_at = ? WHERE id = ?").run(headline, caption, nextStatus, nowIso(), id);
+  db.prepare("UPDATE planned_posts SET headline = ?, caption = ?, status = ?, updated_at = ?, branding_version_at_generation = ? WHERE id = ?").run(
+    headline,
+    caption,
+    nextStatus,
+    nowIso(),
+    nowIso(),
+    id,
+  );
   return getPlannedPost(id);
 }
 
@@ -1146,6 +1244,7 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
     imageUrl: plan.imageUrl ?? undefined,
     pillarTitle: plan.pillarTitle ?? undefined,
     source: "planning",
+    brandingVersionAtGeneration: plan.brandingVersionAtGeneration ?? undefined,
   });
   // Mark 'submitted' even when savePendingApproval returned null (hasPendingOrApprovedToday
   // already found another open entry for this customer/channel/day, e.g. filed earlier the same
@@ -1164,6 +1263,46 @@ export function updatePlannedPostImage(id: string, imageUrl: string, accentColor
   const result = db
     .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = ?, regenerate_count = regenerate_count + 1, updated_at = ? WHERE id = ?")
     .run(imageUrl, accentColorUsed, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
+}
+
+/**
+ * How many of a customer's still-open (today..+6 days) planned posts would be affected by a
+ * "regenerate after branding change" offer (see router.ts's PATCH /api/me and
+ * planning.ts's regeneratePlannedPostsForBranding) - split by whether the customer already
+ * edited them, so the panel can show "N Beiträge" for the plain offer and a separate "M davon
+ * haben Sie bereits bearbeitet" warning before anyone touches an edited one.
+ */
+export function countRegenerableBrandingPlannedPosts(customerId: string): { eligible: number; edited: number } {
+  const today = viennaDateStr();
+  const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+  const rows = db
+    .prepare("SELECT status FROM planned_posts WHERE customer_id = ? AND scheduled_for >= ? AND scheduled_for <= ?")
+    .all(customerId, today, to) as { status: string }[];
+  return {
+    eligible: rows.filter((r) => r.status === "planned").length,
+    edited: rows.filter((r) => r.status === "edited").length,
+  };
+}
+
+/**
+ * Overwrites a planned post's generated content wholesale (headline/caption/image) after a
+ * branding-driven regeneration - unlike updatePlannedPostText (a customer's own hand-edit,
+ * which moves 'planned' -> 'edited'), this is the SERVER replacing AI-generated content with
+ * fresher AI-generated content, so the row goes back to plain 'planned' regardless of its
+ * previous status (including from 'edited', when the caller explicitly opted to overwrite
+ * edited rows too) - the old edit is gone, there is nothing left to flag as customer-touched.
+ * Does not touch regenerate_count (that budget is specifically for the customer's own "Mit
+ * dieser Farbe neu erstellen" button, a separate feature/limit).
+ */
+export function overwritePlannedPostContent(id: string, fields: { headline: string; caption: string; imageUrl: string; accentColorUsed?: string | null }): PlannedPost | null {
+  const now = nowIso();
+  const result = db
+    .prepare(
+      "UPDATE planned_posts SET headline = ?, caption = ?, image_url = ?, accent_color_used = ?, status = 'planned', updated_at = ?, branding_version_at_generation = ? WHERE id = ?",
+    )
+    .run(fields.headline, fields.caption, fields.imageUrl, fields.accentColorUsed ?? null, now, now, id);
   if (result.changes === 0) return null;
   return getPlannedPost(id);
 }

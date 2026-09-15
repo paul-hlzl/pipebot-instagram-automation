@@ -18,20 +18,33 @@ import {
   assertRequiredElements,
   CHANNEL_IMAGE_FORMAT,
   createPlannedPost,
+  EMAIL_CHANNEL_LABEL,
+  forceRejectPendingApproval,
   getPlannedPostByChannelDate,
   getStyleSamples,
+  listApprovedPendingPosts,
   listContentPillars,
+  listPlannedPosts,
   logPlanningError,
+  markPlannedPostStatus,
+  overwritePendingApprovalContent,
+  overwritePlannedPostContent,
   pickWeightedPillar,
   resolveImageBranding,
   scheduleInputFor,
   splitCommaList,
   type ContentPillar,
+  type PendingApproval,
+  type PlannedPost,
   type PublishChannel,
 } from "./credentials.js";
-import { isPostingDayForChannel, type PostingChannel } from "./schedule.js";
+import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./schedule.js";
 import { anthropicAvailable, generatePlannedPostContent } from "../anthropic.js";
-import { generateImageUrl } from "../fal.js";
+import { FAL_IMAGE_COST_USD, generateImageUrl } from "../fal.js";
+import { logUsageCost } from "./analytics.js";
+import { ToolError } from "../errors.js";
+import { sendMailBestEffort } from "./mailer.js";
+import { stalePostSkippedEmail } from "./emails.js";
 
 const LOOKAHEAD_DAYS = 7;
 
@@ -55,7 +68,22 @@ interface PlanOneResult {
   planned: boolean;
 }
 
-async function planOnePost(row: CustomerRow, channel: PlannableChannel, scheduledFor: string, pillar: ContentPillar | null): Promise<PlanOneResult> {
+interface GeneratedPost {
+  headline: string;
+  caption: string;
+  imageUrl: string;
+  accentColorUsed?: string;
+  /** Combined Anthropic (text, incl. a possible retry) + fal.ai (image) cost for this one post. */
+  costUsd: number | null;
+}
+
+/**
+ * The actual "write + illustrate one post" work, shared by planOnePost (nightly pre-planning,
+ * creates a new planned_posts row) and regeneratePlannedPostsForBranding (rewrites an existing
+ * row after the customer changed company/industry/about/tone) - everything from here down is
+ * identical for both callers, only what happens to the result (INSERT vs UPDATE) differs.
+ */
+async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar: ContentPillar | null): Promise<GeneratedPost> {
   const styleSamples = await getStyleSamples(row.id);
   const bannedWords = splitCommaList(row.banned_words);
   const requiredElements = splitCommaList(row.required_elements);
@@ -77,6 +105,7 @@ async function planOnePost(row: CustomerRow, channel: PlannableChannel, schedule
   };
 
   let content = await generatePlannedPostContent(baseInput);
+  let costUsd = content.costUsd;
   try {
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
@@ -85,24 +114,88 @@ async function planOnePost(row: CustomerRow, channel: PlannableChannel, schedule
     // and don't give up after one attempt either" policy as K7 in the routine.
     const avoidNote = err instanceof Error ? err.message : String(err);
     content = await generatePlannedPostContent({ ...baseInput, avoidNote });
+    costUsd = costUsd != null && content.costUsd != null ? costUsd + content.costUsd : content.costUsd ?? costUsd;
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
   }
 
   const branding = resolveImageBranding(row.id);
   const generated = await generateImageUrl(content.headline, CHANNEL_IMAGE_FORMAT[channel], branding);
+  costUsd = costUsd != null ? costUsd + FAL_IMAGE_COST_USD : FAL_IMAGE_COST_USD;
 
+  return { headline: content.headline, caption: content.caption, imageUrl: generated.imageUrl, accentColorUsed: branding.accentColor, costUsd };
+}
+
+async function planOnePost(row: CustomerRow, channel: PlannableChannel, scheduledFor: string, pillar: ContentPillar | null): Promise<PlanOneResult> {
+  const generated = await generatePost(row, channel, pillar);
   createPlannedPost({
     customerId: row.id,
     channel,
     scheduledFor,
-    headline: content.headline,
-    caption: content.caption,
+    headline: generated.headline,
+    caption: generated.caption,
     imageUrl: generated.imageUrl,
     pillarTitle: pillar?.title,
-    accentColorUsed: branding.accentColor,
+    accentColorUsed: generated.accentColorUsed,
   });
   return { planned: true };
+}
+
+export interface BrandingRegenResult {
+  updated: number;
+  skipped: number;
+  errors: number;
+}
+
+/**
+ * Re-generates content for a customer's still-open (today..+6 days) planned posts after they
+ * changed a content-relevant branding field (company/industry/about/tone) in settings - see
+ * router.ts's POST /api/planned-posts/regenerate-for-branding, which decides `includeEdited`
+ * based on the customer's explicit confirmation. Only ever UPDATES existing planned_posts rows
+ * (never creates/removes any) and only ones with status 'planned' (always) or 'edited' (only
+ * when includeEdited) - an already published/rejected/approved/submitted row is left alone no
+ * matter what, since overwriting any of those would be a correctness bug, not a convenience.
+ * Keeps each row's already-assigned content pillar and schedule slot, so this only refreshes the
+ * wording/image to match the new branding instead of reshuffling the week.
+ */
+export async function regeneratePlannedPostsForBranding(row: CustomerRow, includeEdited: boolean): Promise<BrandingRegenResult> {
+  if (!anthropicAvailable()) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+  const today = viennaDateStr();
+  const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+  const targetStatuses = includeEdited ? ["planned", "edited"] : ["planned"];
+  const candidates = listPlannedPosts(row.id, today, to).filter((p) => targetStatuses.includes(p.status));
+  const pillars = listContentPillars(row.id);
+
+  let updated = 0;
+  let skipped = 0;
+  let errors = 0;
+  for (const plan of candidates) {
+    const channel = plan.channel as PlannableChannel;
+    if (!(channel in CHANNEL_SCHEDULE)) {
+      skipped++;
+      continue;
+    }
+    const pillar = plan.pillarTitle ? pillars.find((p) => p.title === plan.pillarTitle) ?? { id: "", title: plan.pillarTitle, description: null, weight: 1 } : null;
+    try {
+      const generated = await generatePost(row, channel, pillar);
+      overwritePlannedPostContent(plan.id, {
+        headline: generated.headline,
+        caption: generated.caption,
+        imageUrl: generated.imageUrl,
+        accentColorUsed: generated.accentColorUsed,
+      });
+      logUsageCost(row.id, "planned-post-branding-regen", generated.costUsd);
+      updated++;
+    } catch (err) {
+      errors++;
+      const message = err instanceof Error ? err.message : String(err);
+      logPlanningError(row.id, channel, plan.scheduledFor, `Branding-Neugenerierung fehlgeschlagen: ${message}`);
+      console.error(`[panel] Branding-Neugenerierung fehlgeschlagen für ${row.id}/${channel}/${plan.scheduledFor}:`, message);
+    }
+  }
+  return { updated, skipped, errors };
 }
 
 export interface PlanningRunSummary {
@@ -208,4 +301,140 @@ export function startDailyPlanningSchedule(hourUtc = 3): NodeJS.Timeout {
     run();
     setInterval(run, 24 * 3_600_000);
   }, msUntilNextUtcHour(hourUtc));
+}
+
+/* ================= Stale-Content-Sicherheitsnetz (Panel v19) =================
+ *
+ * See Session-Bericht: a planned_post generated on 2026-09-12 (physiotherapy/"Andrea" branding)
+ * sat untouched and was auto-published on 2026-09-15, three days after the customer had renamed
+ * their business to "Pipeflow" in settings - the opt-in "regenerate after a branding change"
+ * banner (router.ts's brandingRegenOffer) only helps a customer who notices and acts on it; this
+ * is the hard backstop for everyone else, enforced here in code rather than left to the routine's
+ * own judgement.
+ *
+ * Both entry points below are the SAME two places that already hand pre-generated content to the
+ * routine (get_planned_post and list_approved_pending_posts in index.ts) - nothing publishes
+ * without going through one of them first (ad-hoc "Jetzt posten"/spontaneous generation is always
+ * fresh by construction and never touches planned_posts/pending_approvals, so it needs no guard).
+ */
+
+/** Cheap, single timestamp comparison - no DB/network access, safe to call on every post on every
+ *  routine tick without slowing anything down. NULL branding_last_changed_at (no recorded change
+ *  for this customer, ever) means never stale, so a customer who's never touched their branding
+ *  isn't affected by this feature at all. A NULL version_at_generation on an otherwise-tracked
+ *  customer means "written before this column existed" - treated as stale (unknown age, and a
+ *  change IS on record), which is exactly what lets the 6 already-stale planned_posts from the
+ *  incident fall under this check automatically once branding_last_changed_at is backfilled for
+ *  that one customer (see admin note in the session report) - no separate manual cleanup needed. */
+export function isBrandingStale(versionAtGeneration: string | null, brandingLastChangedAt: string | null): boolean {
+  if (!brandingLastChangedAt) return false;
+  if (!versionAtGeneration) return true;
+  return versionAtGeneration < brandingLastChangedAt;
+}
+
+function getCustomerRowById(customerId: string): CustomerRow | undefined {
+  return db.prepare("SELECT * FROM customers WHERE id = ?").get(customerId) as CustomerRow | undefined;
+}
+
+function findPillar(pillars: ContentPillar[], title: string | null): ContentPillar | null {
+  if (!title) return null;
+  return pillars.find((p) => p.title === title) ?? { id: "", title, description: null, weight: 1 };
+}
+
+function sendStalePostSkippedEmailBestEffort(row: CustomerRow, channel: string): void {
+  sendMailBestEffort(stalePostSkippedEmail({ to: row.email, company: row.company, channelLabel: EMAIL_CHANNEL_LABEL[channel] ?? "neuer" }));
+}
+
+/**
+ * Called from the `get_planned_post` MCP tool for every post about to be handed to the routine as
+ * "ready to use as-is". Only the three "ready" statuses (see get_planned_post's own docs) are
+ * checked - 'rejected'/'published'/'submitted' pass through untouched, nothing to decide there.
+ * On staleness: regenerates the SAME row in place (same channel/day/pillar slot, fresh text+image
+ * from the customer's CURRENT branding) and returns the refreshed post - the routine never sees
+ * the stale version at all. If regeneration itself fails (Anthropic/fal.ai unavailable): marks the
+ * row 'rejected' (never retried, never published stale) and best-effort emails the customer, then
+ * returns null - get_planned_post's existing "nothing prepared" contract, so the routine's
+ * documented fallback (generate on the spot, with current customer data, so never stale either)
+ * takes over exactly as it already does for a day pre-planning simply hasn't reached yet.
+ */
+export async function ensureFreshPlannedPost(plan: PlannedPost): Promise<PlannedPost | null> {
+  if (plan.status !== "planned" && plan.status !== "edited" && plan.status !== "approved") return plan;
+  const row = getCustomerRowById(plan.customerId);
+  if (!row) return plan;
+  if (!isBrandingStale(plan.brandingVersionAtGeneration, row.branding_last_changed_at)) return plan;
+
+  try {
+    const pillars = listContentPillars(row.id);
+    const pillar = findPillar(pillars, plan.pillarTitle);
+    const generated = await generatePost(row, plan.channel as PlannableChannel, pillar);
+    const updated = overwritePlannedPostContent(plan.id, {
+      headline: generated.headline,
+      caption: generated.caption,
+      imageUrl: generated.imageUrl,
+      accentColorUsed: generated.accentColorUsed,
+    });
+    logUsageCost(row.id, "stale-content-guard-regen", generated.costUsd);
+    return updated;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    markPlannedPostStatus(plan.id, "rejected");
+    logPlanningError(
+      row.id,
+      plan.channel,
+      plan.scheduledFor,
+      `Stale-Content-Sicherheitsnetz: Neu-Generierung fehlgeschlagen, Beitrag übersprungen statt veraltet zu veröffentlichen: ${message}`,
+    );
+    sendStalePostSkippedEmailBestEffort(row, plan.channel);
+    return null;
+  }
+}
+
+/**
+ * Called from the `list_approved_pending_posts` MCP tool - the equivalent gateway for the
+ * approval-mode flow. Checks every 'approved' row for staleness and, when stale, either
+ * regenerates it in place (single-image formats, same mechanism as ensureFreshPlannedPost) or -
+ * for a carousel/video-slideshow, which has no server-side text generator at all - force-rejects
+ * it and emails the customer, since there is no safe way to auto-regenerate that here. Returns
+ * only the rows actually safe to publish; a stale row that got skipped is simply absent from the
+ * result, same effect as if it had never been approved.
+ */
+export async function getFreshApprovedPendingPosts(): Promise<PendingApproval[]> {
+  const approvals = listApprovedPendingPosts();
+  const customerCache = new Map<string, CustomerRow | undefined>();
+  const fresh: PendingApproval[] = [];
+
+  for (const approval of approvals) {
+    if (!customerCache.has(approval.customerId)) {
+      customerCache.set(approval.customerId, getCustomerRowById(approval.customerId));
+    }
+    const row = customerCache.get(approval.customerId);
+    if (!row || !isBrandingStale(approval.brandingVersionAtGeneration, row.branding_last_changed_at)) {
+      fresh.push(approval);
+      continue;
+    }
+
+    if (approval.format !== "single") {
+      forceRejectPendingApproval(approval.id);
+      logPlanningError(row.id, approval.channel, null, "Stale-Content-Sicherheitsnetz: Karussell/Video-Diashow kann serverseitig nicht automatisch neu geschrieben werden - Beitrag übersprungen.");
+      sendStalePostSkippedEmailBestEffort(row, approval.channel);
+      continue;
+    }
+
+    try {
+      const pillars = listContentPillars(row.id);
+      const pillar = findPillar(pillars, approval.pillarTitle);
+      const channel = (approval.channel as PlannableChannel) || (approval.provider === "linkedin" ? "linkedin" : "ig_feed");
+      const generated = await generatePost(row, channel, pillar);
+      const updated = overwritePendingApprovalContent(approval.id, { headline: generated.headline, caption: generated.caption, imageUrl: generated.imageUrl });
+      logUsageCost(row.id, "stale-content-guard-regen", generated.costUsd);
+      if (updated) fresh.push(updated);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      forceRejectPendingApproval(approval.id);
+      logPlanningError(row.id, approval.channel, null, `Stale-Content-Sicherheitsnetz: Neu-Generierung fehlgeschlagen, Beitrag übersprungen statt veraltet zu veröffentlichen: ${message}`);
+      sendStalePostSkippedEmailBestEffort(row, approval.channel);
+    }
+  }
+
+  return fresh;
 }

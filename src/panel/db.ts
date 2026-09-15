@@ -434,6 +434,21 @@ migrateColumns("customers", [
   ["gradient_direction", "TEXT NOT NULL DEFAULT 'diagonal'"],
 ]);
 
+// Panel v19: Stale-Content-Sicherheitsnetz (siehe Session-Bericht - Andrea/Physiotherapie-Vorfall,
+// cus_bW0p_HapELUZ). branding_last_changed_at wird bei jeder Aenderung von company/industry/
+// about/tone aktualisiert (siehe router.ts's brandingFieldsChanged, gleiche Ausloeser-Felder wie
+// das Branding-Regen-Angebot). planned_posts/pending_approvals bekommen dazu
+// branding_version_at_generation - ein Zeitstempel, wann ihr TEXT zuletzt geschrieben wurde
+// (Erst-Generierung, Server-Neugenerierung ODER ein Kunden-eigener Edit zaehlen alle als "frisch",
+// siehe credentials.ts). Ein Beitrag ist "stale", wenn sein branding_version_at_generation aelter
+// ist als branding_last_changed_at des Kunden (oder komplett fehlt, waehrend der Kunde bereits
+// einen Wechsel hat) - siehe planning.ts's isBrandingStale. NULL/NULL (kein branding_change
+// bekannt) gilt nie als stale, damit bestehende Kunden ohne je eine Aenderung nicht plötzlich
+// alle als veraltet markiert werden.
+migrateColumns("customers", [["branding_last_changed_at", "TEXT"]]);
+migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
+migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
+
 export interface CustomerRow {
   id: string;
   company: string;
@@ -489,6 +504,7 @@ export interface CustomerRow {
   gradient_enabled: number;
   gradient_color2: string | null;
   gradient_direction: string;
+  branding_last_changed_at: string | null;
 }
 
 export interface ConnectionRow {
@@ -601,6 +617,7 @@ export interface PendingApprovalRow {
   created_at: string;
   updated_at: string;
   format: string;
+  branding_version_at_generation: string | null;
 }
 
 export interface PostRequestRow {
@@ -629,6 +646,7 @@ export interface PlannedPostRow {
   created_at: string;
   updated_at: string;
   format: string;
+  branding_version_at_generation: string | null;
 }
 
 export interface PlanningErrorRow {

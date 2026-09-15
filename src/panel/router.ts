@@ -15,6 +15,7 @@ import {
   CHANNEL_IMAGE_FORMAT,
   CHANNEL_LABEL,
   connectionStatus,
+  countRegenerableBrandingPlannedPosts,
   createPostRequest,
   createSavedTheme,
   deactivateTheme,
@@ -43,6 +44,7 @@ import {
   updatePlannedPostText,
 } from "./credentials.js";
 import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache, logUsageCost } from "./analytics.js";
+import { regeneratePlannedPostsForBranding } from "./planning.js";
 import { deleteObject, uploadAudioBase64 } from "../r2.js";
 import { estimateTranscriptionCostUsd, transcribeAudioUrl } from "../audio-transcribe.js";
 import { ToolError } from "../errors.js";
@@ -275,6 +277,34 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
   if (!HASHTAG_PREFS.includes(data.hashtagPreference)) data.hashtagPreference = "wenige";
   if (!LANGUAGES.includes(data.language)) data.language = "de";
   return { data, errors };
+}
+
+/** Human labels for the branding-regen offer banner - see BRANDING_REGEN_FIELDS below. */
+const BRANDING_REGEN_FIELD_LABELS: Record<string, string> = {
+  company: "Firmenname",
+  industry: "Branche",
+  about: "Beschreibung",
+  tone: "Tonalität",
+};
+
+/**
+ * Which BriefingInput fields are "content-relevant" enough that changing them should offer to
+ * regenerate the still-open 7-day preview (see PATCH /api/me below and
+ * planning.ts's regeneratePlannedPostsForBranding). Deliberately narrow - these are exactly the
+ * fields generatePlannedPostContent's prompt actually uses to write the text (company/industry/
+ * about/tone). Purely visual settings (accentColor, watermarkText, fontChoice, gradient*, logo)
+ * do NOT belong here: a plain image re-render would cover those, but that's a different, cheaper
+ * operation (see updatePlannedPostImage / the "Mit dieser Farbe neu erstellen" button, which
+ * already exists per-post) - lumping them into this text-regeneration offer would just waste
+ * money re-writing captions that didn't need to change.
+ */
+function brandingFieldsChanged(before: CustomerRow, data: BriefingInput): string[] {
+  const changed: string[] = [];
+  if (before.company !== data.company) changed.push("company");
+  if ((before.industry ?? "") !== data.industry) changed.push("industry");
+  if ((before.about ?? "") !== data.about) changed.push("about");
+  if (before.tone !== data.tone) changed.push("tone");
+  return changed;
 }
 
 function publicState(c: CustomerRow) {
@@ -844,6 +874,8 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Bitte prüfen Sie Ihre Angaben.", fields: errors });
       return;
     }
+    const changedBrandingFields = brandingFieldsChanged(c, data);
+    const now = nowIso();
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
@@ -851,18 +883,81 @@ export function createPanelRouter(): Router {
          active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
          comment_automation_enabled=?, comment_automation_mode=?, carousel_slide_count=?, carousel_auto_frequency=?,
          font_choice=?, gradient_enabled=?, gradient_color2=?, gradient_direction=?, updated_at=?
+         ${changedBrandingFields.length ? ", branding_last_changed_at=?" : ""}
        WHERE id=?`,
-    ).run(data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
-      data.tone, data.frequency, data.postTime,
-      data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
-      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
-      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
-      data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode, data.carouselSlideCount, data.carouselAutoFrequency,
-      data.fontChoice, data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection,
-      nowIso(), c.id);
+    ).run(
+      ...[
+        data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
+        data.tone, data.frequency, data.postTime,
+        data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
+        data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+        data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
+        data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode, data.carouselSlideCount, data.carouselAutoFrequency,
+        data.fontChoice, data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection,
+        now,
+        ...(changedBrandingFields.length ? [now] : []),
+        c.id,
+      ],
+    );
     setContentPillars(c.id, data.contentPillars);
-    res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
+    // Panel v18: only ever an OFFER, never an automatic regeneration (see brandingFieldsChanged's
+    // doc comment / Session-Bericht) - null when nothing content-relevant changed, or when there's
+    // simply nothing in the 7-day preview left to regenerate.
+    let brandingRegenOffer: { changedFields: string[]; changedFieldLabels: string[]; eligibleCount: number; editedCount: number } | null = null;
+    if (changedBrandingFields.length) {
+      const { eligible, edited } = countRegenerableBrandingPlannedPosts(c.id);
+      if (eligible > 0 || edited > 0) {
+        brandingRegenOffer = {
+          changedFields: changedBrandingFields,
+          changedFieldLabels: changedBrandingFields.map((f) => BRANDING_REGEN_FIELD_LABELS[f]),
+          eligibleCount: eligible,
+          editedCount: edited,
+        };
+      }
+    }
+    res.json({ ...publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow), brandingRegenOffer });
   }));
+
+  // "Diese Änderung betrifft deine noch nicht veröffentlichten Beiträge - jetzt neu generieren?"
+  // (see brandingRegenOffer above) - the customer's explicit confirmation from that banner.
+  // `includeEdited` only matters if they also confirmed the separate "X Beiträge wurden bereits
+  // von dir bearbeitet - auch diese überschreiben?" follow-up; defaults to false so a plain
+  // confirm never silently discards a hand-edit.
+  router.post(
+    "/api/planned-posts/regenerate-for-branding",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).json({ error: "Nicht angemeldet" });
+        return;
+      }
+      if (!c.email_verified) {
+        res.status(403).json({ error: EMAIL_NOT_VERIFIED_MSG });
+        return;
+      }
+      if (!anthropicAvailable()) {
+        res.status(503).json({ error: "Die Neugenerierung ist gerade nicht verfügbar." });
+        return;
+      }
+      // Touches up to a full week of posts (multiple Anthropic + fal.ai calls each) per call -
+      // generous enough for "changed my mind and adjusted settings a few times in a row", tight
+      // enough that a stray double-click or script can't run up real cost.
+      if (rateLimited(`branding-regen:${c.id}`, 3, 3_600_000)) {
+        res.status(429).json({ error: "Zu viele Anfragen. Bitte in einer Stunde erneut versuchen." });
+        return;
+      }
+      const includeEdited = req.body?.includeEdited === true;
+      try {
+        const result = await regeneratePlannedPostsForBranding(c, includeEdited);
+        const today = viennaDateStr();
+        const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+        res.json({ ...result, posts: listPlannedPosts(c.id, today, to), maxRegenerate: PLANNED_POST_MAX_REGENERATE });
+      } catch (err) {
+        console.error("[panel] Branding-Neugenerierung fehlgeschlagen:", err);
+        res.status(502).json({ error: err instanceof Error ? err.message : "Die Neugenerierung konnte gerade nicht durchgeführt werden." });
+      }
+    }),
+  );
 
   // Panel v11: Erst-Rundgang als gesehen markieren. Serverseitig statt im Browser-Speicher, damit
   // er nicht bei jedem Login/Geraetewechsel wieder auftaucht (siehe db.ts, tour_done_at).
