@@ -114,7 +114,9 @@
   const S = { providers: [], aiAvailable: false, trialDays: 7, turnstileSiteKey: null, customer: null, connections: [], step: "company", formPart: 1, banner: null, skipped: new Set(), pillarAiOpen: false, pillarAiKeywords: "", pillarSuggestions: [], settingsTarget: null, settingsQuery: "", tourIndex: -1, pendingCommentCount: 0, analyticsChannel: "instagram",
     // Redesign: aktiver Reiter im Bereich "Beiträge" und Anzahl offener Freigaben (speist den
     // Status-Satz und die Zähler in Navigation/Bottom-Bar aus derselben Quelle).
-    postTab: "geplant", approvalCount: 0 };
+    postTab: "geplant", approvalCount: 0,
+    // Mobil: welche Einstellungs-Gruppe gerade offen ist ("" = Gruppenliste).
+    settingsGroup: "" };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -157,16 +159,14 @@
   function dictateBtnHtml(forceDisabled) {
     const disabled = forceDisabled || !dictateAvailable();
     const label = dictateAvailable() ? "Diktieren" : "Diktieren wird von diesem Browser nicht unterstützt";
-    return `<button type="button" class="dictate-btn" data-dictate ${disabled ? "disabled" : ""} aria-label="${label}" title="${label}">` +
-      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-      `<path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>` +
-      `</svg></button>`;
+    // Eigenes Pixel-Icon statt Strich-Symbol, damit es zur Icon-Familie passt.
+    return `<button type="button" class="dictate" data-dictate ${disabled ? "disabled" : ""} aria-label="${label}" title="${label}" aria-pressed="false">${icon("mic", 14)}</button>`;
   }
 
   /** Die einzige Stelle, die ein Text-/Textarea-Feld dictier-faehig macht - siehe Dateikopf-Kommentar.
    *  `forceDisabled` fuer Felder, die selbst gerade disabled sind (z. B. nicht editierbare
    *  Vorausplanungs-Karten) - der Mikrofon-Button darf dann nie aktiv wirken. */
-  const withDictate = (fieldHtml, forceDisabled = false) => `<div class="dictate-wrap">${fieldHtml}${dictateBtnHtml(forceDisabled)}</div>`;
+  const withDictate = (fieldHtml, forceDisabled = false) => `<div class="with-dictate">${fieldHtml}${dictateBtnHtml(forceDisabled)}</div>`;
 
   /**
    * Bricht eine laufende Diktier-Sitzung sofort und OHNE Transkription ab (beide Modi) - der
@@ -182,6 +182,7 @@
     state.listening = false;
     clearTimeout(state.autoStopTimer);
     state.btn.classList.remove("dictating", "transcribing");
+    state.btn.setAttribute("aria-pressed", "false");
     state.btn.disabled = false;
     try { state.recognition?.stop(); } catch {}
     if (state.recorder && state.recorder.state !== "inactive") { try { state.recorder.stop(); } catch {} }
@@ -282,6 +283,7 @@
       state.stoppedPromise = new Promise((resolve) => recorder.addEventListener("stop", resolve, { once: true }));
       activeDictation = state;
       btn.classList.add("dictating");
+      btn.setAttribute("aria-pressed", "true");
       recorder.start();
       state.autoStopTimer = setTimeout(() => { if (activeDictation === state) finishRecording(state); }, 90_000);
     }).catch((err) => {
@@ -340,6 +342,7 @@
       const state = { mode: "speech", btn, target, listening: true, recognition: null };
       activeDictation = state;
       btn.classList.add("dictating");
+      btn.setAttribute("aria-pressed", "true");
       startRecognitionCycle(state);
     } else if (mediaRecorderSupported()) {
       startServerRecording(btn, target);
@@ -440,7 +443,7 @@
     feed: '<rect x="0" y="0" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"/>',
     story: '<rect x="2" y="0" width="7" height="11" fill="none" stroke="currentColor" stroke-width="2"/>',
     linkedin: '<rect x="0" y="0" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="2" y="2" width="2" height="2"/><rect x="2" y="5" width="2" height="4"/><rect x="5" y="5" width="4" height="4"/>',
-    chevron: '<rect x="3" y="0" width="2" height="2"/><rect x="5" y="2" width="2" height="2"/><rect x="7" y="4" width="2" height="3"/><rect x="5" y="7" width="2" height="2"/><rect x="3" y="9" width="2" height="2"/>',
+    chevron: '<rect x="3" y="1" width="2" height="2"/><rect x="5" y="3" width="2" height="2"/><rect x="7" y="5" width="2" height="1"/><rect x="5" y="6" width="2" height="2"/><rect x="3" y="8" width="2" height="2"/>',
     undo: '<rect x="0" y="4" width="3" height="3"/><rect x="2" y="2" width="2" height="2"/><rect x="2" y="7" width="2" height="2"/><rect x="4" y="4" width="7" height="3"/>',
   };
   /** @param {string} name @param {number} size */
@@ -537,7 +540,9 @@
     if (!area) return false;
     if (area.view === "posts" && sub && POST_TABS.some((t) => t.id === sub)) S.postTab = sub;
     if (area.view === "analytics" && (sub === "instagram" || sub === "linkedin")) S.analyticsChannel = sub;
-    if (area.view === "settings" && sub) S.settingsTarget = sub;
+    // Ohne Gruppe im Hash: mobil zurueck zur Gruppenliste (sonst bliebe die zuletzt geoeffnete
+    // Gruppe haengen und "Einstellungen" in der Navigation wuerde scheinbar nichts tun).
+    if (area.view === "settings") { S.settingsTarget = sub || null; S.settingsGroup = sub || ""; }
     S.step = area.view;
     return true;
   }
@@ -969,11 +974,18 @@
       ${emailVerifyBannerHtml(c)}
       <h1>Einstellungen</h1>
       <p class="lede">Alles, was wir für Sie tun, lässt sich hier ändern - in sieben Gruppen. Wenn Sie etwas suchen, tippen Sie es einfach ein.</p>
-      <div class="set-layout">
+      <div class="settings-layout" id="set-layout" data-mobile-group="${esc(S.settingsGroup || "")}">
         <aside class="set-side">
-          <ul>${SETTINGS_GROUPS.map((g) => `<li><button type="button" data-setjump="${g.id}">${esc(g.label)}</button></li>`).join("")}</ul>
+          <ul style="list-style:none;margin:0;padding:0">${SETTINGS_GROUPS.map((g) => `<li><button type="button" data-setjump="${g.id}">${esc(g.label)}</button></li>`).join("")}</ul>
         </aside>
         <div>
+          <!-- Mobil: Gruppenliste wie in den iOS-Einstellungen. Die Gruppen selbst bleiben dabei
+               IMMER im DOM (nur ausgeblendet) - das Formular sendet alle Felder gemeinsam an
+               PATCH /api/me, ein Entfernen wuerde stillschweigend Werte verlieren. -->
+          <nav class="set-list" aria-label="Einstellungs-Gruppen">
+            ${SETTINGS_GROUPS.map((g) => `<button type="button" data-setgroup="${g.id}">${esc(g.label)}${icon("chevron", 12)}</button>`).join("")}
+          </nav>
+          <button type="button" class="link set-back" data-setgroup="">Zurück zu allen Einstellungen</button>
           <div class="set-search">
             <label class="vh" for="set-search-input">Einstellung suchen</label>
             ${withDictate(`<input id="set-search-input" type="search" placeholder="Einstellung suchen, z. B. Kommentar, Farbe, Hashtag" autocomplete="off" value="${esc(S.settingsQuery)}">`)}
@@ -1494,16 +1506,30 @@
     // Panel v14: Format nur fuer Instagram Feed relevant (Karussell gibt es nicht bei Story/
     // LinkedIn) - trotzdem immer sichtbar mit erklaerendem Hinweis, statt sich dynamisch je nach
     // Kanalauswahl ein-/auszublenden (einfacher zu verstehen als ein Feld, das verschwindet).
+    // Grosse Kacheln statt Standard-Checkboxen: am Handy sicher treffbar (44px+) und der Zustand
+    // ist auf einen Blick lesbar (Ink-Flaeche = ausgewaehlt), ohne dass eine Legende noetig waere.
+    const chanIcon = (id) => (id === "linkedin" ? "linkedin" : id === "ig_story" ? "story" : "feed");
     return `<fieldset class="field post-now-channels">
-      <legend>Kanäle</legend>
-      ${available.map((o) => `
-        <label class="check"><input type="checkbox" name="postNowChannel" value="${o.id}" ${open.has(o.id) ? "disabled" : "checked"}><span>${esc(o.label)}${open.has(o.id) ? " (schon angefragt)" : ""}</span></label>`).join("")}
+      <legend class="lbl">Wo soll es erscheinen?</legend>
+      <div class="tiles">
+        ${available.map((o) => `
+          <label class="tile${open.has(o.id) ? " is-disabled" : ""}">
+            <input type="checkbox" name="postNowChannel" value="${o.id}" ${open.has(o.id) ? "disabled" : "checked"}>
+            <span class="tile-face">${icon(chanIcon(o.id), 18)}<span>${esc(o.label)}</span>
+            ${open.has(o.id) ? `<span class="micro muted">schon angefragt</span>` : ""}</span>
+          </label>`).join("")}
+      </div>
     </fieldset>
     <fieldset class="field post-now-format">
-      <legend>Format (nur für Instagram Feed)</legend>
-      ${Object.entries(POST_FORMATS).map(([k, label]) => `
-        <label class="check"><input type="radio" name="postNowFormat" value="${k}" ${k === "single" ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}
-      <p class="hint">Karussell verbraucht ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES}× die Bildkosten eines Einzelbild-Posts (aktuell ${esc(String(c.carouselSlideCount ?? 5))} Bilder, einstellbar unter „Kanäle &amp; Zeitplan“).</p>
+      <legend class="lbl">Format <span class="opt">(nur für Instagram Feed)</span></legend>
+      <div class="tiles">
+        ${Object.entries(POST_FORMATS).map(([k, label]) => `
+          <label class="tile">
+            <input type="radio" name="postNowFormat" value="${k}" ${k === "single" ? "checked" : ""}>
+            <span class="tile-face">${icon(k === "carousel" ? "beitraege" : "feed", 18)}<span>${esc(k === "carousel" ? "Karussell" : label)}</span></span>
+          </label>`).join("")}
+      </div>
+      <p class="hint">Karussell verbraucht ${CAROUSEL_MIN_SLIDES}-${CAROUSEL_MAX_SLIDES}× die Bildkosten eines Einzelbild-Beitrags (aktuell ${esc(String(c.carouselSlideCount ?? 5))} Bilder, einstellbar unter „Kanäle &amp; Zeitplan“).</p>
     </fieldset>`;
   }
 
@@ -2059,9 +2085,8 @@
   ];
 
   function analyticsTabsHtml() {
-    const tab = (id, label) =>
-      `<button type="button" class="link" role="tab" aria-selected="${S.analyticsChannel === id}" data-analytics-channel="${id}" ${S.analyticsChannel === id ? 'style="font-weight:700;text-decoration:underline"' : ""}>${esc(label)}</button>`;
-    return `<div class="actions" role="tablist" style="margin:-8px 0 20px">${ANALYTICS_CHANNELS.map((c) => tab(c.id, c.label)).join("")}</div>`;
+    return `<div class="segmented" role="tablist" style="margin:var(--s4) 0 var(--s6)">${ANALYTICS_CHANNELS.map((c) => `
+      <button type="button" role="tab" aria-selected="${S.analyticsChannel === c.id}" data-analytics-channel="${c.id}">${esc(c.label)}</button>`).join("")}</div>`;
   }
 
   function analyticsHtml() {
@@ -2070,10 +2095,7 @@
       <h1>Analytics</h1>
       <p class="lede">Kennzahlen der letzten 30 Tage, einmal täglich im Hintergrund aktualisiert.</p>
       ${analyticsTabsHtml()}
-      <div id="analytics-body"><p class="empty">Wird geladen …</p></div>
-      <div class="actions">
-        <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
-      </div>`;
+      <div id="analytics-body"><p class="empty">Wird geladen …</p></div>`;
   }
 
   function anDelta(curr, prev) {
@@ -2202,10 +2224,7 @@
       ${postsTabsHtml("preview")}
       <div id="preview-strip"><p class="empty">Wird geladen …</p></div>
       <p class="preview-hint">← Tage seitlich wischen, um sie zu wechseln.</p>
-      <div id="preview-detail"></div>
-      <div class="actions">
-        <button class="btn" data-go="${overviewStep()}">Zurück zur Übersicht</button>
-      </div>`;
+      <div id="preview-detail"></div>`;
   }
 
   function previewStripHtml() {
@@ -2215,13 +2234,22 @@
     if (!previewSelectedDate || !dates.includes(previewSelectedDate)) {
       previewSelectedDate = dates.find((d) => (byDate[d] || []).length) || dates[0];
     }
+    // Tagesreiter in derselben Pipe-Sprache wie die Übersicht: ein Knoten je Beitrag, Zustand
+    // über data-state. Bei schmalen Screens horizontal scrollbar mit scroll-snap.
+    const stateOf = (p) => (p.status === "published" ? "published" : p.status === "approved" || p.status === "submitted" ? "waiting" : p.status === "rejected" ? "none" : "planned");
     return `<div class="preview-days">
       ${dates.map((d) => {
         const items = byDate[d] || [];
-        const label = new Date(`${d}T00:00:00`).toLocaleDateString("de-AT", { weekday: "short", day: "2-digit", month: "2-digit" });
-        return `<button type="button" class="preview-day${d === previewSelectedDate ? " is-selected" : ""}" data-preview-day="${d}">
-          <span class="preview-day-label">${esc(label)}</span>
-          <span class="preview-day-dots">${items.map((it) => `<span class="dot" title="${esc(PP_CHANNEL_LABEL[it.channel] || it.channel)}"></span>`).join("")}</span>
+        const date = new Date(`${d}T00:00:00`);
+        const wd = date.toLocaleDateString("de-AT", { weekday: "short" });
+        const dm = date.toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit" });
+        const nodes = items.length
+          ? items.map((it) => `<span class="pipe-node" data-state="${stateOf(it)}" role="img" aria-label="${esc(PP_CHANNEL_LABEL[it.channel] || it.channel)}"></span>`).join("")
+          : `<span class="pipe-node" data-state="none" aria-hidden="true"></span>`;
+        return `<button type="button" class="preview-day${d === previewSelectedDate ? " is-selected" : ""}" data-preview-day="${d}"
+            aria-pressed="${d === previewSelectedDate}" aria-label="${esc(wd)}, ${esc(dm)}: ${items.length ? pluralDe(items.length, "Beitrag", "Beiträge") : "nichts geplant"}">
+          <span class="preview-day-label"><span class="wd">${esc(wd)}</span><span class="dm">${esc(dm)}</span></span>
+          <span class="preview-day-dots">${nodes}</span>
         </button>`;
       }).join("")}
     </div>`;
@@ -2235,39 +2263,68 @@
     const editable = p.status !== "published" && p.status !== "submitted";
     const canSkip = editable && p.status !== "rejected";
     const canApprove = S.customer.approvalMode && editable && p.status !== "approved" && p.status !== "rejected";
-    return `<div class="preview-card" data-plan-id="${esc(p.id)}">
-      <div class="preview-card-media">
-        ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" data-lightbox>` : `<div class="ph"></div>`}
-      </div>
-      <div class="preview-card-body">
-        <div>
-          <span class="channel-badge">${esc(PP_CHANNEL_LABEL[p.channel] || p.channel)}</span>
-          <span class="channel-badge">${esc(PP_STATUS_LABEL[p.status] || p.status)}</span>
-        </div>
-        <p class="hint" style="margin:2px 0 8px">Erstellt ${esc(fmtCreated(p.createdAt))} (Vorausplanung).</p>
-        <label class="vh" for="pp-headline-${esc(p.id)}">Headline</label>
-        ${withDictate(`<input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Headline" ${editable ? "" : "disabled"}>`, !editable)}
-        ${p.channel !== "ig_story" ? `<label class="vh" for="pp-caption-${esc(p.id)}">Caption</label>
-        ${withDictate(`<textarea id="pp-caption-${esc(p.id)}" maxlength="2200" placeholder="Caption" ${editable ? "" : "disabled"}>${esc(p.caption || "")}</textarea>`, !editable)}` : ""}
-        <p class="pp-save-status" data-pp-save-status="${esc(p.id)}" aria-live="polite"></p>
-        ${editable ? `<div class="actions"><button type="button" class="link" data-pp-save="${esc(p.id)}">Speichern</button></div>` : ""}
+    // Karte zeigt den Beitrag so, wie er erscheinen wird: Bild gross, darunter Kanal + Termin in
+    // einem Satz, dann Text. Bearbeiten liegt hinter einem Schalter, damit die Karte im Normalfall
+    // ruhig bleibt und nicht wie ein Formular wirkt.
+    const time = S.customer && S.customer.postTime ? ` um ${esc(S.customer.postTime)} Uhr` : "";
+    const when = p.scheduledFor === localDateStr(new Date())
+      ? `Geht heute${time} raus`
+      : `Geht am ${esc(new Date(`${p.scheduledFor}T00:00:00`).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" }))}${time} raus`;
+    const statusNote = p.status === "rejected" ? "Übersprungen — wird nicht veröffentlicht."
+      : p.status === "published" ? "Bereits veröffentlicht."
+      : p.status === "submitted" ? "Liegt zur Freigabe bereit."
+      : p.status === "approved" ? "Von Ihnen freigegeben."
+      : S.customer.approvalMode ? `${when}, sobald Sie freigeben.` : `${when}.`;
 
-        ${editable ? `<label>Bild-Farbe</label>
-        <div class="swatches">
-          ${PALETTE.map((hex) => `<button type="button" class="swatch" data-pp-swatch="${hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
-          <input type="color" data-pp-color="${esc(p.id)}" value="${esc(p.accentColorUsed || "#0a0e1a")}">
+    return `<article class="card preview-card" data-plan-id="${esc(p.id)}">
+      ${p.imageUrl
+        ? `<img class="card-media${p.channel === "ig_story" ? " story" : ""}" src="${esc(p.imageUrl)}" alt="Vorschaubild: ${esc(p.headline || "")}" data-lightbox loading="lazy" decoding="async">`
+        : `<div class="card-media"></div>`}
+      <div class="card-body">
+        <div class="card-kicker">
+          ${icon(p.channel === "linkedin" ? "linkedin" : p.channel === "ig_story" ? "story" : "feed", 12)}
+          ${esc(PP_CHANNEL_LABEL[p.channel] || p.channel)}
+          <span class="pipe-node" data-state="${p.status === "published" ? "published" : p.status === "approved" || p.status === "submitted" ? "waiting" : p.status === "rejected" ? "none" : "planned"}"
+            style="width:10px;height:10px" role="img" aria-label="${esc(PP_STATUS_LABEL[p.status] || p.status)}"></span>
         </div>
-        ${atMax
-          ? `<p class="hint">Maximale Anzahl an Neuerstellungen erreicht.</p>`
-          : `<button type="button" class="link" data-pp-regenerate="${esc(p.id)}">Mit dieser Farbe neu erstellen</button>
-             <p class="hint">${p.regenerateCount}/${previewCache.maxRegenerate} Neuerstellungen verwendet.</p>`}` : ""}
+        <p class="small" style="margin:var(--s2) 0 var(--s4)">${statusNote}</p>
 
-        <div class="actions">
-          ${canSkip ? `<button type="button" class="link" data-pp-skip="${esc(p.id)}">Diesen Beitrag überspringen</button>` : ""}
-          ${canApprove ? `<button type="button" class="btn" data-pp-approve="${esc(p.id)}">Jetzt schon freigeben</button>` : ""}
+        ${p.headline ? `<h2 style="margin-bottom:var(--s2)">${esc(p.headline)}</h2>` : ""}
+        ${p.caption && p.channel !== "ig_story" ? `<p class="prose">${esc(p.caption)}</p>` : ""}
+
+        ${editable ? `
+        <details class="pp-edit">
+          <summary>Text bearbeiten</summary>
+          <div class="field" style="margin-top:var(--s4)">
+            <label for="pp-headline-${esc(p.id)}">Schlagzeile im Bild</label>
+            ${withDictate(`<input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Schlagzeile">`)}
+          </div>
+          ${p.channel !== "ig_story" ? `<div class="field">
+            <label for="pp-caption-${esc(p.id)}">Beitragstext</label>
+            ${withDictate(`<textarea id="pp-caption-${esc(p.id)}" maxlength="2200" placeholder="Beitragstext">${esc(p.caption || "")}</textarea>`)}
+          </div>` : ""}
+          <div class="field">
+            <label>Bild-Farbe</label>
+            <div class="swatches">
+              ${PALETTE.map((hex) => `<button type="button" class="swatch" data-pp-swatch="${hex}" style="background:${hex}" aria-label="Farbe ${hex}"></button>`).join("")}
+              <input type="color" data-pp-color="${esc(p.id)}" value="${esc(p.accentColorUsed || "#0a0e1a")}" aria-label="Eigene Farbe">
+            </div>
+            ${atMax
+              ? `<p class="hint">Maximale Anzahl an Neuerstellungen erreicht.</p>`
+              : `<p class="hint"><button type="button" class="link" data-pp-regenerate="${esc(p.id)}">Bild mit dieser Farbe neu erstellen</button> — noch ${previewCache.maxRegenerate - p.regenerateCount} von ${previewCache.maxRegenerate}</p>`}
+          </div>
+          <div class="actions">
+            <button type="button" class="btn" data-pp-save="${esc(p.id)}">Änderungen speichern</button>
+            <span class="saved" data-pp-save-status="${esc(p.id)}" aria-live="polite"></span>
+          </div>
+        </details>` : ""}
+
+        <div class="card-actions">
+          ${canApprove ? `<button type="button" class="btn btn-primary" data-pp-approve="${esc(p.id)}">Jetzt schon freigeben</button>` : ""}
+          ${canSkip ? `<button type="button" class="btn btn-quiet" data-pp-skip="${esc(p.id)}">Überspringen</button>` : ""}
         </div>
       </div>
-    </div>`;
+    </article>`;
   }
 
   function previewDetailHtml() {
@@ -2483,7 +2540,12 @@
     // View Transitions fuer den Bereichswechsel, mit Fallback: wo es die API nicht gibt (Firefox,
     // aeltere Safari), rendert es einfach direkt - kein Unterschied ausser der Ueberblendung.
     if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      document.startViewTransition(() => renderNow(focus));
+      // Abgebrochene Uebergaenge (z. B. wenn sich waehrenddessen die Fenstergroesse aendert) sind
+      // erwartbar und duerfen keinen unbehandelten Fehler erzeugen.
+      const t = document.startViewTransition(() => renderNow(focus));
+      t.finished.catch(() => {});
+      t.ready.catch(() => {});
+      t.updateCallbackDone.catch(() => {});
     } else {
       renderNow(focus);
     }
@@ -2584,6 +2646,7 @@
     let sub = "";
     if (area.view === "posts") sub = S.postTab;
     else if (area.view === "analytics") sub = S.analyticsChannel;
+    else if (area.view === "settings") sub = S.settingsGroup || "";
     applyHash(hashFor(area.view, sub), { replace: true });
   }
 
@@ -2593,7 +2656,7 @@
     if (step === "settings" && !isEstablished()) return go("company");
     if (step !== "company" && !S.customer) return go("company");
     if (groupId) S.settingsTarget = groupId;
-    if (sub && step === "settings") S.settingsTarget = sub;
+    if (step === "settings") { S.settingsTarget = sub || S.settingsTarget; S.settingsGroup = sub || ""; }
     if (sub && step === "posts" && POST_TABS.some((t) => t.id === sub)) S.postTab = sub;
     if (sub && step === "analytics" && (sub === "instagram" || sub === "linkedin")) S.analyticsChannel = sub;
     if (step !== "settings") S.settingsQuery = "";
@@ -3021,10 +3084,23 @@
     const postNowTrigger = e.target.closest("[data-open-post-now]");
     if (postNowTrigger) { e.preventDefault(); openPostNow(); return; }
 
+    const setGroupBtn = e.target.closest("[data-setgroup]");
+    if (setGroupBtn) {
+      S.settingsGroup = setGroupBtn.dataset.setgroup || "";
+      const layout = $("#set-layout");
+      if (layout) layout.dataset.mobileGroup = S.settingsGroup;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn && !tabBtn.dataset.go) {
       const id = tabBtn.dataset.tab;
-      if (POST_TABS.some((t) => t.id === id) && id !== S.postTab) { S.postTab = id; render(true); }
+      if (POST_TABS.some((t) => t.id === id) && id !== S.postTab) {
+        S.postTab = id;
+        applyHash(hashFor("posts", id)); // pushState: die Zurück-Geste führt zum vorigen Reiter
+        render(true);
+      }
       return;
     }
 
@@ -3090,6 +3166,7 @@
     const analyticsTabBtn = e.target.closest("[data-analytics-channel]");
     if (analyticsTabBtn) {
       S.analyticsChannel = analyticsTabBtn.dataset.analyticsChannel;
+      applyHash(hashFor("analytics", S.analyticsChannel));
       render(true);
       return;
     }
@@ -3724,9 +3801,10 @@
     // Zurück-Geste am Handy / Browser-Zurück: Ansicht aus der URL wiederherstellen.
     window.addEventListener("hashchange", () => {
       if (!isEstablished()) return;
-      const before = `${S.step}/${S.postTab}/${S.analyticsChannel}`;
+      const key = () => `${S.step}/${S.postTab}/${S.analyticsChannel}/${S.settingsGroup}`;
+      const before = key();
       if (!routeFromHash()) return;
-      if (`${S.step}/${S.postTab}/${S.analyticsChannel}` !== before) render(true);
+      if (key() !== before) render(true);
     });
 
     // Sichtbare Daten aktualisieren, wenn der Tab wieder in den Vordergrund kommt - nie waehrend

@@ -70,6 +70,11 @@
 
 * { box-sizing: border-box; }
 
+/* Bilder passen sich immer dem Container an - ohne das sprengt ein einziges breites
+   Beitragsbild das komplette Layout am Handy (gefunden bei 390px, Bild mit 1040px). */
+img, svg, video { max-width: 100%; }
+img { height: auto; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -792,3 +797,94 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
   height: 4px; background: var(--rule); border-radius: 2px;
 }
 .flow-nodes::before { display: none; }
+
+/* ===========================================================================
+   Beiträge: Tagesreiter (Geplant) und Detailkarte
+   =========================================================================== */
+.preview-days {
+  display: flex; gap: var(--s2); overflow-x: auto; scroll-snap-type: x mandatory;
+  padding-bottom: var(--s2); margin-bottom: var(--s5); scrollbar-width: none;
+}
+.preview-days::-webkit-scrollbar { display: none; }
+.preview-day {
+  scroll-snap-align: start; flex: 0 0 auto; min-width: 72px; min-height: 66px;
+  display: flex; flex-direction: column; align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s3); background: none; cursor: pointer; font: inherit; color: inherit;
+  border: 1px solid transparent; border-radius: var(--r1);
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.preview-day:hover { background: var(--wash); }
+.preview-day.is-selected { border-color: var(--ink); }
+.preview-day-label { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.preview-day-label .wd { font-size: var(--t-micro); font-weight: 700; }
+.preview-day-label .dm { font-size: var(--t-micro); color: var(--stone); font-variant-numeric: tabular-nums; }
+.preview-day-dots { display: flex; gap: 3px; align-items: center; min-height: 16px; }
+.preview-day-dots .pipe-node { width: 12px; height: 12px; }
+
+/* Bearbeiten liegt hinter einem Schalter: die Karte bleibt im Normalfall ruhig und liest sich
+   wie ein Beitrag, nicht wie ein Formular. */
+.pp-edit { margin: var(--s5) 0 0; border-top: 1px solid var(--rule); padding-top: var(--s4); }
+.pp-edit > summary {
+  cursor: pointer; font-size: var(--t-small); font-weight: 500; list-style: none;
+  display: inline-flex; align-items: center; gap: var(--s2); padding: var(--s2) 0;
+}
+.pp-edit > summary::-webkit-details-marker { display: none; }
+.pp-edit > summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-2) var(--ease); }
+.pp-edit[open] > summary::before { transform: rotate(45deg); }
+.preview-card .card-media { cursor: zoom-in; }
+
+/* Diktat-Knopf sitzt IM Feld (vorher darunter als eigener Kasten) */
+.with-dictate { position: relative; }
+.with-dictate > input, .with-dictate > textarea { padding-right: 52px; }
+.dictate.dictating { background: var(--stop); border-color: var(--stop); color: var(--paper); animation: pulse 1.2s infinite; }
+.dictate.transcribing { opacity: .6; }
+@keyframes pulse { 50% { opacity: .55; } }
+
+/* Große Auswahl-Kacheln (Kanäle, Format) */
+fieldset { border: 0; padding: 0; margin: 0 0 var(--s5); }
+fieldset > legend { padding: 0; margin-bottom: var(--s3); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s2); }
+.tile { position: relative; display: block; cursor: pointer; }
+.tile input { position: absolute; opacity: 0; width: 0; height: 0; }
+.tile-face {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2);
+  min-height: 72px; padding: var(--s3) var(--s4);
+  border: 1px solid var(--line-strong); border-radius: var(--r2);
+  font-size: var(--t-small); font-weight: 500;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease), color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.tile-face svg { fill: currentColor; }
+.tile:hover .tile-face { border-color: var(--ink); }
+.tile:active .tile-face { transform: scale(.98); }
+.tile input:checked + .tile-face { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tile input:focus-visible + .tile-face { outline: 2px solid var(--ink); outline-offset: 2px; }
+.tile.is-disabled .tile-face { opacity: .5; }
+.tile.is-disabled { cursor: not-allowed; }
+
+/* ===========================================================================
+   Einstellungen: mobil Gruppenliste -> Unterseite, ab 1024px alles mit Sprungliste
+   =========================================================================== */
+.set-list { display: none; }
+.set-back { display: none; margin-bottom: var(--s5); }
+
+@media (max-width: 1023px) {
+  /* Gruppenliste sichtbar, solange keine Gruppe gewählt ist */
+  #set-layout[data-mobile-group=""] .set-list { display: block; }
+  #set-layout[data-mobile-group=""] .setgroup { display: none; }
+  #set-layout[data-mobile-group=""] .set-search { display: none; }
+
+  /* Eine Gruppe gewählt: nur diese zeigen, plus Zurück */
+  #set-layout:not([data-mobile-group=""]) .setgroup { display: none; }
+  #set-layout:not([data-mobile-group=""]) .set-back { display: inline-block; }
+  #set-layout[data-mobile-group="unternehmen"] .setgroup[data-group="unternehmen"],
+  #set-layout[data-mobile-group="aussehen"] .setgroup[data-group="aussehen"],
+  #set-layout[data-mobile-group="inhalt"] .setgroup[data-group="inhalt"],
+  #set-layout[data-mobile-group="kanaele"] .setgroup[data-group="kanaele"],
+  #set-layout[data-mobile-group="automatik"] .setgroup[data-group="automatik"],
+  #set-layout[data-mobile-group="mail"] .setgroup[data-group="mail"],
+  #set-layout[data-mobile-group="konto"] .setgroup[data-group="konto"] { display: block; }
+  /* Die erste sichtbare Gruppe braucht keine Trennlinie über sich */
+  #set-layout:not([data-mobile-group=""]) .setgroup { margin-top: 0; padding-top: 0; border-top: 0; }
+  /* Suche blendet Gruppen per .is-hidden aus - das darf die Auswahl nicht überstimmen */
+  .setgroup.is-hidden { display: none !important; }
+}

@@ -21,11 +21,21 @@ const log = (ok, msg) => { if (!ok) problems++; console.log(`  ${ok ? "ok " : "F
 
 async function checkPage(page, name, width) {
   await page.waitForTimeout(700);
-  const overflow = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    innerWidth: window.innerWidth,
-  }));
-  log(overflow.scrollWidth <= overflow.innerWidth + 1, `${name}: kein horizontales Scrollen (${overflow.scrollWidth} <= ${overflow.innerWidth})`);
+  // Gegen die EINGESTELLTE Breite pruefen, nicht gegen innerWidth: bei echtem Ueberlauf zoomt
+  // der mobile Browser heraus, innerWidth waechst mit - der Test waere dann immer gruen.
+  const o = await page.evaluate(() => {
+    const docW = document.documentElement.scrollWidth;
+    let worst = null;
+    document.querySelectorAll("body *").forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.right > document.documentElement.clientWidth + 1) {
+        if (!worst || r.right > worst.right) worst = { right: Math.round(r.right), sel: el.tagName.toLowerCase() + (el.className && typeof el.className === "string" ? "." + el.className.split(" ").filter(Boolean).slice(0,2).join(".") : "") };
+      }
+    });
+    return { docW, innerW: window.innerWidth, worst };
+  });
+  const ok_ = o.docW <= width + 1 && o.innerW <= width + 1;
+  log(ok_, `${name}: kein horizontales Scrollen (doc ${o.docW}, innerWidth ${o.innerW}, erwartet ${width})${o.worst ? ` — breitestes Element: ${o.worst.sel} bis ${o.worst.right}px` : ""}`);
   await page.screenshot({ path: `${outDir}/${name}-${width}.png`, fullPage: true });
 }
 
