@@ -448,6 +448,17 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
 .card-actions .btn { flex: 1 1 auto; }
 
+/* Ab Tablet steht das Beitragsbild LINKS neben Text und Aktionen statt darueber: in voller
+   Kartenbreite war es am Desktop 730x730px gross und hat Text, Freigeben und alles andere
+   erschlagen (Rueckmeldung von Paul nach dem Livegang). Am Handy bleibt es ueber dem Text und in
+   voller Breite - dort ist genau das die vertraute Beitragsansicht. */
+@media (min-width: 768px) {
+  .card { display: grid; grid-template-columns: 260px minmax(0, 1fr); align-items: start; max-width: 880px; }
+  .card-media { border-right: 1px solid var(--rule); }
+  .card-media.story { aspect-ratio: 9 / 16; max-height: 420px; }
+  .card-body { padding: var(--s5); }
+}
+
 /* ===========================================================================
    Zustände: leer, Skeleton, Fehler
    =========================================================================== */
