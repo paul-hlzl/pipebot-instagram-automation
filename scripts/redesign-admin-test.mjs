@@ -15,8 +15,13 @@ import { chromium } from "/root/.npm/_npx/e41f203b7505f1fb/node_modules/playwrig
 import { readFileSync, mkdirSync } from "node:fs";
 
 const BASE = "https://mcp.pipebot.at/panel/sandbox/admin/";
-const PW = process.env.PANEL_ADMIN_PASSWORD;
-if (!PW) { console.error("PANEL_ADMIN_PASSWORD fehlt (nur Staging-Passwort verwenden)."); process.exit(2); }
+// Passwort aus der Umgebung, sonst aus der .env - gleiches Muster wie scripts/test-panel.mjs
+// (wird nie ausgegeben). Die Seite, die damit geoeffnet wird, ist ausschliesslich die Sandbox.
+const PW = process.env.PANEL_ADMIN_PASSWORD ?? (() => {
+  try { return /^PANEL_ADMIN_PASSWORD=(.*)$/m.exec(readFileSync(".env", "utf8"))?.[1]?.trim() ?? ""; }
+  catch { return ""; }
+})();
+if (!PW) { console.error("PANEL_ADMIN_PASSWORD weder in der Umgebung noch in .env gefunden."); process.exit(2); }
 const outDir = process.argv[2] || "docs/redesign/after";
 const prefix = process.argv[3] || "20-admin";
 const AXE = (() => { try { return readFileSync("/tmp/axe.min.js", "utf8"); } catch { return null; } })();

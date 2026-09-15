@@ -679,6 +679,14 @@
     </div>`;
   }
 
+  /** Zeichnet die Saeulen-Liste neu und zieht die Beitrags-Vorschau nach (die Saeulen liefern die
+   *  Ueberschrift und die Beispiel-Hashtags - ohne diesen Aufruf bliebe sie beim alten Stand). */
+  function repaintPillars() {
+    const section = $("#pillars-section");
+    if (section) section.innerHTML = renderPillarsSection();
+    updateFirstPostPreview();
+  }
+
   function renderPillarsSection() {
     stopActiveDictation(); // wird bei Hinzufuegen/Entfernen/Uebernehmen neu gerendert
     const rows = S.pillarsDraft.map((p, i) => `
@@ -778,8 +786,11 @@
           ${f("company", "Firmenname", "text", { ac: "organization" })}
           <div class="field">
             <label for="f-website">Website <span class="opt">(optional)</span></label>
-            <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://">
-            ${S.aiAvailable ? `<p class="hint"><button type="button" class="link" id="analyze-website">Vorschlag aus meiner Website holen</button></p>` : ""}
+            <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
+            ${S.aiAvailable ? `<div class="website-suggest">
+              <button type="button" class="btn" id="analyze-website">Vorschlag aus meiner Website holen</button>
+              <p class="hint" id="analyze-website-hint">Wir lesen einmalig Ihre Startseite und schlagen Branche, Beschreibung und Tonalität vor. Sie sehen den Vorschlag zuerst und können alles ändern.</p>
+            </div>` : ""}
           </div>
           ${f("contactName", "Ihr Name", "text", { ac: "name" })}
           ${f("email", "E-Mail", "email", { ac: "email" })}
@@ -918,6 +929,7 @@
       <p class="lede" id="lede">${edit ? "Ändern Sie hier, worüber wir für Sie posten." : formPartLede(part)}</p>
       <form id="company" novalidate>
         ${twoPart ? `<div id="formpart-a" ${part !== 1 ? "hidden" : ""}>${partAHtml}</div><div id="formpart-b" ${part !== 2 ? "hidden" : ""}>${partBHtml}</div>` : partAHtml + partBHtml}
+        ${edit ? "" : firstPostPreviewHtml()}
         <div id="formpart-actions">${actionsHtml}</div>
       </form>
       ${!edit ? recoverAccessHtml() : ""}`;
@@ -1388,6 +1400,7 @@
     const actions = document.getElementById("formpart-actions");
     if (actions) actions.innerHTML = formPartActionsHtml(n);
     if (n === 2) renderTurnstileIfNeeded();
+    updateFirstPostPreview(); // Seite 2 blendet die Stil-Felder ein - die Vorschau gehoert dann dazu
     window.scrollTo({ top: 0 });
     $("#stage")?.focus({ preventScroll: true });
   }
@@ -2560,7 +2573,7 @@
     const rail = onboarding ? railHtml() : "";
 
     if (S.step === "dashboard") { stage.innerHTML = dashboardHtml(); loadDashboardExtras(); }
-    else if (S.step === "company") stage.innerHTML = rail + companyHtml();
+    else if (S.step === "company") { stage.innerHTML = rail + companyHtml(); updateLivePreview(); updateFirstPostPreview(); }
     else if (S.step === "settings") stage.innerHTML = settingsHtml();
     else if (S.step === "guide") stage.innerHTML = guideHtml();
     else if (S.step === "done") { stage.innerHTML = rail + doneHtml(); }
@@ -2722,11 +2735,170 @@
     if (wm) wm.style.fontFamily = `'${family}'`;
   }
 
+  /* ================= „Ihr erster Beitrag" - Live-Vorschau im Onboarding =================
+     Waechst mit, waehrend das Briefing ausgefuellt wird: dasselbe Bildquadrat wie in den
+     Einstellungen, dazu Kanal und Zeitpunkt aus den Kanalfeldern und ein Beispieltext aus
+     Beschreibung, Saeulen und Aufruf. Rein lokal zusammengesetzt - kein API-Aufruf, keine KI,
+     keine Vertragsaenderung. Der Text ist ausdruecklich als Beispiel ausgewiesen: den echten
+     schreibt die Routine spaeter aus genau diesen Angaben. Nur im Onboarding - wer eingerichtet
+     ist, sieht in den Einstellungen echte Beitraege statt einer Attrappe. */
+  const CTA_PREVIEW = {
+    link_bio: "Mehr dazu über den Link in unserer Bio.",
+    anrufen: "Rufen Sie uns an - wir nehmen uns Zeit.",
+    nachricht: "Schreiben Sie uns eine Nachricht.",
+    termin: "Termin buchen - online in zwei Minuten.",
+    keiner: "",
+  };
+  const FP_SKELETON = '<div class="sk sk-line" style="width:92%"></div><div class="sk sk-line" style="width:78%"></div><div class="sk sk-line" style="width:54%"></div>';
+
+  function firstPostPreviewHtml() {
+    return `
+      <section class="fp" id="first-post" aria-labelledby="fp-title">
+        <h2 id="fp-title">Ihr erster Beitrag</h2>
+        <p class="hint">Wächst mit, während Sie ausfüllen - ein Beispiel dafür, wie Ihr Beitrag aussehen wird. Den Text schreibt die KI später aus genau diesen Angaben.</p>
+        <div class="fp-card">
+          <div class="fp-media" id="fp-media">
+            <span class="fp-headline" id="fp-headline">Ihr Beitrag</span>
+            <span class="fp-watermark" id="fp-watermark">Ihr Firmenname</span>
+          </div>
+          <div class="fp-body">
+            <p class="card-kicker"><span class="pipe-node" data-state="planned" aria-hidden="true"></span><span id="fp-kicker">Noch kein Kanal gewählt</span></p>
+            <div class="fp-caption" id="fp-caption">${FP_SKELETON}</div>
+            <p class="fp-tags micro muted" id="fp-tags" hidden></p>
+            <p class="fp-style micro muted" id="fp-style"></p>
+          </div>
+        </div>
+        <p class="fp-progress small" id="fp-progress" aria-live="polite"></p>
+      </section>`;
+  }
+
+  const fpVal = (sel) => { const el = document.querySelector(sel); return el ? String(el.value || "").trim() : ""; };
+  const fpChecked = (name) => { const el = document.querySelector(`#company [name="${name}"]`); return el ? el.checked : false; };
+
+  /** Erster Satz, hoechstens `max` Zeichen - der Beispieltext soll nach Beitrag aussehen, nicht
+   *  nach abgeschnittenem Formularfeld. */
+  function fpFirstSentence(text, max) {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return "";
+    const end = clean.search(/[.!?](\s|$)/);
+    const sentence = end > 0 ? clean.slice(0, end + 1) : clean;
+    return sentence.length > max ? `${sentence.slice(0, max - 1).trimEnd()}…` : sentence;
+  }
+
+  /** Beispiel-Hashtags aus den Angaben: Wortgrenzen zu CamelCase, Dubletten weg. Umlaute bleiben
+   *  stehen - Instagram und LinkedIn koennen sie, "#Ruckenschmerzen" saehe aus wie ein Tippfehler. */
+  function fpTags(words, count) {
+    const seen = new Set();
+    const tags = [];
+    for (const word of words) {
+      const tag = String(word || "")
+        .replace(/[^A-Za-z0-9\u00C0-\u024F ]+/g, " ")
+        .trim().split(/\s+/).filter(Boolean)
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join("");
+      if (tag.length < 4 || seen.has(tag.toLowerCase())) continue;
+      seen.add(tag.toLowerCase());
+      tags.push(`#${tag}`);
+      if (tags.length >= count) break;
+    }
+    return tags;
+  }
+
+  /** Aus der Beschreibung taugen als Hashtag vor allem Hauptwoerter - im Deutschen also die
+   *  grossgeschriebenen Woerter, abzueglich der ueblichen Satzanfaenge. */
+  const FP_STOPWORDS = new Set(["wir", "sie", "ihr", "ihre", "unser", "unsere", "der", "die", "das",
+    "ein", "eine", "einen", "einem", "einer", "und", "aber", "auch", "dabei", "damit", "durch",
+    "für", "hier", "immer", "mehr", "nach", "oder", "viele", "wenn", "zwischen"]);
+  function fpNouns(text) {
+    return String(text || "").split(/[\s,.;:!?()"„“]+/)
+      .filter((w) => w.length > 4 && /^[A-ZÄÖÜ]/.test(w) && !FP_STOPWORDS.has(w.toLowerCase()));
+  }
+
+  function updateFirstPostPreview() {
+    const media = document.getElementById("fp-media");
+    if (!media) return;
+
+    const company = fpVal('#company [name="company"]');
+    const industry = fpVal("#f-industry");
+    const about = fpVal("#f-about");
+    const pillars = Array.from(document.querySelectorAll("#company [data-pillar-title]"))
+      .map((el) => el.value.trim()).filter(Boolean);
+    const accent = document.getElementById("f-accentColor")?.value || "#0a0e1a";
+    const watermark = fpVal("#f-watermarkText");
+    const tone = fpVal("#f-tone") || "sachlich";
+    const language = fpVal("#f-language") || "de";
+    const cta = fpVal("#f-ctaPreference") || "link_bio";
+    const hashtagPref = fpVal("#f-hashtagPreference") || "wenige";
+    const emojis = fpChecked("emojisEnabled");
+    const postTime = fpVal("#f-postTime") || "15:00";
+
+    // Bild: gleiche Herleitung wie die Vorschau in den Einstellungen (Akzentfarbe, Beschriftung)
+    media.style.background = accent;
+    // Ueberschrift im Bild: nur was auch als Ueberschrift taugt. Ein abgeschnittener Satz mit "…"
+    // saehe im Beitragsbild aus wie ein Fehler - dann lieber Branche oder Firmenname.
+    const aboutLine = fpFirstSentence(about, 42);
+    const headline = pillars[0] || (aboutLine.endsWith("…") ? "" : aboutLine) || industry || company || "Ihr Beitrag";
+    document.getElementById("fp-headline").textContent = headline;
+    document.getElementById("fp-watermark").textContent = watermark || company || "Ihr Firmenname";
+
+    // Kanal und Zeitpunkt aus denselben Feldern, die spaeter den Plan steuern
+    const channels = [];
+    if (fpChecked("igFeedEnabled")) channels.push("Instagram Feed");
+    if (fpChecked("igStoryEnabled")) channels.push("Instagram Story");
+    if (fpChecked("linkedinEnabled")) channels.push("LinkedIn");
+    const dayRow = channels[0] === "LinkedIn" ? "linkedin" : "instagram";
+    const days = Array.from(document.querySelectorAll(`#company [data-weekday-channel="${dayRow}"] input:checked`))
+      .map((el) => Number(el.value)).sort((a, b) => a - b);
+    const dayText = !days.length ? "noch kein Tag gewählt"
+      : days.length === 7 ? "täglich"
+      : days.join(",") === "1,2,3,4,5" ? "werktags"
+      : days.map((d) => WEEKDAYS[d - 1]).join(", ");
+    document.getElementById("fp-kicker").textContent = channels.length
+      ? `${channels[0]} · ${dayText} um ${postTime} Uhr`
+      : "Noch kein Kanal gewählt";
+
+    // Text: erst wenn die Beschreibung steht - vorher ehrlich ein Platzhalter statt erfundener Werbetext
+    const caption = document.getElementById("fp-caption");
+    const lead = fpFirstSentence(about, 150);
+    if (!lead) {
+      caption.innerHTML = FP_SKELETON;
+    } else {
+      const ctaLine = CTA_PREVIEW[cta] || "";
+      caption.innerHTML = [emojis ? `✨ ${lead}` : lead, ctaLine].filter(Boolean)
+        .map((line) => `<p>${esc(line)}</p>`).join("");
+    }
+
+    const tagsEl = document.getElementById("fp-tags");
+    const count = hashtagPref === "keine" ? 0 : hashtagPref === "viele" ? 6 : 3;
+    const tags = count ? fpTags([...pillars, industry, company, ...fpNouns(about)], count) : [];
+    tagsEl.hidden = !tags.length;
+    tagsEl.textContent = tags.join(" ");
+
+    document.getElementById("fp-style").textContent =
+      `Ton: ${TONES[tone] || tone} · Sprache: ${LANGUAGES[language] || language} · ${emojis ? "mit" : "ohne"} Emojis`;
+
+    // Der einzige Satz, der sagt, was noch fehlt - aria-live, aber nur bei echter Aenderung
+    const missing = [];
+    if (!company) missing.push("Firmenname");
+    if (!about) missing.push("Beschreibung");
+    if (!channels.length) missing.push("Kanal");
+    if (!days.length) missing.push("Tag");
+    const progress = document.getElementById("fp-progress");
+    const text = missing.length
+      ? `Noch offen: ${missing.join(", ")}.`
+      : "Alles da, was wir für Ihren ersten Beitrag brauchen.";
+    if (progress.textContent !== text) progress.textContent = text;
+  }
+
   document.addEventListener("input", (e) => {
     if (e.target.id === "f-accentColor" || e.target.id === "f-watermarkText" || e.target.name === "company" ||
         e.target.id === "f-gradientColor2" || e.target.id === "f-gradientDirection" || e.target.id === "f-fontChoice") {
       updateLivePreview();
     }
+    // Die Vorschau "Ihr erster Beitrag" haengt an fast allen Briefing-Feldern - ein Aufruf fuer
+    // alle ist billiger und vollstaendiger als eine Liste von IDs, die beim naechsten neuen Feld
+    // wieder vergessen wird. Sie liest nur DOM-Werte, kein Netz.
+    if (e.target.closest && e.target.closest("#company")) updateFirstPostPreview();
     if (e.target.id === "f-accentColor") updateGradientSuggestions();
     if (e.target.id === "f-pillar-keywords") {
       S.pillarAiKeywords = e.target.value;
@@ -2746,6 +2918,9 @@
       if (e.target.checked) updateGradientSuggestions();
       updateLivePreview();
     }
+    // Auswahlfelder, Haken und Wochentage loesen kein "input" aus, veraendern die Vorschau aber
+    // genauso (Kanal, Uhrzeit, Hashtags, Emojis, Sprache, Ton).
+    if (e.target.closest && e.target.closest("#company")) updateFirstPostPreview();
   });
 
   let pendingLogoDataUrl = null;
@@ -3265,6 +3440,7 @@
       if (suggestion.tone && $("#f-tone")) $("#f-tone").value = suggestion.tone;
       box.hidden = true;
       box.innerHTML = "";
+      updateFirstPostPreview(); // gesetzte Felder loesen kein input-Ereignis aus
       return;
     }
     if (e.target.closest("[data-website-discard]")) {
@@ -3349,22 +3525,19 @@
     if (e.target.closest("#pillar-add")) {
       syncPillarsDraftFromDom();
       if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: "", description: "", weight: 1 });
-      const section = $("#pillars-section");
-      if (section) section.innerHTML = renderPillarsSection();
+      repaintPillars();
       return;
     }
     const pillarRemove = e.target.closest("[data-pillar-remove]");
     if (pillarRemove) {
       syncPillarsDraftFromDom();
       S.pillarsDraft.splice(Number(pillarRemove.dataset.pillarRemove), 1);
-      const section = $("#pillars-section");
-      if (section) section.innerHTML = renderPillarsSection();
+      repaintPillars();
       return;
     }
     if (e.target.closest("#pillar-ai-suggest")) {
       S.pillarAiOpen = true;
-      const section = $("#pillars-section");
-      if (section) section.innerHTML = renderPillarsSection();
+      repaintPillars();
       $("#f-pillar-keywords")?.focus();
       return;
     }
@@ -3377,16 +3550,14 @@
       syncPillarsDraftFromDom();
       if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: suggestion.title, description: suggestion.description, weight: 1 });
       S.pillarSuggestions.splice(i, 1);
-      const section = $("#pillars-section");
-      if (section) section.innerHTML = renderPillarsSection();
+      repaintPillars();
       return;
     }
     const pillarDiscard = e.target.closest("[data-pillar-discard]");
     if (pillarDiscard) {
       const i = Number(pillarDiscard.dataset.pillarDiscard);
       S.pillarSuggestions.splice(i, 1);
-      const section = $("#pillars-section");
-      if (section) section.innerHTML = renderPillarsSection();
+      repaintPillars();
       return;
     }
     if (e.target.closest("[data-ai-accept]")) {
@@ -3394,6 +3565,7 @@
       $("#f-about").value = box.dataset.suggestion;
       box.hidden = true;
       box.innerHTML = "";
+      updateFirstPostPreview(); // gesetzter Wert loest kein input-Ereignis aus
       return;
     }
     if (e.target.closest("[data-ai-discard]")) {

@@ -92,6 +92,30 @@ Suche. Alle sieben Gruppen bleiben dabei immer im DOM (nur ausgeblendet) — `PA
 das ganze Briefing, ein Entfernen hätte stillschweigend Werte verloren. Genau das prüft der
 Funktionstest.
 
+### Onboarding: „Ihr erster Beitrag" (Phase 7)
+Das Briefing war bisher ein Formular, das nichts zurückgab — der Kunde sah erst nach dem Einrichten,
+was aus seinen Angaben wird. Jetzt steht unter dem Formular eine Vorschau, die **mitwächst**:
+Beitragsbild in der Akzentfarbe mit Beschriftung, darüber Kanal und Zeitpunkt aus den Kanalfeldern,
+darunter Beispieltext, Hashtags und eine Zeile zu Ton, Sprache und Emojis. Ab 1024 px steht sie als
+eigene Spalte **neben** dem Formular und bleibt beim Scrollen stehen — sonst läge sie auf Seite 2
+zweitausend Pixel unter dem Feld, das gerade geändert wird. Am Handy bleibt sie im Lesefluss unter
+den Feldern.
+
+Sie ist **rein lokal zusammengesetzt**: kein API-Aufruf, keine KI, keine Vertragsänderung. Solange
+die Beschreibung fehlt, steht dort ein Platzhalter (Skeleton) statt eines erfundenen Werbetextes,
+und eine Zeile sagt, was noch fehlt („Noch offen: Firmenname, Kanal."), bzw. „Alles da, was wir für
+Ihren ersten Beitrag brauchen.". Die Überschrift nimmt die erste Content-Säule, sonst den ersten
+Satz der Beschreibung (nur wenn er ungekürzt passt — ein abgeschnittener Satz sähe im Bild aus wie
+ein Fehler), sonst Branche oder Firmenname. Beispiel-Hashtags entstehen aus Säulen, Branche, Firma
+und den großgeschriebenen Wörtern der Beschreibung, mit Umlauten (`#Rückenschmerzen`, nicht
+`#Ruckenschmerzen`).
+
+**„Vorschlag aus meiner Website holen"** war ein Textlink in einer Fußnote unter dem Website-Feld
+und wurde übersehen. Jetzt ist es ein eigener Knopf (am Handy volle Breite, 51 px hoch) mit einem
+Satz daneben, was dabei passiert: Startseite einmalig lesen, Branche/Beschreibung/Tonalität
+vorschlagen, Vorschlag zuerst zeigen — übernommen wird nichts automatisch. Nach dem Übernehmen zieht
+die Vorschau sofort nach.
+
 ### Admin-Seite (Phase 6)
 `admin.html` läuft jetzt auf denselben Tokens, derselben Schrift und denselben Komponenten wie das
 Kunden-Panel — Google Fonts ist damit auch hier weg. Oben steht **ein Satz** statt einer Kachelwand
@@ -157,9 +181,10 @@ Pixel-Logo (Scope relativ, dadurch für `/panel` und `/panel/sandbox` automatisc
 5. **Rundgang als Spotlight an echten Elementen** — läuft weiterhin als Dialog (4 Schritte).
 6. ~~**`admin.html`** wurde noch nicht auf die neuen Tokens gezogen (Phase 6).~~ **Erledigt** —
    siehe „Admin-Seite (Phase 6)" in Abschnitt 1.
-7. **Onboarding**: neuer Pipe-Fortschritt und neue Komponenten sind drin, die im Plan skizzierte
+7. ~~**Onboarding**: neuer Pipe-Fortschritt und neue Komponenten sind drin, die im Plan skizzierte
    mitwachsende Live-Vorschau des ersten Beitrags und die Hervorhebung von „Vorschlag aus meiner
-   Website holen" stehen noch aus.
+   Website holen" stehen noch aus.~~ **Erledigt** — siehe „Onboarding: Ihr erster Beitrag" in
+   Abschnitt 1.
 8. **Web-Push** — laut Auftrag nur vormerken, siehe `docs/redesign/IDEEN.md`.
 
 ### Zwei Altbestand-Fehler an der Admin-Seite (gefunden in Phase 6, beide behoben)
@@ -196,6 +221,7 @@ melden. Empfehlung für die nächste Runde: Feld auch im deaktivierten Zustand m
 | `node scripts/redesign-undo-test.mjs` | **10/10** — Rückgängig ohne vorzeitigen Routine-Trigger |
 | `node scripts/redesign-a11y.mjs` (axe-core 4.10) | **0 kritische/ernste Verstöße**, 5 Ansichten × 2 Breiten |
 | `node scripts/redesign-check.mjs` | kein horizontales Scrollen bei 390 und 1440, **keine Konsolenfehler** |
+| `npm run test:onboarding` (neu) | **62/62** — Vorschau wächst mit (Firma, Branche, Beschreibung, Säule, Farbe, Hashtags, Emojis, Aufruf, Kanal), Platzhalter statt erfundenem Text, Website-Vorschlag als Knopf mit Erklärung und Prüfschritt, kein horizontales Scrollen, axe ohne kritische/ernste Verstöße |
 | `npm run test:admin` (neu) | **41/41** — Anmeldung (richtig/falsch), Statussatz, Kundenliste, Detail-Dialog mit Escape und Fokus-Rückgabe, eigener Eingabedialog statt `window.prompt`, kein horizontales Scrollen, axe ohne kritische/ernste Verstöße, **keine externen Anfragen** |
 | Produktion unverändert | `md5sum public/panel/index.html` = `089c8228…`, `public/panel/admin.html` = `10c4a76d…` (beide wie bei `pre-redesign`) |
 
@@ -244,6 +270,13 @@ Satz ganz oben, ob etwas zu tun ist? Und fühlt sich die Kundenliste am Handy k�
 
 Punkt 10 ist der wichtigste. Wenn irgendetwas fehlt, bitte notieren: die Inventur
 (`docs/redesign/INVENTUR.md`) listet jede Funktion des alten Panels, wir hängen den Punkt dort an.
+
+### Onboarding ansehen (ohne Konto)
+**https://mcp.pipebot.at/panel/sandbox/?demo** — Vorschau-Modus: nichts wird gespeichert, keine
+Verbindung aufgebaut. Tippen Sie Firmenname und ein, zwei Sätze zu Ihrem Geschäft ein und schauen
+Sie zu, wie „Ihr erster Beitrag" darunter entsteht. Zwei Fragen dazu: Wird damit klarer, wofür die
+Angaben gut sind? Und ist deutlich genug, dass das ein **Beispiel** ist und nicht der fertige
+Beitrag? Vorher/Nachher: `docs/redesign/after/21-onboarding-*.png`.
 
 ### Produktions-Deploy (erst nach Ihrer ausdrücklichen Freigabe)
 1. `git checkout main && git merge panel-redesign`

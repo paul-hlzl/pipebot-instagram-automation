@@ -754,6 +754,54 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .formpart-nav { display: flex; gap: var(--s2); margin-bottom: var(--s5); }
 .steplabel { font-size: var(--t-small); color: var(--stone); font-weight: 500; margin-bottom: var(--s2); }
 
+/* „Vorschlag aus meiner Website holen": war ein Textlink in einer Fußnote und wurde übersehen -
+   jetzt eine eigene Aktion mit Erklärung, am Handy volle Breite (Daumenzone). */
+.website-suggest { margin-top: var(--s3); }
+.website-suggest .btn { width: 100%; }
+.website-suggest .hint { margin-top: var(--s2); }
+@media (min-width: 640px) { .website-suggest .btn { width: auto; } }
+
+/* „Ihr erster Beitrag": wächst mit, während das Briefing ausgefüllt wird. Dieselbe Kartensprache
+   wie eine echte Beitragskarte - nur mit dem Bildquadrat aus der Aussehen-Vorschau. */
+.fp { margin-top: var(--s7); padding-top: var(--s6); border-top: 1px solid var(--rule); }
+.fp > .hint { margin-bottom: var(--s4); max-width: 60ch; }
+.fp-card {
+  display: grid; gap: var(--s4); align-items: start;
+  border: 1px solid var(--rule); border-radius: var(--r2); padding: var(--s4);
+}
+@media (min-width: 640px) { .fp-card { grid-template-columns: 220px minmax(0, 1fr); } }
+.fp-media {
+  position: relative; aspect-ratio: 1; border-radius: var(--r1); overflow: hidden;
+  display: grid; place-content: center; text-align: center; color: #fff; padding: var(--s4);
+  transition: background var(--dur-2) var(--ease);
+}
+.fp-headline { font-size: 18px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.fp-watermark { position: absolute; left: var(--s3); right: var(--s3); bottom: var(--s2); font-size: 10px; opacity: .8; }
+.fp-caption { margin-top: var(--s3); }
+.fp-caption p + p { margin-top: var(--s2); }
+.fp-tags { margin-top: var(--s3); overflow-wrap: anywhere; }
+.fp-style { margin-top: var(--s2); }
+.fp-progress { margin-top: var(--s3); color: var(--stone); }
+
+/* Ab 1024px steht die Vorschau als eigene Spalte neben dem Formular und bleibt beim Scrollen
+   stehen - sonst saehe der Kunde auf Seite 2 nie, was seine Stil-Entscheidungen bewirken
+   (die Vorschau laege 2000px unter dem Feld, das er gerade aendert). Am Handy bleibt sie
+   bewusst im Lesefluss unter den Feldern. */
+@media (min-width: 1024px) {
+  /* Zeilenabstand klein halten: der Knopf gehoert direkt unter die Felder, die 48px sind nur
+     der Abstand zur Vorschau-Spalte. */
+  #company:has(.fp) { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--s5) var(--s7); align-items: start; }
+  #company:has(.fp) > #formpart-a,
+  #company:has(.fp) > #formpart-b,
+  #company:has(.fp) > #formpart-actions { grid-column: 1; }
+  #company > .fp {
+    grid-column: 2; grid-row: 1 / -1;
+    position: sticky; top: var(--s5);
+    margin-top: 0; padding-top: 0; border-top: 0;
+  }
+  #company > .fp .fp-card { grid-template-columns: 1fr; }
+}
+
 /* Kalender */
 .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s1); }
 .cal .sq { aspect-ratio: 1; display: grid; place-content: center; font-size: var(--t-micro); border: 1px solid var(--rule); border-radius: 3px; color: var(--stone); }
