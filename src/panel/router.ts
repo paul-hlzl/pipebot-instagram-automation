@@ -76,6 +76,27 @@ const VERSION: string = (() => {
 })();
 
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
+
+/**
+ * Das Panel laeuft ab 15.09.2026 unter ZWEI Adressen gleichzeitig:
+ *   - https://mcp.pipebot.at/panel  (historisch, bleibt bis auf Weiteres)
+ *   - https://app.pipeflow.at/      (neu, Panel liegt direkt auf der Wurzel)
+ * Beide zeigen auf denselben Prozess und dieselbe Datenbank.
+ *
+ * Mount und Basis-URL duerfen deshalb NICHT mehr aus einer globalen Variable kommen: Cookie-Pfad,
+ * Weiterleitungen, Links in E-Mails und vor allem die OAuth-redirect_uri muessen zu der Adresse
+ * passen, ueber die der Aufruf tatsaechlich kam. Sonst landet ein Kunde, der auf app.pipeflow.at
+ * beginnt, nach dem Verbinden auf mcp.pipebot.at - oder bekommt ein Cookie mit Pfad /panel, das
+ * unter der neuen Adresse nie mitgeschickt wird.
+ */
+const APP_HOSTS = (process.env.PANEL_APP_HOSTS ?? "app.pipeflow.at")
+  .split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+const hostOf = (req: Request): string => String(req.headers.host ?? "").split(":")[0].toLowerCase();
+const istAppHost = (req: Request): boolean => APP_HOSTS.includes(hostOf(req));
+/** Mount fuer DIESE Anfrage - auf der neuen Adresse leer (Wurzel), sonst wie bisher. */
+const mountFor = (req: Request): string => (istAppHost(req) ? "" : MOUNT);
+/** Cookie-Pfad: "" waere ungueltig, die Wurzel heisst "/". */
+const cookiePathFor = (req: Request): string => mountFor(req) || "/";
 const COOKIE = "pp_session";
 const LOGO_DIR = path.join(PACKAGE_ROOT, "data/logos");
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
@@ -105,7 +126,20 @@ const baseUrl = (): string => {
   if (!url) throw new Error("PANEL_BASE_URL fehlt in .env (z. B. https://mcp.pipebot.at)");
   return url;
 };
-const redirectUri = (providerId: string): string => `${baseUrl()}${MOUNT}/callback/${providerId}`;
+/** Absolute Basis fuer DIESE Anfrage (Schema + Host), damit erzeugte Links auf der Adresse
+ *  bleiben, ueber die der Kunde gekommen ist. Fuer Hintergrundaufgaben ohne Anfrage gilt
+ *  weiterhin PANEL_BASE_URL. */
+const baseUrlFor = (req: Request): string => {
+  const host = String(req.headers.host ?? "");
+  if (!host) return baseUrl();
+  if (!istAppHost(req) && !host.startsWith("mcp.")) return baseUrl();
+  const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim() || "https";
+  return `${proto}://${host}`;
+};
+/** Die redirect_uri MUSS bei Meta/LinkedIn registriert sein - deshalb pro Adresse eine eigene,
+ *  und beide dort hinterlegen (siehe Bericht). */
+const redirectUri = (providerId: string, req: Request): string =>
+  `${baseUrlFor(req)}${mountFor(req)}/callback/${providerId}`;
 
 // ---------- Hilfsfunktionen ----------
 
@@ -117,11 +151,11 @@ function readCookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
-function startSession(res: Response, customerId: string): void {
+function startSession(res: Response, customerId: string, req: Request = res.req as Request): void {
   const token = randomToken();
   const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString();
   db.prepare("INSERT INTO sessions (token_hash, customer_id, expires_at) VALUES (?, ?, ?)").run(sha256(token), customerId, expires);
-  res.setHeader("Set-Cookie", `${COOKIE}=${token}; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`);
+  res.setHeader("Set-Cookie", `${COOKIE}=${token}; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`);
 }
 
 function currentCustomer(req: Request): CustomerRow | undefined {
@@ -426,7 +460,7 @@ function publicState(c: CustomerRow) {
 }
 
 const backTo = (res: Response, params: Record<string, string>): void =>
-  res.redirect(303, `${MOUNT}/?${new URLSearchParams(params)}`);
+  res.redirect(303, `${mountFor(res.req as Request)}/?${new URLSearchParams(params)}`);
 
 type Handler = (req: Request, res: Response) => Promise<void> | void;
 const safe = (fn: Handler) => async (req: Request, res: Response, next: NextFunction) => {
@@ -955,7 +989,7 @@ export function createPanelRouter(): Router {
     startSession(res, id);
     console.log(`[panel] Neuer Kunde: ${data.company} (${id})`);
     sendMailBestEffort(
-      verificationEmail({ to: data.email, company: data.company, verifyUrl: `${baseUrl()}${MOUNT}/verify-email?token=${verifyToken}` }),
+      verificationEmail({ to: data.email, company: data.company, verifyUrl: `${baseUrlFor(req)}${mountFor(req)}/verify-email?token=${verifyToken}` }),
     );
     const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
     res.status(201).json(publicState(created));
@@ -1097,7 +1131,7 @@ export function createPanelRouter(): Router {
     }
     const key = randomToken(24);
     db.prepare("UPDATE customers SET login_key_hash = ?, updated_at = ? WHERE id = ?").run(sha256(key), nowIso(), c.id);
-    res.json({ link: `${baseUrl()}${MOUNT}/login?key=${key}` });
+    res.json({ link: `${baseUrlFor(req)}${mountFor(req)}/login?key=${key}` });
   });
 
   // Panel v6 Aufgabe 5: "Zugang verloren?" fuer jemanden OHNE Session. Verraet nie, ob eine
@@ -1120,7 +1154,7 @@ export function createPanelRouter(): Router {
     if (found) {
       const key = randomToken(24);
       db.prepare("UPDATE customers SET login_key_hash = ?, updated_at = ? WHERE id = ?").run(sha256(key), nowIso(), found.id);
-      sendMailBestEffort(accessRecoveryEmail({ to: found.email, company: found.company, loginUrl: `${baseUrl()}${MOUNT}/login?key=${key}` }));
+      sendMailBestEffort(accessRecoveryEmail({ to: found.email, company: found.company, loginUrl: `${baseUrlFor(req)}${mountFor(req)}/login?key=${key}` }));
     }
     res.json({ ok: true, message: "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt." });
   }));
@@ -1136,7 +1170,7 @@ export function createPanelRouter(): Router {
     db.prepare("UPDATE customers SET email_verified = 1, email_verify_token_hash = NULL, updated_at = ? WHERE id = ?").run(nowIso(), c.id);
     startSession(res, c.id);
     console.log(`[panel] ${c.id} (${c.company}) hat die E-Mail-Adresse bestätigt.`);
-    res.redirect(303, `${MOUNT}/?verified=1`);
+    res.redirect(303, `${mountFor(req)}/?verified=1`);
   });
 
   // Erneutes Anfordern, solange email_verified noch 0 ist - braucht eine bestehende Session
@@ -1158,7 +1192,7 @@ export function createPanelRouter(): Router {
     const verifyToken = randomToken(24);
     db.prepare("UPDATE customers SET email_verify_token_hash = ?, updated_at = ? WHERE id = ?").run(sha256(verifyToken), nowIso(), c.id);
     sendMailBestEffort(
-      verificationEmail({ to: c.email, company: c.company, verifyUrl: `${baseUrl()}${MOUNT}/verify-email?token=${verifyToken}` }),
+      verificationEmail({ to: c.email, company: c.company, verifyUrl: `${baseUrlFor(req)}${mountFor(req)}/verify-email?token=${verifyToken}` }),
     );
     res.json({ ok: true });
   }));
@@ -1172,13 +1206,13 @@ export function createPanelRouter(): Router {
     const c = db.prepare("SELECT * FROM customers WHERE login_key_hash = ? AND status = 'active'").get(sha256(key)) as CustomerRow | undefined;
     if (!c) return backTo(res, { error: "login" });
     startSession(res, c.id);
-    res.redirect(303, `${MOUNT}/`);
+    res.redirect(303, `${mountFor(req)}/`);
   });
 
   router.post("/api/logout", (req, res) => {
     const token = readCookie(req, COOKIE);
     if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
     res.json({ ok: true });
   });
 
@@ -1201,7 +1235,7 @@ export function createPanelRouter(): Router {
       await fsPromises.unlink(c.logo_url).catch(() => {});
     }
     db.prepare("DELETE FROM customers WHERE id = ?").run(c.id);
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${MOUNT}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
     console.log(`[panel] Kunde ${c.id} (${c.company}) hat sein Konto inkl. aller Daten gelöscht.`);
     res.json({ ok: true });
   }));
@@ -1762,7 +1796,7 @@ export function createPanelRouter(): Router {
     const state = randomToken(24);
     db.prepare("INSERT INTO oauth_states (state, customer_id, provider, expires_at) VALUES (?, ?, ?, ?)")
       .run(state, c.id, provider.id, new Date(Date.now() + 15 * 60_000).toISOString());
-    res.redirect(302, provider.authorizeUrl(state, redirectUri(provider.id)));
+    res.redirect(302, provider.authorizeUrl(state, redirectUri(provider.id, req)));
   });
 
   // Schritt 2 OAuth: Rückkehr von der Plattform
@@ -1785,7 +1819,7 @@ export function createPanelRouter(): Router {
     if (!code) return backTo(res, { error: "failed", provider: pid });
 
     try {
-      const result = await provider.exchangeCode(code, redirectUri(pid));
+      const result = await provider.exchangeCode(code, redirectUri(pid, req));
       const now = nowIso();
       db.prepare(
         `INSERT INTO connections (customer_id, provider, account_id, account_name, access_token_enc, refresh_token_enc, expires_at, scopes, connected_at, updated_at, expiry_warning_sent_at)

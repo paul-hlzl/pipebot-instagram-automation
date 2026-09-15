@@ -26,7 +26,15 @@ const COOKIE = "pp_admin";
 // Redesign Phase 6). Gleiche Herleitung wie im Kunden-Router (router.ts MOUNT); ohne
 // PANEL_MOUNT_PATH bleibt es exakt "/panel/admin" wie bisher.
 const MOUNT = (process.env.PANEL_MOUNT_PATH ?? "/panel").replace(/\/$/, "");
-const COOKIE_PATH = `${MOUNT}/admin`;
+// Zweite Adresse (app.pipeflow.at, Panel auf der Wurzel): der Cookie-Pfad muss zu der Adresse
+// passen, ueber die der Aufruf kam - genau dieser Fehler hat die Sandbox-Admin-Seite schon einmal
+// unbenutzbar gemacht (Login 200, danach /api/me 401), damals durch einen fest verdrahteten Pfad.
+const APP_HOSTS = (process.env.PANEL_APP_HOSTS ?? "app.pipeflow.at")
+  .split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+const cookiePathFor = (req: Request): string => {
+  const host = String(req.headers.host ?? "").split(":")[0].toLowerCase();
+  return APP_HOSTS.includes(host) ? "/admin" : `${MOUNT}/admin`;
+};
 const SESSION_HOURS = 12;
 const STATUSES = ["active", "paused"] as const;
 
@@ -60,13 +68,13 @@ function rateLimited(key: string, max: number, windowMs: number): boolean {
 const clientIp = (req: Request): string =>
   (String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || req.socket.remoteAddress || "unknown").trim();
 
-function startAdminSession(res: Response): void {
+function startAdminSession(res: Response, req: Request): void {
   const token = randomToken();
   const expires = new Date(Date.now() + SESSION_HOURS * 3_600_000).toISOString();
   db.prepare("INSERT INTO admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(sha256(token), expires);
   res.setHeader(
     "Set-Cookie",
-    `${COOKIE}=${token}; Path=${COOKIE_PATH}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_HOURS * 3600}`,
+    `${COOKIE}=${token}; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_HOURS * 3600}`,
   );
 }
 
@@ -172,7 +180,7 @@ export function createAdminRouter(panelPublicDir?: string): Router {
         res.status(401).json({ error: "Falsches Passwort." });
         return;
       }
-      startAdminSession(res);
+      startAdminSession(res, req);
       res.json({ ok: true });
     }),
   );
@@ -180,7 +188,7 @@ export function createAdminRouter(panelPublicDir?: string): Router {
   router.post("/api/logout", (req, res) => {
     const token = readCookie(req, COOKIE);
     if (token) db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha256(token));
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${COOKIE_PATH}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
     res.json({ ok: true });
   });
 

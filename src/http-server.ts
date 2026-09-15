@@ -50,7 +50,19 @@ export function createHttpApp(createMcpServer: () => McpServer): express.Express
   // Customer panel: browser-facing, its own cookie-based session auth and its
   // own express.json() (50kb limit), so it must be mounted before the global
   // express.json() below, or that would already consume the request body.
-  app.use("/panel", createPanelRouter());
+  // Das Panel haengt unter zwei Adressen: historisch unter /panel (mcp.pipebot.at), neu direkt auf
+  // der Wurzel von app.pipeflow.at. Dieselbe Router-Instanz, damit beide exakt dasselbe tun.
+  const panelRouter = createPanelRouter();
+  app.use("/panel", panelRouter);
+  const PANEL_APP_HOSTS = (process.env.PANEL_APP_HOSTS ?? "app.pipeflow.at")
+    .split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+  app.use((req, res, next) => {
+    const host = String(req.headers.host ?? "").split(":")[0].toLowerCase();
+    // Nur fuer die neue Adresse - unter mcp.pipebot.at bleibt die Wurzel unveraendert (dort liegen
+    // der MCP-Endpunkt und die Health-Route, die die Claude-Routine braucht).
+    if (!PANEL_APP_HOSTS.includes(host)) return next();
+    return panelRouter(req, res, next);
+  });
 
   // Meta-Webhooks (Panel v11): oeffentlich, unauthentifiziert (Absicherung ueber HMAC-Signatur
   // im Router selbst), braucht den RAW Body fuer die Signaturpruefung - muss darum vor dem
