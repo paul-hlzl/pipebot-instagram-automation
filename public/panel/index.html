@@ -1094,7 +1094,9 @@
   // Panel v7 (Teil 2): 'planning' = aus der naechtlichen Vorausplanung uebernommen (siehe
   // submit_planned_post_for_approval), 'routine'/null = spontan von der stuendlichen Routine
   // erstellt (K2 "Jetzt posten" oder K4-K8-Fallback) - null deckt Eintraege von vor diesem Fix ab.
-  const ORIGIN_LABEL = { planning: "aus der Vorausplanung", routine: "spontan erstellt" };
+  // 'review' = aus einer guten Google-Bewertung erzeugt (Content-Recycling, siehe reviews.ts) -
+  // fuer den Kunden ist genau das der Unterschied, den er vor der Freigabe wissen muss.
+  const ORIGIN_LABEL = { planning: "aus der Vorausplanung", routine: "spontan erstellt", review: "aus einer Google-Bewertung" };
   const originLabel = (source) => ORIGIN_LABEL[source] || "automatisch erstellt";
 
   /* ================= API ================= */
@@ -1705,7 +1707,8 @@
                 ${c.commentAutomationEnabled && c.commentAutomationMode === "auto"
                   ? `<span class="consequence" style="margin-top:10px">Aktuell automatisch: Antworten gehen <strong>sofort und ungeprüft</strong> unter Ihrem Namen online (höchstens 10 pro Stunde).</span>`
                   : ""}
-              </div>`)}
+              </div>
+              ${googleReviewSettingsHtml(c)}`)}
 
             ${group("mail", "Alle E-Mails an einer Stelle. Standardmäßig ist alles aus - Sie bekommen nur, was Sie hier anhaken.", `
               <label class="check"><input type="checkbox" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""}><span>E-Mail, wenn ein Beitrag veröffentlicht wird${c.approvalMode ? " (bzw. sobald einer auf Ihre Freigabe wartet)" : ""}</span></label>
@@ -1750,6 +1753,15 @@
           ? "Echte Fragen unter Ihren Instagram-Beiträgen werden beantwortet, Hass und Spam nie. Dafür muss Instagram einmal neu verbunden werden."
           : "Echte Fragen unter Ihren Instagram-Beiträgen bekommen eine Antwort - Lob, Spam und Hass-Kommentare werden immer übersprungen.",
         go: "settings:automatik", link: igMissing ? "Was zu tun ist" : "Kommentar-Automatik einstellen", off: !c.commentAutomationEnabled },
+      ...(prov("google") ? [{
+        title: "Google-Bewertungen beantworten",
+        text: conn("google")
+          ? "Jede neue Google-Bewertung bekommt automatisch eine Antwort - bei Kritik sachlich und lösungsorientiert, nie streitend. Auf Wunsch entsteht aus guten Bewertungen ein Beitragsvorschlag."
+          : "Jede neue Google-Bewertung kann automatisch beantwortet werden. Dafür muss Ihr Google-Unternehmensprofil einmal verbunden werden.",
+        go: conn("google") ? "settings:automatik" : "google",
+        link: conn("google") ? "Bewertungs-Automatik einstellen" : "Google verbinden",
+        off: !c.googleReviewAutomationEnabled,
+      }] : []),
       { title: "Content-Säulen", text: "Legen Sie Ihre festen Themenbereiche fest - die Beiträge wechseln sich dann sinnvoll zwischen ihnen ab, statt sich zu wiederholen.", go: "settings:inhalt", link: "Säulen bearbeiten" },
       { title: "Ihr Aussehen", text: "Akzentfarbe, Beschriftung, eigenes Logo und gespeicherte Farbthemen bestimmen, wie Ihre Bilder aussehen.", go: "settings:aussehen", link: "Aussehen ändern" },
       { title: "Harte Grenzen für jeden Text", text: "Wörter, die nie vorkommen dürfen, und Elemente, die immer vorkommen müssen - beides wird erzwungen, nicht nur gewünscht.", go: "settings:inhalt", link: "Grenzen festlegen" },
@@ -2198,7 +2210,12 @@
             <p class="lede" style="font-size:15px;margin-bottom:12px">Diese Antworten hat die KI auf echte Fragen unter Ihren Instagram-Beiträgen vorbereitet. Prüfen, bei Bedarf anpassen, dann freigeben oder ablehnen.</p>
             <div id="dash-comment-approvals"><p class="empty">Wird geladen …</p></div>
           </div>` : ""}
-          <div class="dash2-block"${c.approvalMode || (c.commentAutomationEnabled && c.commentAutomationMode !== "auto") ? "" : ' style="margin-top:0"'}>
+          ${c.googleReviewAutomationEnabled && c.googleReviewMode !== "auto" ? `<div class="dash2-block"${c.approvalMode || (c.commentAutomationEnabled && c.commentAutomationMode !== "auto") ? "" : ' style="margin-top:0"'}>
+            <h2>Antworten auf Google-Bewertungen</h2>
+            <p class="lede" style="font-size:15px;margin-bottom:12px">Diese Antworten hat die KI auf neue Google-Bewertungen vorbereitet. Prüfen, bei Bedarf anpassen, dann freigeben oder ablehnen.</p>
+            <div id="dash-review-approvals"><p class="empty">Wird geladen …</p></div>
+          </div>` : ""}
+          <div class="dash2-block"${c.approvalMode || (c.commentAutomationEnabled && c.commentAutomationMode !== "auto") || (c.googleReviewAutomationEnabled && c.googleReviewMode !== "auto") ? "" : ' style="margin-top:0"'}>
             <h2>Jetzt posten</h2>
             <p class="lede" style="font-size:15px;margin-bottom:14px">Sofort zu einem bestimmten Thema posten - wir übernehmen das beim nächsten Lauf.</p>
             ${postNowStatusHtml(c)}
@@ -2307,6 +2324,16 @@
         commentApprovalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
       }
     }
+
+    const reviewApprovalsBox = $("#dash-review-approvals");
+    if (reviewApprovalsBox) {
+      try {
+        const { approvals } = await api("GET", "/api/review-approvals");
+        reviewApprovalsBox.innerHTML = approvals.length ? approvals.map(reviewApprovalCardHtml).join("") : `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch {
+        reviewApprovalsBox.innerHTML = `<p class="empty">Konnte nicht geladen werden.</p>`;
+      }
+    }
   }
 
   const CHANNEL_BADGE_LABEL = {
@@ -2351,6 +2378,58 @@
   /** Freigabe-Karte fuer eine KI-Antwort auf einen Instagram-Kommentar (Panel v10) - gleiches
    *  Muster wie approvalCardHtml, aber die Antwort ist direkt bearbeitbar (Textarea statt reinem
    *  Text), weil "Bearbeiten" hier eine sinnvolle dritte Aktion neben Freigeben/Ablehnen ist. */
+  /* ================= Google-Bewertungen (Einstellungen) =================
+     Wird nur gezeigt, wenn der Kanal ueberhaupt angeboten wird (providers enthaelt "google" erst,
+     wenn der API-Zugang hinterlegt ist - siehe providers/index.ts). Ohne verbundenes
+     Unternehmensprofil bleiben die Schalter sichtbar, aber gesperrt: so ist erkennbar, dass es die
+     Funktion gibt UND was dafuer fehlt, statt dass sie einfach nicht da ist. */
+  function googleReviewSettingsHtml(c) {
+    if (!prov("google")) return "";
+    const missing = !conn("google");
+    const dis = missing ? " disabled" : "";
+    return `
+      <hr style="border:none;border-top:1px solid var(--line);margin:26px 0 22px">
+      <label class="check${missing ? " is-disabled" : ""}"><input type="checkbox" name="googleReviewAutomationEnabled" ${c.googleReviewAutomationEnabled ? "checked" : ""}${dis}><span>Google-Bewertungen automatisch mit KI beantworten</span></label>
+      ${missing
+        ? `<p class="locked">Dafür muss Ihr Google-Unternehmensprofil verbunden sein. <button type="button" class="link" data-go="google">Jetzt verbinden</button>, danach lässt sich das hier einschalten.</p>`
+        : `<span class="consequence"><strong>Jede</strong> neue Bewertung bekommt eine Antwort - auch schlechte. Auf Kritik wird sachlich und lösungsorientiert geantwortet, nie gestritten und nie gerechtfertigt.</span>`}
+      <div class="field">
+        <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
+        <label class="check"><input type="radio" name="googleReviewMode" value="approval" ${(c.googleReviewMode || "approval") === "approval" ? "checked" : ""}${dis}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher.</span></label>
+        <label class="check"><input type="radio" name="googleReviewMode" value="auto" ${c.googleReviewMode === "auto" ? "checked" : ""}${dis}><span>Automatisch abschicken</span></label>
+        ${c.googleReviewAutomationEnabled && c.googleReviewMode === "auto"
+          ? `<span class="consequence" style="margin-top:10px">Aktuell automatisch: Antworten gehen <strong>sofort und ungeprüft</strong> unter Ihrem Firmennamen online (höchstens 10 pro Stunde). Google prüft Antworten zusätzlich selbst - lehnt Google eine ab, bekommen Sie eine E-Mail.</span>`
+          : ""}
+      </div>
+      <label class="check${missing ? " is-disabled" : ""}"><input type="checkbox" name="googleReviewPostsEnabled" ${c.googleReviewPostsEnabled ? "checked" : ""}${dis}><span>Aus guten Bewertungen Beitragsvorschläge erstellen ("Das sagen unsere Kunden")</span></label>
+      <span class="consequence">Aus einer guten Bewertung entsteht ein fertiger Beitragsvorschlag in Ihrem Bildstil. Er geht <strong>immer</strong> erst zu Ihrer Freigabe - auch wenn Ihre Beiträge sonst automatisch veröffentlicht werden.</span>
+      <div class="field">
+        <label for="f-googleReviewPostMinStars">Ab wie vielen Sternen?</label>
+        <select id="f-googleReviewPostMinStars" name="googleReviewPostMinStars"${dis}>
+          <option value="5" ${Number(c.googleReviewPostMinStars) === 5 ? "selected" : ""}>Nur 5 Sterne</option>
+          <option value="4" ${Number(c.googleReviewPostMinStars || 4) === 4 ? "selected" : ""}>Ab 4 Sternen</option>
+          <option value="3" ${Number(c.googleReviewPostMinStars) === 3 ? "selected" : ""}>Ab 3 Sternen</option>
+        </select>
+        <p class="hint">Prüfen Sie, ob die Weiterveröffentlichung eines Bewertungstexts in Ihrem Fall zulässig ist - je nach Situation braucht es dafür das Einverständnis der bewertenden Person. Das ist ein Hinweis, keine Rechtsberatung.</p>
+      </div>`;
+  }
+
+  function reviewApprovalCardHtml(a) {
+    const stars = a.starRating >= 1 && a.starRating <= 5 ? "★".repeat(a.starRating) + "☆".repeat(5 - a.starRating) : "";
+    return `<div class="approval-card" data-review-approval-id="${esc(a.id)}">
+      <div class="approval-body">
+        <span class="channel-badge">Google-Bewertung</span>
+        <p class="hint" style="margin:2px 0 10px">${esc(stars)} ${esc(a.reviewerName || "Jemand")} schrieb: ${a.reviewText ? `„${esc(a.reviewText)}“` : "(nur Sterne, kein Text)"}</p>
+        <label style="display:block;margin-bottom:4px">Ihre Antwort</label>
+        ${withDictate(`<textarea class="review-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>`)}
+        <div class="actions">
+          <button class="btn" data-review-approve="${esc(a.id)}">Freigeben</button>
+          <button class="link" data-review-reject="${esc(a.id)}">Ablehnen</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function commentApprovalCardHtml(a) {
     return `<div class="approval-card" data-comment-approval-id="${esc(a.id)}">
       <div class="approval-body">
@@ -3591,6 +3670,27 @@
       }
       return;
     }
+    const reviewApproveBtn = e.target.closest("[data-review-approve]");
+    const reviewRejectBtn = e.target.closest("[data-review-reject]");
+    if (reviewApproveBtn || reviewRejectBtn) {
+      const btn = reviewApproveBtn || reviewRejectBtn;
+      const id = btn.dataset.reviewApprove || btn.dataset.reviewReject;
+      const action = reviewApproveBtn ? "approve" : "reject";
+      if (action === "reject" && !(await showConfirm({ title: "Antwort ablehnen?", message: "Sie wird dann nicht an Google gesendet - die Bewertung bleibt unbeantwortet.", confirmLabel: "Ablehnen" }))) return;
+      const card = btn.closest(".approval-card");
+      const body = action === "approve" ? { reply: card?.querySelector(".review-reply-text")?.value ?? "" } : undefined;
+      btn.classList.add("busy");
+      try {
+        await api("POST", `/api/review-approvals/${id}/${action}`, body);
+        card?.remove();
+        const box = $("#dash-review-approvals");
+        if (box && !box.querySelector(".approval-card")) box.innerHTML = `<p class="empty">Aktuell nichts, das auf Ihre Freigabe wartet.</p>`;
+      } catch (err) {
+        showError(err.message || "Aktion fehlgeschlagen.");
+        btn.classList.remove("busy");
+      }
+      return;
+    }
     if (e.target.closest("#post-now-btn")) {
       const btn = e.target.closest("#post-now-btn");
       const topic = $("#f-postNowTopic")?.value || "";
@@ -3776,6 +3876,8 @@
     body.notifyOnPublish = checked("notifyOnPublish");
     body.notifyWeeklyReport = checked("notifyWeeklyReport");
     body.commentAutomationEnabled = checked("commentAutomationEnabled");
+    body.googleReviewAutomationEnabled = checked("googleReviewAutomationEnabled");
+    body.googleReviewPostsEnabled = checked("googleReviewPostsEnabled");
     body.gradientEnabled = checked("gradientEnabled");
     syncPillarsDraftFromDom();
     body.contentPillars = S.pillarsDraft.filter((p) => p.title.trim());

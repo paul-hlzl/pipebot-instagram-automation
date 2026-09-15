@@ -750,3 +750,196 @@ export async function classifyAndAnswerComment(input: CommentClassificationInput
   const reply = type === "question" && typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : null;
   return { type, reply, costUsd };
 }
+
+export interface ReviewReplyInput {
+  /** Bewertungstext - kann leer sein (reine Sterne-Bewertung ohne Text ist auf Google normal). */
+  reviewText: string;
+  /** 1-5, 0 = unbekannt. Steuert den Tonfall stärker als jeder andere Wert hier. */
+  starRating: number;
+  reviewerName: string | null;
+  company: string;
+  industry: string;
+  about: string;
+  tone: string;
+  language: string;
+}
+
+export interface ReviewReplyResult {
+  reply: string;
+  costUsd: number | null;
+}
+
+/**
+ * Eine Anthropic-Anfrage pro neuer Google-Bewertung. BEWUSST ANDERS als
+ * classifyAndAnswerComment (Instagram-Kommentare), nicht davon abgeleitet:
+ *
+ * - Dort wird KLASSIFIZIERT und in den meisten Fällen bewusst NICHT geantwortet (nur echte Fragen
+ *   bekommen eine Antwort, Lob/Spam/Hass werden übersprungen). Hier bekommt JEDE Bewertung eine
+ *   Antwort - das ist bei Google der Normalfall und wird von Kundinnen und Kunden erwartet.
+ * - Eine schlechte Bewertung wird deshalb nicht ignoriert wie ein Hass-Kommentar, sondern
+ *   empathisch und lösungsorientiert beantwortet (bedauern, Verantwortung nicht abstreiten, ins
+ *   Direktgespräch einladen) - ohne zu streiten, ohne Rechtfertigung, ohne Gegenangriff.
+ *
+ * Harte Grenzen im System-Prompt (Google moderiert Inhaber-Antworten und lehnt Verstöße ab, siehe
+ * google-business.ts): keine personenbezogenen Daten, keine Werbung/Rabatte/Links, keine
+ * Gegenvorwürfe, keine Behauptungen über die bewertende Person, kein Zweifel an der Echtheit der
+ * Bewertung. Antwort immer kurz (max. ~60 Wörter) - lange Antworten wirken defensiv und ecken bei
+ * der Moderation eher an.
+ */
+export async function generateReviewReply(input: ReviewReplyInput): Promise<ReviewReplyResult> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("Die Bewertungs-Automatisierung ist gerade nicht verfügbar.");
+  }
+
+  const languageName = input.language === "en" ? "English" : "Deutsch";
+  const stars = input.starRating >= 1 && input.starRating <= 5 ? input.starRating : null;
+  const stance =
+    stars !== null && stars <= 2
+      ? "Das ist eine SCHLECHTE Bewertung. Antworte empathisch und lösungsorientiert: Bedauern ausdrücken, das Anliegen ernst nehmen, ein direktes Gespräch anbieten (z.B. per E-Mail oder Telefon über die im Profil hinterlegten Kontaktdaten). Niemals streiten, niemals rechtfertigen, niemals widersprechen, niemals die Schilderung in Zweifel ziehen."
+      : stars === 3
+        ? "Das ist eine mittlere Bewertung. Bedanke dich für das ehrliche Feedback, greife den genannten Kritikpunkt sachlich auf und lade zu einem direkten Austausch ein - ohne Ausreden und ohne Beschönigung."
+        : "Das ist eine gute Bewertung. Bedanke dich kurz, persönlich und ohne Werbefloskeln, und gehe auf das ein, was konkret gelobt wurde.";
+
+  const system =
+    "Du schreibst die öffentliche Inhaber-Antwort auf eine Google-Bewertung eines Kleinunternehmens. " +
+    "Antworte AUSSCHLIESSLICH mit dem reinen Antworttext - kein JSON, kein Markdown, keine Anführungszeichen, keine Anrede-Platzhalter. " +
+    `Sprache: ${languageName}. Tonfall: "${input.tone || "sachlich"}". Maximal 60 Wörter, lieber kürzer. ` +
+    `${stance} ` +
+    "HARTE REGELN, haben Vorrang vor allem anderen (Google moderiert Inhaber-Antworten und lehnt Verstöße ab): " +
+    "keine personenbezogenen Daten (keine Nachnamen, keine Termindetails, keine Angaben zu Behandlung/Auftrag/Bestellung, nichts, was die Person identifizierbar macht, was sie nicht selbst geschrieben hat); " +
+    "keine Werbung, keine Rabatte, keine Preise, keine Links, keine Telefonnummern, keine E-Mail-Adressen; " +
+    "keine Gegenvorwürfe, keine Unterstellungen, kein Zweifel an der Echtheit der Bewertung, keine Bitte, die Bewertung zu ändern oder zu löschen; " +
+    "keine Versprechen (Erstattung, Entschädigung, Ergebnis), die das Unternehmen vielleicht nicht halten kann. " +
+    "Im Zweifel kürzer und allgemeiner antworten statt konkreter zu werden.";
+
+  const user =
+    `Unternehmen: ${input.company} (Branche: ${input.industry || "unbekannt"})\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `Sterne: ${stars !== null ? `${stars} von 5` : "unbekannt"}\n` +
+    `Name der bewertenden Person: ${input.reviewerName || "(unbekannt)"}\n\n` +
+    `Bewertungstext: ${input.reviewText ? `"${input.reviewText}"` : "(kein Text - nur eine Sterne-Bewertung)"}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        { model: anthropicModel, max_tokens: 400, system, messages: [{ role: "user", content: user }] },
+        {
+          headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          timeout: 30_000,
+        },
+      ),
+    2,
+    "Anthropic review-reply",
+  );
+
+  const reply = data.content?.find((c) => c.type === "text")?.text?.trim() ?? "";
+  if (!reply) throw new ToolError("Bewertungs-Antwort: leere Modell-Antwort.");
+  // Sicherheitsnetz gegen ein Modell, das trotz Anweisung in Anführungszeichen antwortet.
+  const cleaned = reply.replace(/^["„»]/, "").replace(/["“«]$/, "").trim();
+  return { reply: cleaned, costUsd: estimateCostUsd(anthropicModel, data.usage) };
+}
+
+export interface ReviewPostInput {
+  reviewText: string;
+  starRating: number;
+  reviewerName: string | null;
+  company: string;
+  industry: string;
+  about: string;
+  tone: string;
+  language: string;
+  hashtagPreference: string;
+  emojisEnabled: boolean;
+  channel: string;
+  /** Harte Wortverbote des Kunden - hier zusätzlich in den Prompt gegeben, weil der Ausgangstext
+   *  (die Bewertung) ein fremder Text ist: ein verbotenes Wort darin würde sonst mit hoher
+   *  Wahrscheinlichkeit ins Zitat wandern und den Beitrag unveröffentlichbar machen. */
+  bannedWords: string[];
+  /** Pflicht-Elemente des Kunden - müssen im Beitrag vorkommen, sonst lehnt die Veröffentlichung ab. */
+  requiredElements: string[];
+}
+
+export interface ReviewPostResult {
+  headline: string;
+  caption: string;
+  costUsd: number | null;
+}
+
+/**
+ * Content-Recycling: aus einer guten Bewertung einen "Das sagen unsere Kunden"-Beitragsvorschlag
+ * machen. Getrennt von generatePlannedPostContent, weil die Quelle hier ein fremder Text ist -
+ * die Regeln drehen sich vor allem darum, was damit NICHT passieren darf: nichts dazuerfinden,
+ * die Aussage nicht verschärfen, keinen vollen Namen der bewertenden Person nennen (nur Vorname
+ * oder Initial, und auch das nur, wenn er in der Bewertung selbst steht).
+ *
+ * Die Headline landet als Text im generierten Bild (siehe fal.ts/watermark.ts) und muss deshalb
+ * kurz sein; die Caption ist der Beitragstext.
+ */
+export async function generateReviewSocialPost(input: ReviewPostInput): Promise<ReviewPostResult> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("Die Beitrags-Erstellung ist gerade nicht verfügbar.");
+  }
+
+  const languageName = input.language === "en" ? "English" : "Deutsch";
+  const hashtagRule =
+    input.hashtagPreference === "keine"
+      ? "Keine Hashtags."
+      : input.hashtagPreference === "viele"
+        ? "8-12 passende Hashtags am Ende der Caption."
+        : "Höchstens 3 passende Hashtags am Ende der Caption.";
+
+  const system =
+    "Du machst aus einer echten Kundenbewertung einen Social-Media-Beitrag für ein Kleinunternehmen. " +
+    'Antworte AUSSCHLIESSLICH mit einem JSON-Objekt nach genau diesem Schema: {"headline": "...", "caption": "..."} - kein Text davor oder danach, kein Markdown-Codeblock. ' +
+    `Sprache: ${languageName}. Tonfall: "${input.tone || "sachlich"}". ` +
+    "headline: maximal 60 Zeichen, wird als Text ins Bild gesetzt - am besten ein kurzes, wörtliches Zitat aus der Bewertung oder dessen Kern. " +
+    "caption: 2-4 Sätze, greift die Bewertung auf und bedankt sich; " +
+    `${hashtagRule} ${input.emojisEnabled ? "Emojis sparsam erlaubt." : "Keine Emojis."} ` +
+    "HARTE REGELN: nichts dazuerfinden, was nicht in der Bewertung steht; die Aussage nicht verstärken oder ins Werbliche drehen; " +
+    "keinen vollen Namen der bewertenden Person nennen (Vorname oder Initial nur, wenn er in der Bewertung selbst vorkommt); " +
+    "keine personenbezogenen Details (Behandlung, Auftrag, Bestellung, Termin); keine Preise, keine Rabatte, keine Heils- oder Erfolgsversprechen; " +
+    "ein wörtliches Zitat muss WÖRTLICH aus der Bewertung stammen (gekürzt ist erlaubt, umformuliert nicht)." +
+    (input.bannedWords.length
+      ? ` Diese Wörter dürfen weder in headline noch in caption vorkommen - auch nicht in einem Zitat (dann das Zitat entsprechend kürzen): ${input.bannedWords.join(", ")}.`
+      : "") +
+    (input.requiredElements.length
+      ? ` Diese Elemente MÜSSEN irgendwo in headline oder caption vorkommen: ${input.requiredElements.join(", ")}.`
+      : "");
+
+  const user =
+    `Unternehmen: ${input.company} (Branche: ${input.industry || "unbekannt"})\n` +
+    `Über das Unternehmen: ${input.about || "(keine Angabe)"}\n` +
+    `Kanal: ${input.channel}\n` +
+    `Sterne: ${input.starRating} von 5\n` +
+    `Name der bewertenden Person: ${input.reviewerName || "(unbekannt)"}\n\n` +
+    `Bewertungstext: "${input.reviewText}"`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        { model: anthropicModel, max_tokens: 800, system, messages: [{ role: "user", content: user }] },
+        {
+          headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          timeout: 45_000,
+        },
+      ),
+    2,
+    "Anthropic review-post",
+  );
+
+  const raw = data.content?.find((c) => c.type === "text")?.text?.trim() ?? "";
+  let parsed: { headline?: unknown; caption?: unknown };
+  try {
+    parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+  } catch {
+    throw new ToolError(`Beitrag aus Bewertung: ungültige Modell-Antwort - ${raw.slice(0, 200)}`);
+  }
+  const headline = typeof parsed.headline === "string" ? parsed.headline.trim() : "";
+  const caption = typeof parsed.caption === "string" ? parsed.caption.trim() : "";
+  if (!headline || !caption) throw new ToolError("Beitrag aus Bewertung: Modell-Antwort ohne headline/caption.");
+  return { headline, caption, costUsd: estimateCostUsd(anthropicModel, data.usage) };
+}

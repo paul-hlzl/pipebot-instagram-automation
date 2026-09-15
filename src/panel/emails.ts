@@ -212,3 +212,33 @@ export function approvalNeededEmail(input: { to: string; company: string; channe
       `Ihr Pipeflow-Team\nPipeline AI Solutions`,
   };
 }
+
+/**
+ * Google lehnt eine bereits abgeschickte Inhaber-Antwort nachträglich ab (Richtlinienverstoß aus
+ * Sicht der Google-Moderation). Gleiches Prinzip wie bei versteckten Instagram-Kommentaren: der
+ * Kunde soll das erfahren, statt dass die Antwort still verschwindet. Wird pro Bewertung genau
+ * einmal verschickt (rejected_notified_at in google_reviews ist der Guard, siehe reviews.ts).
+ */
+export function reviewReplyRejectedEmail(input: {
+  to: string;
+  company: string;
+  reviewerName: string | null;
+  starRating: number;
+  reason: string | null;
+}): MailInput {
+  const who = input.reviewerName ? `von ${input.reviewerName}` : "";
+  const stars = input.starRating >= 1 && input.starRating <= 5 ? `${input.starRating}-Sterne-` : "";
+  return {
+    to: input.to,
+    subject: "Eine Antwort auf eine Google-Bewertung wurde von Google abgelehnt - Pipeflow",
+    text:
+      `Hallo,\n\n` +
+      `die automatisch erstellte Antwort auf eine ${stars}Bewertung ${who} für "${input.company}" wurde von Google nicht ` +
+      `veröffentlicht. Google prüft Antworten von Unternehmen und hat diese wegen eines Richtlinienverstoßes abgelehnt.\n\n` +
+      (input.reason ? `Begründung laut Google: ${input.reason}\n\n` : "") +
+      `Die Bewertung ist damit weiterhin unbeantwortet. Sie können direkt in Ihrem Google-Unternehmensprofil selbst ` +
+      `antworten - dort sehen Sie auch, was Google konkret beanstandet.\n\n` +
+      `Im Panel finden Sie die Bewertung unter den Google-Bewertungen:\n${panelUrl()}\n\n` +
+      `Ihr Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}

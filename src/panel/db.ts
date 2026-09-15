@@ -267,6 +267,42 @@ CREATE TABLE IF NOT EXISTS post_media (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS post_media_owner ON post_media(owner_type, owner_id, position);
+
+-- Google-Bewertungen (siehe reviews.ts). Gleiche Grundidee wie processed_comments: eine Zeile pro
+-- Bewertung, der Ressourcenname von Google (accounts/*/locations/*/reviews/*) ist der Dedupe-
+-- Schluessel, damit dieselbe Bewertung nie zweimal beantwortet wird. Unterschiede zu
+-- processed_comments, bewusst und nicht kopiert:
+--   * star_rating/reviewer_name gibt es bei Kommentaren nicht, hier steuern sie Tonfall der
+--     Antwort UND das Content-Recycling (ab wie vielen Sternen ein Beitragsvorschlag entsteht).
+--   * reply_state/policy_violation halten Googles MODERATIONSERGEBNIS fest: eine erfolgreich
+--     abgeschickte Antwort kann von Google nachtraeglich noch abgelehnt werden. rejected_notified_at
+--     sorgt dafuer, dass der Kunde darueber genau einmal eine E-Mail bekommt, nicht bei jedem Lauf.
+--   * social_post_* verknuepft eine gute Bewertung mit dem daraus erzeugten Beitragsvorschlag
+--     (pending_approvals.id), damit aus einer Bewertung nie zwei Beitraege entstehen.
+-- Kein Fremdschluessel auf pending_approvals: der Beitrag darf geloescht werden, ohne dass die
+-- Bewertungs-Historie verschwindet (gleiche Ueberlegung wie bei processed_comments/posts).
+CREATE TABLE IF NOT EXISTS google_reviews (
+  id TEXT PRIMARY KEY,
+  review_name TEXT NOT NULL UNIQUE,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  location_name TEXT NOT NULL,
+  reviewer_name TEXT,
+  star_rating INTEGER NOT NULL DEFAULT 0,
+  review_text TEXT NOT NULL DEFAULT '',
+  review_created_at TEXT,
+  generated_reply TEXT,
+  status TEXT NOT NULL,
+  reply_state TEXT,
+  policy_violation TEXT,
+  rejected_notified_at TEXT,
+  social_post_status TEXT,
+  social_post_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS google_reviews_customer ON google_reviews(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS google_reviews_status ON google_reviews(customer_id, status);
+CREATE INDEX IF NOT EXISTS google_reviews_post_status ON google_reviews(customer_id, social_post_status);
 `);
 
 // Migration: add columns to a table that existed before this version. SQLite has no
@@ -446,6 +482,21 @@ migrateColumns("customers", [
 // bekannt) gilt nie als stale, damit bestehende Kunden ohne je eine Aenderung nicht plötzlich
 // alle als veraltet markiert werden.
 migrateColumns("customers", [["branding_last_changed_at", "TEXT"]]);
+
+// Google-Bewertungen (siehe reviews.ts). Alle vier Standardwerte sind bewusst "aus"/konservativ:
+// eine bestehende Kundin merkt von diesem Feature nichts, bis sie es selbst einschaltet.
+// google_review_mode wie comment_automation_mode ('approval' = erst zur Freigabe, 'auto' = sofort
+// abschicken); Standard hier ebenfalls 'approval', weil eine oeffentliche Antwort unter dem Namen
+// des Kunden steht. google_review_posts_enabled/google_review_post_min_stars steuern das
+// Content-Recycling (aus einer guten Bewertung einen Beitragsvorschlag machen) - eigener Schalter,
+// nicht an die Antwort-Automatik gekoppelt: viele Kunden wollen antworten lassen, aber nicht jede
+// Bewertung weiterveroeffentlichen (Einverstaendnis der bewertenden Person, siehe Panel-Hinweis).
+migrateColumns("customers", [
+  ["google_review_automation_enabled", "INTEGER NOT NULL DEFAULT 0"],
+  ["google_review_mode", "TEXT NOT NULL DEFAULT 'approval'"],
+  ["google_review_posts_enabled", "INTEGER NOT NULL DEFAULT 0"],
+  ["google_review_post_min_stars", "INTEGER NOT NULL DEFAULT 4"],
+]);
 // Panel v20: Token-Ablauf-Warnung (LinkedIn hat keinen Refresh-Token, siehe providers/linkedin.ts
 // - laeuft nach 60 Tagen still ab, wenn niemand rechtzeitig neu verbindet). Verhindert Mehrfach-
 // Mails fuer denselben Ablauf: wird bei jedem erfolgreichen Refresh/Neu-Verbinden zurueckgesetzt
@@ -567,6 +618,10 @@ export interface CustomerRow {
   gradient_color2: string | null;
   gradient_direction: string;
   branding_last_changed_at: string | null;
+  google_review_automation_enabled: number;
+  google_review_mode: string;
+  google_review_posts_enabled: number;
+  google_review_post_min_stars: number;
 }
 
 export interface ConnectionRow {
@@ -733,6 +788,26 @@ export interface ProcessedCommentRow {
   comment_type: string;
   generated_reply: string | null;
   status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoogleReviewRow {
+  id: string;
+  review_name: string;
+  customer_id: string;
+  location_name: string;
+  reviewer_name: string | null;
+  star_rating: number;
+  review_text: string;
+  review_created_at: string | null;
+  generated_reply: string | null;
+  status: string;
+  reply_state: string | null;
+  policy_violation: string | null;
+  rejected_notified_at: string | null;
+  social_post_status: string | null;
+  social_post_id: string | null;
   created_at: string;
   updated_at: string;
 }

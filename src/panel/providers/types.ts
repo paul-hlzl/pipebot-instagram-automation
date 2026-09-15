@@ -40,6 +40,29 @@ export interface Provider {
   /** always = Token kann immer verlängert werden, with-refresh-token = nur wenn ein Refresh-Token vorliegt */
   autoRefresh: "always" | "with-refresh-token" | "never";
   refreshWithinDays: number;
+  /**
+   * Mindestalter des aktuellen Tokens, bevor er überhaupt verlängert werden darf. Default (nicht
+   * gesetzt) sind 24 Stunden - das ist Instagrams eigene Regel (ein Long-Lived-Token lässt sich
+   * erst verlängern, wenn er mindestens einen Tag alt ist), die bisher fest in credentials.ts's
+   * shouldRefresh stand. Google-Access-Tokens leben nur eine Stunde und müssen deshalb 0 setzen,
+   * sonst wäre ein Google-Token per Definition nie verlängerbar.
+   */
+  refreshMinTokenAgeMs?: number;
+  /**
+   * true = ein bereits ABGELAUFENER Zugangstoken lässt sich mit dem gespeicherten Refresh-Token
+   * trotzdem noch erneuern (Google: der Refresh-Token ist der eigentliche, langlebige Zugang, der
+   * Access-Token nur ein Stundenticket). Bei Instagram/LinkedIn bleibt es beim Gegenteil: dort ist
+   * ein abgelaufener Token endgültig, der Kunde muss neu verbinden.
+   */
+  refreshAfterExpiry?: boolean;
+  /**
+   * true = diese Plattform taucht im Panel nur auf, wenn sie auch konfiguriert ist (isConfigured()).
+   * Für Instagram/LinkedIn (nicht gesetzt) bleibt es beim bisherigen Verhalten: der Schritt wird
+   * immer angezeigt, ein fehlender App-Schlüssel führt nur zu einem Hinweistext. Google-
+   * Unternehmensprofil ist so lange unsichtbar, bis der API-Zugang von Google freigeschaltet und
+   * eingetragen ist - sonst würde jeder Kunde einen Kanal sehen, den niemand verbinden kann.
+   */
+  hiddenUntilConfigured?: boolean;
   isConfigured(): boolean;
   authorizeUrl(state: string, redirectUri: string): string;
   exchangeCode(code: string, redirectUri: string): Promise<ConnectResult>;

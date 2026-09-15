@@ -46,7 +46,13 @@ export const RENEW_SOON_WINDOW_DAYS = 14;
 export function connectionStatus(row: ConnectionRow): ConnectionStatus {
   if (!row.expires_at) return "ok";
   const left = new Date(row.expires_at).getTime() - Date.now();
-  if (left <= 0) return "expired";
+  if (left <= 0) {
+    // Google: der Access-Token ist nur ein Stundenticket, der Refresh-Token der eigentliche
+    // Zugang - "abgelaufen" waere hier fast immer angezeigt und fast immer falsch. Fuer
+    // Instagram/LinkedIn (kein refreshAfterExpiry) bleibt es exakt wie bisher.
+    const p = getProvider(row.provider);
+    return p?.refreshAfterExpiry && canAutoRefresh(p, row) ? "ok" : "expired";
+  }
   const provider = getProvider(row.provider);
   if (provider && !canAutoRefresh(provider, row) && left < RENEW_SOON_WINDOW_DAYS * DAY) return "renew-soon";
   return "ok";
@@ -299,8 +305,13 @@ function shouldRefresh(provider: Provider, row: ConnectionRow): boolean {
   if (!row.expires_at || !canAutoRefresh(provider, row)) return false;
   const left = new Date(row.expires_at).getTime() - Date.now();
   const ageMs = Date.now() - new Date(row.updated_at).getTime();
-  // Instagram erlaubt Refresh erst, wenn der Token mind. 24h alt ist
-  return left > 0 && left < provider.refreshWithinDays * DAY && ageMs > DAY;
+  // Instagram erlaubt Refresh erst, wenn der Token mind. 24h alt ist - das ist der Default.
+  // Google widerspricht dem in beide Richtungen (Token lebt nur 1h, laesst sich dafuer auch nach
+  // Ablauf noch erneuern), deshalb beides pro Provider ueberschreibbar statt fest verdrahtet.
+  const minAge = provider.refreshMinTokenAgeMs ?? DAY;
+  if (ageMs <= minAge) return false;
+  if (left <= 0) return Boolean(provider.refreshAfterExpiry);
+  return left < provider.refreshWithinDays * DAY;
 }
 
 /** Entschlüsselte Zugangsdaten für einen Kunden + Plattform. Verlängert automatisch, wenn nötig. */
@@ -329,7 +340,9 @@ export async function getCredentials(
     .get(customerId, providerId) as ConnectionRow | undefined;
   if (!row) throw new Error(`Kunde ${customerId} hat ${provider.name} nicht verbunden.`);
 
-  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+  const expired = Boolean(row.expires_at && new Date(row.expires_at).getTime() < Date.now());
+  const renewable = expired && provider.refreshAfterExpiry && canAutoRefresh(provider, row);
+  if (expired && !renewable) {
     throw new Error(`${provider.name}-Zugang von Kunde ${customerId} ist abgelaufen – Kunde muss im Panel neu verbinden.`);
   }
   let accessToken = decrypt(row.access_token_enc);
@@ -337,6 +350,13 @@ export async function getCredentials(
     try {
       accessToken = (await refreshRow(provider, row)).accessToken;
     } catch (err) {
+      // Bei einem bereits abgelaufenen Token (Google) ist ein gescheiterter Refresh das Ende -
+      // der alte Token taugt dann nichts mehr, weitermachen wuerde nur einen 401 weiterreichen.
+      if (renewable) {
+        throw new Error(
+          `${provider.name}-Zugang von Kunde ${customerId} konnte nicht erneuert werden – Kunde muss im Panel neu verbinden. (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
       console.error(`[panel] Refresh ${providerId}/${customerId} fehlgeschlagen (alter Token noch gültig):`, err);
     }
   }
@@ -356,6 +376,19 @@ export async function resolveInstagramCredentials(customerId?: string): Promise<
   if (!customerId) return undefined;
   const cred = await getCredentials(customerId, "instagram");
   return { accessToken: cred.accessToken, igUserId: cred.accountId };
+}
+
+/**
+ * Zugangsdaten für das Google-Unternehmensprofil eines Kunden. `accountId` ist der Kontoname
+ * ("accounts/123"), unter dem seine Filialen und damit alle Bewertungen hängen. Wirft (wie
+ * getCredentials) bei abgelaufener Probezeit, Kunden-Pause oder nicht erneuerbarem Token;
+ * undefined nur ohne customerId - anders als bei Instagram/LinkedIn gibt es hier bewusst KEIN
+ * Fallback auf ein Konto des Betreibers, Bewertungen sind immer die des Kunden.
+ */
+export async function resolveGoogleCredentials(customerId?: string): Promise<{ accessToken: string; accountName: string } | undefined> {
+  if (!customerId) return undefined;
+  const cred = await getCredentials(customerId, "google");
+  return { accessToken: cred.accessToken, accountName: cred.accountId };
 }
 
 /** Loads a customer's LinkedIn credentials. undefined = the operator's own .env account (unchanged default behavior). */

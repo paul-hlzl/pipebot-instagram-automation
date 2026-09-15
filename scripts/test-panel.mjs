@@ -1096,6 +1096,115 @@ async function main() {
     db.close();
   }
 
+  // --- Google-Bewertungen (automatische Antworten + Content-Recycling) ---
+  // Wie bei den Kommentaren: KEIN echter Aufruf an Google. Geprueft wird nur, was im eigenen
+  // Server passiert - Einstellungen speichern/validieren, Zugriffsschutz, Freigeben/Ablehnen.
+  console.log("\nGoogle-Bewertungen:");
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/providers`);
+    const body = await res.json();
+    const google = (body.providers || []).find((p) => p.id === "google");
+    // Ohne GOOGLE_CLIENT_ID/SECRET darf der Kanal im Panel gar nicht auftauchen (hiddenUntilConfigured) -
+    // sonst saehe jeder Kunde einen Verbinden-Knopf, der nur in einen Fehler laufen kann.
+    ok(
+      "Google taucht nur auf, wenn er konfiguriert ist",
+      process.env.GOOGLE_CLIENT_ID ? Boolean(google) : google === undefined,
+      `google=${JSON.stringify(google?.id ?? null)}, GOOGLE_CLIENT_ID gesetzt=${Boolean(process.env.GOOGLE_CLIENT_ID)}`,
+    );
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/review-approvals`);
+    ok("/api/review-approvals ohne Login -> 401", res.status === 401, `status=${res.status}`);
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/api/review-approvals`, { headers: { cookie: sessionCookie } });
+    const body = await res.json();
+    ok("/api/review-approvals mit Login -> 200", res.status === 200, `status=${res.status}`);
+    ok("approvals ist ein leeres Array ohne Bewertungen", Array.isArray(body.approvals) && body.approvals.length === 0, JSON.stringify(body.approvals));
+  }
+  {
+    const base = {
+      company: "Test GmbH", contactName: "Test Person", email: testEmail, tone: "sachlich", frequency: "werktags", postTime: "15:00",
+    };
+    const patch = async (extra) => {
+      const res = await fetch(`${BASE}${MOUNT}/api/me`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: sessionCookie },
+        body: JSON.stringify({ ...base, ...extra }),
+      });
+      return (await res.json()).customer;
+    };
+
+    const saved = await patch({ googleReviewAutomationEnabled: true, googleReviewMode: "auto", googleReviewPostsEnabled: true, googleReviewPostMinStars: 5 });
+    ok("PATCH /api/me speichert googleReviewAutomationEnabled", saved?.googleReviewAutomationEnabled === true, JSON.stringify(saved?.googleReviewAutomationEnabled));
+    ok("PATCH /api/me speichert googleReviewMode", saved?.googleReviewMode === "auto", saved?.googleReviewMode);
+    ok("PATCH /api/me speichert googleReviewPostsEnabled", saved?.googleReviewPostsEnabled === true, JSON.stringify(saved?.googleReviewPostsEnabled));
+    ok("PATCH /api/me speichert googleReviewPostMinStars", saved?.googleReviewPostMinStars === 5, String(saved?.googleReviewPostMinStars));
+
+    const badMode = await patch({ googleReviewAutomationEnabled: true, googleReviewMode: "nicht-echt" });
+    ok("Ungültiger googleReviewMode fällt zurück auf 'approval'", badMode?.googleReviewMode === "approval", badMode?.googleReviewMode);
+
+    const badStars = await patch({ googleReviewPostsEnabled: true, googleReviewPostMinStars: 9 });
+    ok("Ungültige Sternezahl fällt zurück auf 4", badStars?.googleReviewPostMinStars === 4, String(badStars?.googleReviewPostMinStars));
+
+    const zeroStars = await patch({ googleReviewPostsEnabled: true, googleReviewPostMinStars: 0 });
+    ok("Sternezahl 0 fällt zurück auf 4 (nie 'ab 1 Stern')", zeroStars?.googleReviewPostMinStars === 4, String(zeroStars?.googleReviewPostMinStars));
+
+    // Standard fuer das Content-Recycling bleibt aus, wenn nichts mitgeschickt wird.
+    const defaults = await patch({});
+    ok("Beide Schalter sind ohne Angabe aus", defaults?.googleReviewAutomationEnabled === false && defaults?.googleReviewPostsEnabled === false, JSON.stringify([defaults?.googleReviewAutomationEnabled, defaults?.googleReviewPostsEnabled]));
+  }
+  {
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/does-not-exist/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" } });
+    ok("Freigeben einer unbekannten Bewertung -> 404", approveRes.status === 404, `status=${approveRes.status}`);
+    const rejectRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/does-not-exist/reject`, { method: "POST", headers: { cookie: sessionCookie } });
+    ok("Ablehnen einer unbekannten Bewertung -> 404", rejectRes.status === 404, `status=${rejectRes.status}`);
+  }
+  if (!customerId) {
+    ok("Freigabe-/Ablehn-Test mit echten Bewertungen übersprungen (customerId unbekannt)", false, "customerId leer");
+  } else {
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(STAGING_DB);
+    const seed = (id, status) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO google_reviews (id, review_name, customer_id, location_name, reviewer_name, star_rating, review_text,
+           review_created_at, generated_reply, status, reply_state, policy_violation, rejected_notified_at,
+           social_post_status, social_post_id, created_at, updated_at)
+         VALUES (?, ?, ?, 'accounts/1/locations/2', 'Testkundin', 5, 'Sehr freundliche Beratung, gerne wieder.', ?, 'Vielen Dank für Ihre Rückmeldung!', ?, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+      ).run(id, `accounts/1/locations/2/reviews/${id}`, customerId, now, status, now, now);
+    };
+
+    const rejectId = "grev_test_reject";
+    seed(rejectId, "pending_approval");
+    const rejectRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/${rejectId}/reject`, { method: "POST", headers: { cookie: sessionCookie } });
+    const rejectBody = await rejectRes.json();
+    ok("Ablehnen einer echten wartenden Bewertung -> 200, status rejected", rejectRes.status === 200 && rejectBody.approval?.status === "rejected", JSON.stringify(rejectBody));
+
+    const approveId = "grev_test_approve";
+    seed(approveId, "pending_approval");
+    const approveRes = await fetch(`${BASE}${MOUNT}/api/review-approvals/${approveId}/approve`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify({}) });
+    ok("Freigeben ohne Google-Verbindung -> 502 statt Absturz", approveRes.status === 502, `status=${approveRes.status}`);
+
+    // Eigene Liste: der wartende Entwurf muss auftauchen, der schon abgelehnte nicht mehr.
+    // (Ein zweiter Kunde wird hier bewusst NICHT angelegt - die Signup-Sperre erlaubt nur 5
+    // Anmeldungen pro Stunde und IP, und der Testlauf verbraucht davon schon vier. Die
+    // Kunden-Eingrenzung selbst ist dieselbe SQL-Bedingung wie bei den Kommentar-Freigaben.)
+    const listBody = await (await fetch(`${BASE}${MOUNT}/api/review-approvals`, { headers: { cookie: sessionCookie } })).json();
+    const ids = (listBody.approvals || []).map((a) => a.id);
+    ok("wartende Bewertung steht in der eigenen Liste", ids.includes(approveId), JSON.stringify(ids));
+    ok("abgelehnte Bewertung steht nicht mehr in der Liste", !ids.includes(rejectId), JSON.stringify(ids));
+    ok("Bewertungstext und Sterne kommen mit", (listBody.approvals || []).every((a) => typeof a.reviewText === "string" && typeof a.starRating === "number"), JSON.stringify(listBody.approvals?.[0] ?? null));
+
+    db.prepare("DELETE FROM google_reviews WHERE customer_id = ?").run(customerId);
+    db.close();
+  }
+  {
+    const res = await fetch(`${BASE}${MOUNT}/connect/google`, { redirect: "manual" });
+    const location = res.headers.get("location") ?? "";
+    ok("/connect/google ohne Session -> redirect error=session", location.includes("error=session"), `location=${location}`);
+  }
+
   // --- Struktur/Rundgang (Panel v11) - der Rundgang-Status liegt bewusst serverseitig, damit er
   // nicht bei jedem Login/Geraetewechsel wieder auftaucht (im Browser-Speicher war genau das bei
   // "Später verbinden" schon einmal die Fehlerursache). Die Oberflaeche selbst (Navigation,
