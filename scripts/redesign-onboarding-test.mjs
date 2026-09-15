@@ -69,7 +69,10 @@ for (const width of [390, 1440]) {
   log((await suggest.getAttribute("class")).includes("btn"), "… und ist ein Knopf, kein Fußnoten-Link", await suggest.getAttribute("class"));
   const box = await suggest.boundingBox();
   log(box.height >= 40, "Tap-Ziel mindestens 40px hoch", `${Math.round(box?.height)}px`);
-  log((await page.locator("#analyze-website-hint").textContent()).includes("Startseite"), "Erklärung, was dabei passiert, steht daneben");
+  // Der Hinweis ist beim Minimalismus-Durchgang bewusst kuerzer geworden - geprueft wird, dass
+  // ueberhaupt eine kurze Erklaerung danebensteht, nicht mehr ihr genauer Wortlaut.
+  const hintText = (await page.locator("#analyze-website-hint").textContent()).trim();
+  log(hintText.length > 10 && hintText.length < 120, "kurze Erklärung steht daneben", hintText);
 
   await page.fill("#f-website", "https://beispiel.at");
   await suggest.click();

@@ -1162,3 +1162,58 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
    die Linienstaerke wird durch das Strecken nicht mehr verzerrt, und die Flaeche ist niedriger. */
 .an-chart-wrap svg { height: 96px; }
 .an-chart-wrap { border-bottom: 1px solid var(--rule); padding-bottom: var(--s3); }
+
+/* ===========================================================================
+   Feinschliff 15.09.2026: weniger gleichzeitig sichtbarer Text, klarere Rangfolge,
+   Abstaende dort wo Abschnitte beginnen (Rueckmeldung Paul).
+   =========================================================================== */
+
+/* --- Rangfolge: Gruppentitel deutlich, Beschriftung normal, Hinweis dezent --- */
+.hint { font-size: var(--t-micro); line-height: 1.45; }
+.setgroup > h2 { font-size: var(--t-h2); }
+.setgroup-lede { color: var(--stone); font-size: var(--t-small); margin-bottom: var(--s5); max-width: 60ch; }
+
+/* --- Abstaende an Abschnittsgrenzen, nicht ueberall gleichmaessig --- */
+/* Abstand NICHT ueber den Nachbar-Selektor: die Gruppe "Konto" steht ausserhalb des Formulars,
+   dadurch klebte ihre Ueberschrift direkt am Knopf "Aenderungen speichern" - dieselbe Luecke wie
+   zuvor an zwei anderen Stellen. Jede Gruppe bringt ihren Abstand jetzt selbst mit, nur die
+   erste nicht. */
+.setgroup { margin-top: var(--s8); padding-top: var(--s6); border-top: 1px solid var(--rule); }
+#setgroup-unternehmen { margin-top: 0; padding-top: 0; border-top: 0; }
+.stage h3 { margin-top: var(--s7); margin-bottom: var(--s2); font-size: var(--t-body); font-weight: 700; }
+.stage h3:first-child { margin-top: 0; }
+/* Eine Ueberschrift direkt nach einem Knopf, einer Liste oder einem Absatz braucht Luft davor -
+   genau diese Luecke fehlte bei "Konto", "Status" und "Zugang auf anderen Geraeten". */
+.setgroup .actions + h3, .setgroup p + h3, .setgroup .field + h3, .setgroup .check + h3 { margin-top: var(--s7); }
+
+/* --- Erklaerung hinter einem Fragezeichen, statt drei Zeilen Grau --- */
+.info { margin-top: var(--s2); }
+.info > summary {
+  display: inline-grid; place-content: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--line-strong); color: var(--stone);
+  font-size: var(--t-micro); font-weight: 700; cursor: pointer; list-style: none;
+}
+.info > summary::-webkit-details-marker { display: none; }
+.info > summary:hover { border-color: var(--ink); color: var(--ink); }
+.info[open] > summary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.info p { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s2); max-width: 52ch; }
+
+/* --- B1: Senden-Knopf passt zur Hoehe des Eingabefelds (das Textfeld erbte min-height:96px,
+       der Knopf streckte sich per align-items:stretch auf denselben Block) --- */
+.chat-form { display: flex; gap: var(--s2); align-items: flex-end; }
+.chat-form .with-dictate { flex: 1 1 auto; min-width: 0; }
+.chat-form textarea { min-height: 44px; max-height: 120px; }
+.chat-form .btn { flex: 0 0 auto; min-height: 44px; padding: var(--s3) var(--s4); }
+
+/* --- B3: Hoerprobe als sichtbarer Knopf neben der Stimme --- */
+.voice-row { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); flex-wrap: wrap; }
+.btn-small { min-height: 38px; padding: var(--s2) var(--s4); font-size: var(--t-small); }
+@media (max-width: 767px) { .btn-small { min-height: 44px; } }
+
+/* --- B4: Beitragstext in der Liste auf zwei Zeilen, Hashtags eingeklappt --- */
+.caption { margin-top: var(--s2); }
+.caption .prose.is-clamped {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.caption-more, .caption-tags { font-size: var(--t-small); margin-top: var(--s2); margin-right: var(--s4); }
+.caption-taglist { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s2); overflow-wrap: anywhere; }

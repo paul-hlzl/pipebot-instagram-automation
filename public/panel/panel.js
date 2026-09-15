@@ -154,6 +154,14 @@
   const mediaRecorderSupported = () =>
     Boolean(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); // Server-Fallback-Pfad
   const dictateAvailable = () => dictateSupported() || mediaRecorderSupported();
+  /** iOS/iPadOS-Safari meldet webkitSpeechRecognition, liefert aber je nach Geraeteeinstellung
+   *  (Diktat/Siri aus) nur "service-not-allowed" - und zwar ohne sichtbare Reaktion. Dort ist der
+   *  Server-Weg (Aufnahme -> /api/transcribe-audio) der zuverlaessige, also gleich der erste. */
+  const isAppleMobile = () =>
+    /iP(hone|od|ad)/.test(navigator.platform || "") ||
+    (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform || "")) ||
+    /iPhone|iPad|iPod/.test(navigator.userAgent || "");
+  const preferServerDictation = () => isAppleMobile() && mediaRecorderSupported();
   let activeDictation = null; // { mode: "speech"|"record", btn, target, ... } - immer hoechstens eine laufende Aufnahme gleichzeitig
 
   function dictateBtnHtml(forceDisabled) {
@@ -166,6 +174,10 @@
   /** Die einzige Stelle, die ein Text-/Textarea-Feld dictier-faehig macht - siehe Dateikopf-Kommentar.
    *  `forceDisabled` fuer Felder, die selbst gerade disabled sind (z. B. nicht editierbare
    *  Vorausplanungs-Karten) - der Mikrofon-Button darf dann nie aktiv wirken. */
+  /** Sekundaere Erklaerung hinter einem kleinen Fragezeichen - die Information bleibt vollstaendig
+   *  erreichbar, verbraucht aber keine drei Zeilen Grau, die ohnehin ueberlesen werden. */
+  const infoHtml = (text) => `<details class="info"><summary title="Erklärung anzeigen">?</summary><p>${text}</p></details>`;
+
   const withDictate = (fieldHtml, forceDisabled = false) => `<div class="with-dictate">${fieldHtml}${dictateBtnHtml(forceDisabled)}</div>`;
 
   /**
@@ -236,9 +248,20 @@
     };
     recognition.onerror = (event) => {
       // "no-speech"/"aborted" sind normale Sprechpausen (v.a. haeufig auf Android) - Zyklus
-      // weiterlaufen lassen statt die Sitzung deswegen zu beenden. Alles andere (z. B.
-      // "not-allowed" bei verweigerter Mikrofon-Berechtigung) beendet sie wie bisher.
-      if (event.error !== "no-speech" && event.error !== "aborted") stopActiveDictation();
+      // weiterlaufen lassen statt die Sitzung deswegen zu beenden.
+      if (event.error === "no-speech" || event.error === "aborted") return;
+      const btn = state.btn, target = state.target;
+      stopActiveDictation();
+      // Der Web-Speech-Dienst steht nicht zur Verfuegung (Safari ohne aktiviertes Diktat, offline,
+      // Dienst blockiert): still scheitern waere das Schlimmste - dann lieber ueber den Server
+      // aufnehmen, der Weg funktioniert ueberall.
+      if ((event.error === "service-not-allowed" || event.error === "network") && mediaRecorderSupported()) {
+        startServerRecording(btn, target);
+        return;
+      }
+      if (event.error === "not-allowed") {
+        showAlert({ title: "Mikrofon nicht freigegeben", message: "Erlauben Sie den Mikrofon-Zugriff in den Browser-Einstellungen und tippen Sie erneut auf das Mikrofon." });
+      }
     };
     recognition.onend = () => { if (activeDictation === state && state.listening) startRecognitionCycle(state); };
     state.recognition = recognition;
@@ -336,9 +359,12 @@
       return;
     }
     stopActiveDictation();
-    const target = btn.closest(".dictate-wrap")?.querySelector("input, textarea");
+    // Beim Aufteilen der alten Einzeldatei wurde der Wrapper in withDictate() zu ".with-dictate"
+    // umbenannt, diese Suche blieb auf dem alten Namen stehen - das Zielfeld war damit IMMER null
+    // und das Mikrofon tat auf jedem Browser gar nichts. Beide Namen werden jetzt akzeptiert.
+    const target = btn.closest(".with-dictate, .dictate-wrap")?.querySelector("input, textarea");
     if (!target) return;
-    if (dictateSupported()) {
+    if (dictateSupported() && !preferServerDictation()) {
       const state = { mode: "speech", btn, target, listening: true, recognition: null };
       activeDictation = state;
       btn.classList.add("dictating");
@@ -659,7 +685,7 @@
   function logoSectionHtml(c) {
     return `
       <label for="f-logo">Eigenes Logo <span class="opt">(optional, PNG oder JPG, max. 2 MB)</span></label>
-      <p class="hint">Wird klein am Bildrand angezeigt und ersetzt dort die Text-Beschriftung - kein Vollbild-Logo.</p>
+      ${infoHtml("Wird klein am Bildrand angezeigt und ersetzt dort die Text-Beschriftung - kein Vollbild-Logo.")}
       <div id="logo-preview">${c.hasLogo ? `<img src="${DEMO && MOCK.logoDataUrl ? MOCK.logoDataUrl : `${CONFIG.mount}/api/logo?t=${Date.now()}`}" alt="Ihr Logo" style="width:64px;height:64px;object-fit:contain;background:var(--wash);border-radius:2px">` : ""}</div>
       <input type="file" id="f-logo" accept="image/png,image/jpeg">
       <div class="actions" style="margin-top:10px">
@@ -698,7 +724,7 @@
       </div>`).join("");
     return `
       <label>Content-Säulen <span class="opt">(optional)</span></label>
-      <p class="hint">Wiederkehrende Themen, zwischen denen automatisch abgewechselt wird (z. B. "Tipps", "Hinter den Kulissen", "Kundenstimmen"). Gewicht = wie oft im Vergleich zu den anderen dran. Ohne Säulen nutzen wir einfach Ihre Beschreibung oben.</p>
+      <p class="hint">Themen, zwischen denen abgewechselt wird. Gewicht = wie oft.</p>
       <div id="pillars-list">${rows}</div>
       ${S.pillarsDraft.length < 6 ? `<button type="button" class="link" id="pillar-add">+ Säule hinzufügen</button>` : `<p class="hint">Maximal 6 Säulen.</p>`}
       ${S.aiAvailable ? `
@@ -789,7 +815,7 @@
             <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
             ${S.aiAvailable ? `<div class="website-suggest">
               <button type="button" class="btn" id="analyze-website">Vorschlag aus meiner Website holen</button>
-              <p class="hint" id="analyze-website-hint">Wir lesen einmalig Ihre Startseite und schlagen Branche, Beschreibung und Tonalität vor. Sie sehen den Vorschlag zuerst und können alles ändern.</p>
+              <p class="hint" id="analyze-website-hint">Vorschlag zum Prüfen - übernommen wird nichts von selbst.</p>
             </div>` : ""}
           </div>
           ${f("contactName", "Ihr Name", "text", { ac: "name" })}
@@ -800,7 +826,7 @@
         <div class="field">
           <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
           ${withDictate(`<textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>`)}
-          <p class="hint">Stichworte reichen. Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
+          <p class="hint">Stichworte reichen.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
           <div id="ai-suggestion" hidden></div>
         </div>
         <div class="field" id="pillars-section">${renderPillarsSection()}</div>`;
@@ -820,13 +846,13 @@
             <div class="swatches" role="group" aria-label="Vorschläge">
               ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
             </div>
-            <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Thema unten verwendet.</strong>" : ""}</p>
+            <p class="hint">Leer = Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Thema unten verwendet.</strong>" : ""}</p>
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
             ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`}
-            <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
-            <p class="hint">So ungefähr sehen Ihre Bilder aus (Beispiel, kein echtes Bild):</p>
+            <p class="hint">Leer = Ihr Firmenname.</p>
+            <p class="hint">Beispiel:</p>
             <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
               <span class="lp-headline" id="lp-headline">Ihr Beitrag</span>
               <span class="lp-watermark" id="lp-watermark">${esc(c.watermarkText || c.company || "Pipeline")}</span>
@@ -856,7 +882,7 @@
         <div class="field">
           <label for="f-pauseUntil">Pause/Urlaub bis <span class="opt">(optional)</span></label>
           <input id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}">
-          <p class="hint">In diesem Zeitraum wird für Sie nichts veröffentlicht.</p>
+          
         </div>
         <div class="grid2">
           <div class="field">
@@ -866,7 +892,7 @@
           <div class="field">
             <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
             ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`}
-            <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
+            <p class="hint">Wird berücksichtigt, nicht erzwungen.</p>
           </div>
         </div>
         <div class="field">
@@ -877,7 +903,7 @@
         <div class="field">
           <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
           ${`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`}
-          <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
+          <p class="hint">Fehlt eines, wird nicht veröffentlicht.</p>
         </div>
         <div class="field">
           <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
@@ -898,7 +924,7 @@
           <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
           <label class="check"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher und geben sie frei.</span></label>
           <label class="check"><input type="radio" name="commentAutomationMode" value="auto" ${c.commentAutomationMode === "auto" ? "checked" : ""}><span>Automatisch abschicken - Antworten werden direkt nach der Generierung veröffentlicht.</span></label>
-          <p class="hint">Gilt nur, wenn die Kommentar-Automatisierung oben eingeschaltet ist.</p>
+          
         </div>
         <div class="grid2">
           <div class="field">
@@ -973,7 +999,7 @@
           <option value="4" ${Number(c.googleReviewPostMinStars || 4) === 4 ? "selected" : ""}>Ab 4 Sternen</option>
           <option value="3" ${Number(c.googleReviewPostMinStars) === 3 ? "selected" : ""}>Ab 3 Sternen</option>
         </select>
-        <p class="hint">Ob ein Bewertungstext weiterveröffentlicht werden darf, hängt vom Einzelfall ab - das ist ein Hinweis, keine Rechtsberatung.</p>
+        ${infoHtml("Ob ein Bewertungstext weiterveröffentlicht werden darf, hängt vom Einzelfall ab - das ist ein Hinweis, keine Rechtsberatung.")}
       </div>`;
   }
 
@@ -1022,10 +1048,13 @@
           <select id="f-videoVoice" name="videoVoice">
             ${voices.map((v) => `<option value="${esc(v.id)}" ${chosenVoice === v.id ? "selected" : ""}>${esc(v.label)}</option>`).join("")}
           </select>
-          <p class="hint" id="voice-desc">${esc((voices.find((v) => v.id === chosenVoice) || {}).description || "")}</p>
           ${S.voicePreviewAvailable
-            ? `<p class="hint"><button type="button" class="link" id="voice-preview">Stimme anhören</button> <span id="voice-preview-state"></span></p>`
-            : ""}
+            ? `<div class="voice-row">
+                 <button type="button" class="btn btn-small" id="voice-preview">${icon("mic", 12)} Anhören</button>
+                 <span class="hint" id="voice-preview-state" aria-live="polite"></span>
+               </div>`
+            : `<p class="hint">Hörprobe gerade nicht verfügbar.</p>`}
+          <p class="hint" id="voice-desc">${esc((voices.find((v) => v.id === chosenVoice) || {}).description || "")}</p>
         </div>
       </div>
       <label class="check"><input type="checkbox" name="videoVoiceEnabled" ${c.videoVoiceEnabled !== false ? "checked" : ""}><span>Text im Video vorlesen lassen</span></label>
@@ -1120,7 +1149,7 @@
               <div class="field">
                 <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
                 ${withDictate(`<textarea id="f-about" name="about" placeholder="Stichworte reichen.">${esc(c.about)}</textarea>`)}
-                <p class="hint">Je konkreter, desto besser passen die Beiträge.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
+                <p class="hint">Stichworte reichen.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
                 <div id="ai-suggestion" hidden></div>
               </div>
               <div class="field">
@@ -1139,12 +1168,12 @@
                   <div class="swatches" role="group" aria-label="Vorschläge">
                     ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
                   </div>
-                  <p class="hint">Bestimmt den Hintergrund Ihrer generierten Bilder. Leer lassen für unser Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Farbthema verwendet.</strong>" : ""}</p>
+                  <p class="hint">Leer = Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Farbthema verwendet.</strong>" : ""}</p>
                 </div>
                 <div class="field">
                   <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
                   ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`}
-                  <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
+                  <p class="hint">Leer = Ihr Firmenname.</p>
                   <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
                     <span class="lp-headline" id="lp-headline" style="font-family:'${esc(fontOption(c.fontChoice).cssFamily)}'">Ihr Beitrag</span>
                     <span class="lp-watermark" id="lp-watermark" style="font-family:'${esc(fontOption(c.fontChoice).cssFamily)}'">${esc(c.watermarkText || c.company || "Pipeline")}</span>
@@ -1162,7 +1191,7 @@
                         <input type="text" value="${esc(c.gradientColor2 || "")}" placeholder="Wählen" readonly aria-hidden="true" tabindex="-1">
                       </div>
                       <div class="swatches" id="gradient-suggestions" role="group" aria-label="Passende Verlauf-Vorschläge"></div>
-                      <p class="hint">Automatische Vorschläge passend zu Ihrer Akzentfarbe - oder frei wählen.</p>
+                      <p class="hint">Vorschläge zur Akzentfarbe.</p>
                     </div>
                     <div class="field">
                       <label for="f-gradientDirection">Richtung</label>
@@ -1179,7 +1208,7 @@
                 <select id="f-fontChoice" name="fontChoice">
                   ${FONT_OPTIONS.map((f) => `<option value="${f.id}" ${(c.fontChoice || "inter") === f.id ? "selected" : ""}>${esc(f.label)} — ${esc(f.styleNote)}</option>`).join("")}
                 </select>
-                <p class="hint">Gilt für Headline, Wasserzeichen und Karussell-Texte. Vorschau oben im Kasten rechts.</p>
+                <p class="hint">Gilt für alle Texte im Bild.</p>
               </div>
               <div class="field" id="themes-section">${themesSectionHtml(c)}</div>
               <div class="field" id="logo-section">${logoSectionHtml(c)}</div>`)}
@@ -1204,7 +1233,7 @@
               <div class="field" style="margin-top:22px">
                 <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
                 ${`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`}
-                <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
+                <p class="hint">Fehlt eines, wird nicht veröffentlicht.</p>
               </div>
               <div class="field">
                 <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
@@ -1214,7 +1243,7 @@
               <div class="field">
                 <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
                 ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`}
-                <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
+                <p class="hint">Wird berücksichtigt, nicht erzwungen.</p>
               </div>`)}
 
             ${group("kanaele", "Wo und wann veröffentlicht wird.", `
@@ -1262,7 +1291,7 @@
               <div class="field">
                 <label for="f-pauseUntil">Pause/Urlaub bis <span class="opt">(optional)</span></label>
                 <input id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}">
-                <p class="hint">In diesem Zeitraum wird für Sie nichts veröffentlicht.</p>
+                
               </div>
               <div class="field">
                 <label>Posting vorübergehend anhalten</label>
@@ -1305,13 +1334,13 @@
             <h3 style="margin-bottom:6px">Status</h3>
             <p class="hint" style="margin:0 0 22px">${esc(trialLine)}</p>
             <h3 style="margin-bottom:6px">Zugang auf anderen Geräten</h3>
-            <p class="hint" style="margin:0 0 10px">Auf diesem Gerät bleiben Sie angemeldet. Für ein anderes Gerät erzeugen Sie einen persönlichen Link - behandeln Sie ihn wie ein Passwort, ein neuer Link ersetzt den alten.</p>
+            <p class="hint" style="margin:0 0 10px">Für ein anderes Gerät: persönlicher Link, wie ein Passwort behandeln.</p>
             <div id="linkbox"><button type="button" class="link" id="mklink">Persönlichen Link erzeugen</button></div>
             <div class="actions" style="margin-top:16px">
               <button type="button" class="link" id="logout">Abmelden</button>
               <button type="button" class="link" id="delete-account" style="color:var(--stop)">Konto und Daten löschen</button>
             </div>
-            <p class="hint">Löschen entfernt Angaben, verbundene Kanäle und den Beitrags-Verlauf endgültig.</p>`)}
+            <p class="hint">Endgültig - Angaben, Kanäle und Verlauf.</p>`)}
           <p class="set-noresult" id="set-noresult" hidden>Dazu gibt es keine Einstellung. Versuchen Sie es mit einem anderen Wort - oder fragen Sie im Hilfe-Chat unten rechts.</p>
         </div>
       </div>`;
@@ -1948,6 +1977,22 @@
   }
 
   /** Beitragskachel fürs Bildraster - die Bilder sind die einzige Farbe im Panel, also gross. */
+  /** B4: In der Liste steht nur der Anfang des Textes - der volle Text ist einen Tipp entfernt.
+   *  Hashtags wandern hinter einen Zaehler: sie machten am Handy den Grossteil der Scrollhoehe aus,
+   *  ohne beim Ueberblick zu helfen. */
+  function captionBlockHtml(caption) {
+    if (!caption) return "";
+    const tags = caption.match(/#[\p{L}\p{N}_]+/gu) || [];
+    const text = caption.replace(/(\s*#[\p{L}\p{N}_]+)+\s*$/u, "").trim() || caption.trim();
+    const long = text.length > 140;
+    return `<div class="caption">
+      <p class="prose${long ? " is-clamped" : ""}">${esc(text)}</p>
+      ${long ? `<button type="button" class="link caption-more" data-caption-more>Mehr anzeigen</button>` : ""}
+      ${tags.length ? `<button type="button" class="link caption-tags" data-caption-tags>${tags.length} Hashtag${tags.length === 1 ? "" : "s"} anzeigen</button>
+      <p class="caption-taglist" hidden>${esc(tags.join(" "))}</p>` : ""}
+    </div>`;
+  }
+
   function postTileHtml(p) {
     const label = p.headline || CHANNEL_BADGE_LABEL[p.provider] || "Beitrag";
     return `<button type="button" class="post-tile" data-lightbox="${esc(p.imageUrl || "")}" aria-label="${esc(label)}">
@@ -2062,7 +2107,7 @@
         ${isCarousel ? `<span class="channel-badge">Karussell</span>` : ""}
         <p class="hint" style="margin:2px 0 10px">${context}</p>
         ${a.headline ? `<strong>${esc(a.headline)}</strong>` : ""}
-        ${a.caption ? `<p>${esc(a.caption)}</p>` : ""}
+        ${a.caption ? captionBlockHtml(a.caption) : ""}
         <div class="actions">
           <button class="btn" data-approve="${esc(a.id)}">Freigeben</button>
           <button class="link" data-reject="${esc(a.id)}">Ablehnen</button>
@@ -2396,7 +2441,7 @@
         <p class="small" style="margin:var(--s2) 0 var(--s4)">${statusNote}</p>
 
         ${p.headline ? `<h2 style="margin-bottom:var(--s2)">${esc(p.headline)}</h2>` : ""}
-        ${p.caption && p.channel !== "ig_story" ? `<p class="prose">${esc(p.caption)}</p>` : ""}
+        ${p.caption && p.channel !== "ig_story" ? captionBlockHtml(p.caption) : ""}
 
         ${editable ? `
         <details class="pp-edit">
@@ -3303,7 +3348,9 @@
     box.scrollTop = box.scrollHeight;
   }
 
-  const CHAT_STARTERS = ["Wie ändere ich meine Farbe?", "Was bedeutet Freigabe-Modus?", "Wie verbinde ich Instagram?"];
+  // Zwei Startfragen statt drei: auf der kleinen Flaeche des Sheets konkurrierten sie mit dem
+  // Eingabefeld, und wer eine eigene Frage hat, tippt sie ohnehin.
+  const CHAT_STARTERS = ["Was bedeutet Freigabe-Modus?", "Wie verbinde ich Instagram?"];
 
   function openHelpChat() {
     helpChat.open = true;
@@ -3387,6 +3434,23 @@
     if (e.target.closest("[data-restart-tour]")) { toggleAcctMenu(false); S.tourIndex = 0; renderTour(); return; }
     if (e.target.closest("[data-reload]")) { render(false); return; }
 
+    const capMore = e.target.closest("[data-caption-more]");
+    if (capMore) {
+      const box = capMore.closest(".caption");
+      const p = box?.querySelector(".prose");
+      const open = p?.classList.toggle("is-clamped") === false;
+      capMore.textContent = open ? "Weniger anzeigen" : "Mehr anzeigen";
+      return;
+    }
+    const capTags = e.target.closest("[data-caption-tags]");
+    if (capTags) {
+      const list = capTags.closest(".caption")?.querySelector(".caption-taglist");
+      if (list) {
+        list.hidden = !list.hidden;
+        capTags.textContent = list.hidden ? capTags.textContent.replace("verbergen", "anzeigen") : capTags.textContent.replace("anzeigen", "verbergen");
+      }
+      return;
+    }
     const dictateBtn = e.target.closest("[data-dictate]");
     if (dictateBtn) { toggleDictation(dictateBtn); return; }
     const tile = e.target.closest(".post-tile");
