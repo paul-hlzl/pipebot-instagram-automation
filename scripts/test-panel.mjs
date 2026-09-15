@@ -1491,7 +1491,15 @@ async function main() {
       `status=${res.status}`,
     );
     ok("/datenschutz ist nie leer", text.length > 80, `${text.length} Zeichen`);
-    if (res.status === 503) console.log("  hinweis - assets/datenschutz.html fehlt noch, Seite erklärt das dem Besucher");
+    if (res.status === 200) {
+      // Inhaltliche Mindestpruefung: die Meta-App-Review sucht per Strg+F nach einem
+      // Loesch-Abschnitt, und ohne Verantwortlichen ist die Erklaerung wertlos.
+      ok("/datenschutz nennt einen Abschnitt zum Löschen", /Daten löschen/i.test(text));
+      ok("/datenschutz nennt den Verantwortlichen", /Verantwortlicher/i.test(text));
+      ok("/datenschutz nennt die Aufsichtsbehörde", /Datenschutzbehörde/i.test(text));
+    } else {
+      console.log("  hinweis - assets/datenschutz.html fehlt noch, Seite erklärt das dem Besucher");
+    }
   }
 
   console.log("\nSecurity-Header:");

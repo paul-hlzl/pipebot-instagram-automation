@@ -1,0 +1,264 @@
+<!doctype html>
+<!--
+  ============================================================================================
+  ENTWURF IN FERTIGER FORM - VOR ENDGÜLTIGER VERWENDUNG ANWALTLICH PRÜFEN LASSEN.
+
+  Erstellt am 15.09.2026 aus dem Arbeitsentwurf docs/DATENSCHUTZ_ENTWURF.md und einer
+  Code-Inventur des tatsächlichen Systemverhaltens (welche Dienste angebunden sind, was
+  gespeichert wird, was bei einer Kontolöschung passiert). Das ist eine fachliche
+  Arbeitsgrundlage, KEINE Rechtsberatung und KEIN geprüfter Text.
+
+  Vor der endgültigen Verwendung zwingend:
+    1. Anwaltliche bzw. WKO-Prüfung des gesamten Textes.
+    2. Die mit [BITTE BESTÄTIGEN] markierten Angaben ausfüllen/bestätigen.
+    3. Nach der OG-Gründung: Abschnitt 1 (Verantwortlicher) auf die OG umstellen -
+       Firmenname, Rechtsform, Firmenbuchnummer, Gesellschafter, Anschrift.
+  ============================================================================================
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="theme-color" content="#FFFFFF">
+<title>Datenschutzerklärung – Pipeflow</title>
+<link rel="preload" href="fonts/SchibstedGrotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("fonts/SchibstedGrotesk-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+:root {
+  --paper: #FFFFFF; --ink: #000000; --stone: #666666; --rule: #E3E3E3; --wash: #F5F5F5;
+  --warn-bg: #FDF2E0; --warn-line: #E8C468;
+  --t-h1: clamp(23px, 4.5vw, 32px); --t-h2: 19px; --t-body: 16px; --t-small: 14px; --t-micro: 12px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+  --r1: 8px; --r2: 12px;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--t-body); line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+.seite { max-width: 68ch; margin: 0 auto; padding: var(--s6) var(--s4) var(--s8); }
+@media (min-width: 768px) { .seite { padding: var(--s8) var(--s6); } }
+header.kopf { border-bottom: 1px solid var(--rule); margin-bottom: var(--s6); padding-bottom: var(--s5); }
+.marke { display: flex; align-items: center; gap: var(--s2); font-weight: 700; letter-spacing: -.02em; }
+h1 { font-size: var(--t-h1); font-weight: 700; letter-spacing: -.02em; line-height: 1.18; margin: var(--s4) 0 var(--s2); text-wrap: balance; }
+h2 { font-size: var(--t-h2); font-weight: 700; letter-spacing: -.02em; line-height: 1.25; margin: var(--s7) 0 var(--s3); text-wrap: balance; }
+h3 { font-size: var(--t-body); font-weight: 700; margin: var(--s5) 0 var(--s2); }
+p, li { text-wrap: pretty; }
+p { margin: 0 0 var(--s4); }
+ul { margin: 0 0 var(--s4); padding-left: var(--s5); }
+li { margin-bottom: var(--s2); }
+a { color: inherit; text-underline-offset: 3px; }
+.stand { color: var(--stone); font-size: var(--t-small); margin-bottom: 0; }
+.hinweis {
+  background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: var(--r1);
+  padding: var(--s4); font-size: var(--t-small); margin: var(--s5) 0;
+}
+.platzhalter { background: var(--wash); border-radius: 3px; padding: 1px 6px; font-size: var(--t-small); }
+table { width: 100%; border-collapse: collapse; font-size: var(--t-small); margin: 0 0 var(--s4); display: block; overflow-x: auto; }
+thead { white-space: nowrap; }
+th, td { text-align: left; padding: var(--s2) var(--s3) var(--s2) 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 500; color: var(--stone); }
+footer.fuss { border-top: 1px solid var(--rule); margin-top: var(--s8); padding-top: var(--s5); font-size: var(--t-small); color: var(--stone); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="seite">
+
+<header class="kopf">
+  <div class="marke">
+    <svg width="20" height="20" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">
+      <rect x="0" y="0" width="3" height="3"/><rect x="3" y="1" width="5" height="1"/><rect x="8" y="0" width="3" height="3"/>
+      <rect x="9" y="3" width="1" height="5"/><rect x="8" y="8" width="3" height="3"/><rect x="3" y="9" width="5" height="1"/><rect x="0" y="8" width="3" height="3"/>
+    </svg>
+    Pipeflow
+  </div>
+  <h1>Datenschutzerklärung</h1>
+  <p class="stand">Stand: 15. September 2026</p>
+</header>
+
+<p>Pipeflow erstellt und veröffentlicht automatisiert Social-Media-Beiträge im Auftrag seiner
+Kundinnen und Kunden. Diese Erklärung beschreibt, welche Daten dabei verarbeitet werden, warum,
+von wem und wie lange – und wie Sie Ihre Daten jederzeit wieder loswerden.</p>
+
+<h2>1. Verantwortlicher</h2>
+<p>
+  Paul Hölzl, Einzelunternehmen (Pipeline AI Solutions)<br>
+  <span class="platzhalter">[BITTE BESTÄTIGEN: vollständige Firmenanschrift]</span><br>
+  <span class="platzhalter">[BITTE BESTÄTIGEN: Gewerbewortlaut / GISA-Zahl, falls anzugeben]</span><br>
+  E-Mail: <a href="mailto:office@pipebot.at">office@pipebot.at</a>
+</p>
+<p>Ein Datenschutzbeauftragter ist nicht bestellt; eine Bestellpflicht nach Art. 37 DSGVO besteht
+nach derzeitiger Einschätzung nicht.</p>
+
+<h2>2. Welche Daten wir verarbeiten</h2>
+<h3>Angaben, die Sie selbst eingeben</h3>
+<ul>
+  <li><strong>Stammdaten:</strong> Firmenname, Name der Ansprechperson, E-Mail-Adresse, optional Website und Branche.</li>
+  <li><strong>Briefing:</strong> Beschreibung Ihres Unternehmens und Ihrer Themen, Content-Säulen, Tonalität,
+      Sprache, zu vermeidende Themen, verbotene Wörter, Pflichtelemente, bevorzugter Handlungsaufruf.</li>
+  <li><strong>Gestaltung:</strong> Akzentfarbe, Farbverlauf, Schriftwahl, Beschriftung im Bild, optional ein Logo.</li>
+  <li><strong>Zeitplan:</strong> Wochentage und Uhrzeiten je Kanal, Pausen-/Urlaubszeiträume, Freigabe-Modus.</li>
+</ul>
+<h3>Angaben, die beim Betrieb entstehen</h3>
+<ul>
+  <li><strong>Zugangstoken</strong> für die von Ihnen selbst verbundenen Instagram-, LinkedIn- bzw.
+      Google-Unternehmensprofil-Konten. Diese werden <strong>verschlüsselt</strong> (AES-256-GCM) gespeichert, nie im Klartext.</li>
+  <li><strong>Generierte Beitragsinhalte:</strong> Überschriften, Beitragstexte, erzeugte Bilder und – sofern genutzt –
+      Video-Diashows samt Sprachausgabe.</li>
+  <li><strong>Veröffentlichungsverlauf:</strong> Kanal, Zeitpunkt, Text und Bild der veröffentlichten Beiträge.</li>
+  <li><strong>Analytics-Kennzahlen:</strong> täglich abgerufene Reichweiten-, Follower- und Interaktionszahlen
+      Ihres verbundenen Kontos sowie Kennzahlen je Beitrag.</li>
+  <li><strong>Kommentarinhalte:</strong> bei eingeschalteter Kommentar-Automatik der Text eingehender Instagram-Kommentare,
+      der Name bzw. Benutzername der kommentierenden Person und die generierte Antwort.</li>
+  <li><strong>Bewertungsinhalte:</strong> bei eingeschalteter Bewertungs-Automatik Text, Sternezahl und Name aus
+      Google-Unternehmensprofil-Bewertungen sowie die generierte Antwort.</li>
+  <li><strong>Sprachaufnahmen:</strong> wenn Sie die Diktierfunktion nutzen, wird Ihre Aufnahme zur Umwandlung in Text
+      kurzzeitig hochgeladen (siehe Abschnitt 4) und unmittelbar danach gelöscht.</li>
+  <li><strong>Kostenprotokoll:</strong> je KI-Aufruf eine Zeile mit Funktion, Zeitpunkt und geschätzten Kosten –
+      zur internen Abrechnungskontrolle, ohne Inhalte.</li>
+  <li><strong>Technische Daten:</strong> ein gehashter Sitzungs-Token als Cookie, Zeitpunkte von Zustimmung,
+      Kontoerstellung und Änderungen, Server-Logs mit IP-Adresse beim Abruf.</li>
+</ul>
+<p>Besondere Kategorien personenbezogener Daten nach Art. 9 DSGVO verarbeiten wir nicht. Das Angebot
+richtet sich an Unternehmen, nicht an Kinder.</p>
+
+<h2>3. Zwecke und Rechtsgrundlagen</h2>
+<table>
+  <thead><tr><th>Zweck</th><th>Rechtsgrundlage</th></tr></thead>
+  <tbody>
+    <tr><td>Konto führen, Beiträge erstellen und auf Ihren Kanälen veröffentlichen</td><td>Vertragserfüllung, Art. 6 Abs. 1 lit. b DSGVO</td></tr>
+    <tr><td>Verbinden Ihrer Social-Media-Konten und Veröffentlichen in Ihrem Namen</td><td>Ausdrückliche Einwilligung bei der Registrierung, Art. 6 Abs. 1 lit. a DSGVO</td></tr>
+    <tr><td>Kommentar- und Bewertungs-Automatik (nur wenn eingeschaltet)</td><td>Einwilligung, Art. 6 Abs. 1 lit. a DSGVO</td></tr>
+    <tr><td>Analytics-Kennzahlen abrufen und anzeigen</td><td>Vertragserfüllung, Art. 6 Abs. 1 lit. b DSGVO</td></tr>
+    <tr><td>Benachrichtigungen per E-Mail (Freigaben, Wochenbericht, Ablaufwarnungen)</td><td>Vertragserfüllung bzw. Einwilligung bei optionalen Berichten</td></tr>
+    <tr><td>Betriebssicherheit, Missbrauchsabwehr, Fehlersuche (Logs, Rate-Limits, Bot-Schutz)</td><td>Berechtigtes Interesse, Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+    <tr><td>Kostenprotokoll zur Abrechnungskontrolle</td><td>Berechtigtes Interesse, Art. 6 Abs. 1 lit. f DSGVO</td></tr>
+  </tbody>
+</table>
+<p>Eine erteilte Einwilligung können Sie jederzeit mit Wirkung für die Zukunft widerrufen – im Panel
+durch Trennen des jeweiligen Kanals, durch Abschalten der Automatik oder durch Löschen des Kontos.</p>
+
+<h2>4. Eingesetzte Dienstleister</h2>
+<p>Zur Erbringung der Leistung binden wir die folgenden Dienste ein. Sie erhalten jeweils nur die
+Daten, die für ihren Zweck nötig sind.</p>
+<table>
+  <thead><tr><th>Dienst</th><th>Wofür</th><th>Sitz / Verarbeitung</th></tr></thead>
+  <tbody>
+    <tr><td>Anthropic PBC</td><td>Erzeugen von Beitragstexten, Ideen, Kommentar- und Bewertungsantworten, Video-Drehbüchern, Hilfe-Chat</td><td>USA</td></tr>
+    <tr><td>fal.ai (Features and Labels, Inc.)</td><td>Erzeugen der Beitragsbilder; Umwandlung von Sprachaufnahmen in Text (Diktierfunktion)</td><td>USA</td></tr>
+    <tr><td>Google Ireland Ltd. / Google LLC</td><td>Sprachausgabe für Video-Diashows (Cloud Text-to-Speech); Google-Unternehmensprofil (Bewertungen), sofern verbunden</td><td>EU und USA</td></tr>
+    <tr><td>Cloudflare, Inc.</td><td>Speicherung der erzeugten Bilder und Videos (R2), damit die Plattformen sie abrufen können; Bot-Schutz im Registrierungsformular (Turnstile)</td><td>EU/weltweit, Unternehmenssitz USA</td></tr>
+    <tr><td>Meta Platforms Ireland Ltd.</td><td>Veröffentlichen auf Instagram, Abruf von Kennzahlen und Kommentaren</td><td>EU (Irland), Konzern USA</td></tr>
+    <tr><td>LinkedIn Ireland Unlimited Company</td><td>Veröffentlichen auf LinkedIn</td><td>EU (Irland), Konzern USA</td></tr>
+    <tr><td>Hetzner Online GmbH</td><td>Server-Hosting (Anwendung und Datenbank)</td><td>Deutschland</td></tr>
+    <tr><td>Hostinger International Ltd.</td><td>E-Mail-Versand (SMTP)</td><td>EU (Litauen/Zypern)</td></tr>
+  </tbody>
+</table>
+<div class="hinweis">
+  <strong>Bot-Schutz im Registrierungsformular:</strong> Beim Anlegen eines Kontos wird Cloudflare Turnstile
+  geladen. Dabei wird Ihre IP-Adresse an Cloudflare übermittelt. Das Panel selbst lädt darüber hinaus
+  <strong>keine</strong> Inhalte von Dritten – Schriften und Symbole liegen auf unserem eigenen Server, es gibt
+  keine Tracking-Skripte und keine Werbe-Netzwerke.
+</div>
+
+<h2>5. Übermittlung in Drittländer</h2>
+<p>Anthropic und fal.ai verarbeiten in den USA. Google, Cloudflare, Meta und LinkedIn können Daten
+innerhalb ihrer Konzernstrukturen ebenfalls in die USA übermitteln. Grundlage dafür sind die
+Standardvertragsklauseln der EU-Kommission nach Art. 46 Abs. 2 lit. c DSGVO bzw. – soweit der Anbieter
+zertifiziert ist – der EU-US Data Privacy Framework-Angemessenheitsbeschluss.
+<span class="platzhalter">[BITTE BESTÄTIGEN: für jeden Anbieter den tatsächlich vorliegenden Auftragsverarbeitungsvertrag
+und die jeweilige Drittland-Grundlage prüfen und hier konkret benennen]</span></p>
+
+<h2>6. Speicherdauer</h2>
+<p>Die folgenden Angaben beschreiben das tatsächliche Verhalten des Systems.</p>
+<table>
+  <thead><tr><th>Datenart</th><th>Aufbewahrung</th></tr></thead>
+  <tbody>
+    <tr><td>Stammdaten, Briefing, Gestaltung, Zeitplan</td><td>bis zur Löschung des Kontos</td></tr>
+    <tr><td>Zugangstoken der verbundenen Kanäle</td><td>bis zum Trennen des Kanals oder zur Löschung des Kontos</td></tr>
+    <tr><td>Veröffentlichungsverlauf, geplante Beiträge, Freigaben</td><td>bis zur Löschung des Kontos</td></tr>
+    <tr><td>Analytics-Kennzahlen (tägliche Momentaufnahmen)</td><td>bis zur Löschung des Kontos; eine zeitliche Begrenzung ist derzeit nicht eingerichtet</td></tr>
+    <tr><td>Kommentar- und Bewertungsdaten</td><td>bis zur Löschung des Kontos</td></tr>
+    <tr><td>Kostenprotokoll</td><td>bis zur Löschung des Kontos</td></tr>
+    <tr><td>Sprachaufnahmen der Diktierfunktion</td><td>unmittelbar nach der Umwandlung in Text gelöscht, in der Regel innerhalb von Sekunden</td></tr>
+    <tr><td>Sitzungs-Cookie</td><td>90 Tage, danach ist eine erneute Anmeldung nötig</td></tr>
+    <tr><td>Erzeugte Bilder und Videos im Speicher (Cloudflare R2)</td><td>bleiben derzeit auch nach einer Kontolöschung gespeichert; eine Bereinigung ist in Vorbereitung – auf Anfrage löschen wir sie sofort</td></tr>
+    <tr><td>Server-Logs</td><td><span class="platzhalter">[BITTE BESTÄTIGEN: Aufbewahrungsdauer der Server-/Webserver-Logs]</span></td></tr>
+  </tbody>
+</table>
+<p>Eine maximale Aufbewahrungsdauer für inaktive, nicht gelöschte Konten ist derzeit nicht festgelegt.
+<span class="platzhalter">[BITTE BESTÄTIGEN: Frist festlegen, z. B. Löschung 24 Monate nach Vertragsende]</span></p>
+
+<h2>7. Daten löschen</h2>
+<p>Sie können Ihr Konto jederzeit selbst und vollständig löschen: im Panel unter
+<strong>Einstellungen → Konto → „Konto und Daten löschen“</strong>. Die Löschung erfolgt sofort und
+unwiderruflich. Entfernt werden dabei:</p>
+<ul>
+  <li>Stammdaten, Briefing, Gestaltung und Zeitplan,</li>
+  <li>alle Zugangstoken der verbundenen Kanäle (die Verbindungen enden damit),</li>
+  <li>der Veröffentlichungsverlauf, geplante Beiträge und offene Freigaben,</li>
+  <li>Analytics-Kennzahlen und gespeicherte Auswertungen,</li>
+  <li>Kommentar- und Bewertungsdatensätze, Content-Säulen, Farbthemen, Sitzungen und das Kostenprotokoll,</li>
+  <li>ein hochgeladenes Logo.</li>
+</ul>
+<p>Bereits auf Instagram oder LinkedIn veröffentlichte Beiträge bleiben dort bestehen – diese Konten
+gehören Ihnen und werden von der Löschung bei uns nicht berührt. Sie können solche Beiträge direkt
+auf der jeweiligen Plattform entfernen. Die im Zwischenspeicher (Cloudflare R2) liegenden Bild- und
+Videodateien werden derzeit nicht automatisch mitgelöscht; auf Anfrage an
+<a href="mailto:office@pipebot.at">office@pipebot.at</a> entfernen wir sie unverzüglich.</p>
+<p>Alternativ genügt eine formlose Nachricht an
+<a href="mailto:office@pipebot.at">office@pipebot.at</a> – wir löschen Ihr Konto dann für Sie.</p>
+
+<h2>8. Ihre Rechte</h2>
+<ul>
+  <li><strong>Auskunft</strong> über die zu Ihnen gespeicherten Daten (Art. 15 DSGVO),</li>
+  <li><strong>Berichtigung</strong> unrichtiger Daten (Art. 16 DSGVO),</li>
+  <li><strong>Löschung</strong> (Art. 17 DSGVO, siehe Abschnitt 7),</li>
+  <li><strong>Einschränkung</strong> der Verarbeitung (Art. 18 DSGVO),</li>
+  <li><strong>Datenübertragbarkeit</strong> in einem gängigen Format (Art. 20 DSGVO),</li>
+  <li><strong>Widerspruch</strong> gegen Verarbeitungen auf Grundlage berechtigter Interessen (Art. 21 DSGVO),</li>
+  <li><strong>Widerruf</strong> erteilter Einwilligungen mit Wirkung für die Zukunft (Art. 7 Abs. 3 DSGVO).</li>
+</ul>
+<p>Wenden Sie sich dafür an <a href="mailto:office@pipebot.at">office@pipebot.at</a>. Unabhängig davon
+können Sie sich bei einer Aufsichtsbehörde beschweren – in Österreich bei der
+Österreichischen Datenschutzbehörde, Barichgasse 40–42, 1030 Wien,
+<a href="https://www.dsb.gv.at" rel="noopener">dsb.gv.at</a>.</p>
+
+<h2>9. Datensicherheit</h2>
+<ul>
+  <li>Zugangstoken verbundener Konten werden mit AES-256-GCM verschlüsselt gespeichert.</li>
+  <li>Der Zugriff auf das Panel erfolgt ausschließlich über HTTPS; Sitzungs-Cookies sind <code>HttpOnly</code>,
+      <code>Secure</code> und <code>SameSite=Lax</code> gesetzt.</li>
+  <li>Der Verwaltungsbereich ist durch ein eigenes Passwort mit Sperre gegen automatisiertes Ausprobieren geschützt.</li>
+  <li>Die Anmeldung über persönliche Zugangslinks ist auf 20 Versuche je Stunde begrenzt; ein neu erzeugter
+      Link entwertet den vorherigen.</li>
+  <li>Eine strenge Content-Security-Policy verhindert das Nachladen fremder Inhalte im Panel.</li>
+</ul>
+
+<h2>10. Cookies</h2>
+<p>Wir setzen ausschließlich ein technisch notwendiges Sitzungs-Cookie, das Sie nach der Anmeldung
+eingeloggt hält. Es dient keiner Analyse und keinem Marketing. Cloudflare Turnstile kann im
+Registrierungsformular ein eigenes technisch notwendiges Cookie setzen.</p>
+
+<h2>11. Änderungen dieser Erklärung</h2>
+<p>Wenn sich Funktionen oder eingesetzte Dienste ändern, passen wir diese Erklärung an. Es gilt jeweils
+die hier veröffentlichte Fassung; das Datum oben zeigt den Stand.</p>
+
+<footer class="fuss">
+  <p>Pipeflow ist ein Produkt von Paul Hölzl (Pipeline AI Solutions).
+  Fragen zum Datenschutz: <a href="mailto:office@pipebot.at">office@pipebot.at</a></p>
+</footer>
+
+</div>
+</body>
+</html>

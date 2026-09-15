@@ -1,14 +1,17 @@
 # Datenschutzerklärung - ENTWURF
 
-> **⚠️ ENTWURF - NICHT VERÖFFENTLICHEN.** Dieser Text ist eine fachliche Arbeitsgrundlage,
-> basierend auf dem, was der Code des Kunden-Panels tatsächlich speichert und verarbeitet
-> (Stand dieser Sitzung, Branch `panel-v3`). Er ersetzt KEINE rechtliche Prüfung. Vor
-> Veröffentlichung: von einem/einer Juristen/Juristin (Datenschutzrecht/DSGVO) prüfen und
-> freigeben lassen, Platzhalter (Firmenanschrift, Verantwortlicher, ggf. Auftragsverarbeiter-
-> Verträge) ausfüllen bzw. bestätigen. Bis dahin ist dieses Dokument nirgends verlinkt und wird
-> es von mir aus auch nicht.
+> **Stand 15.09.2026: Dieser Arbeitsentwurf wurde zu `assets/datenschutz.html` ausgebaut und ist
+> unter https://mcp.pipebot.at/panel/datenschutz live.** Er stammt aus der Zeit von `panel-v3` und
+> ist inhaltlich überholt (es fehlten u. a. Google Text-to-Speech, Cloudflare Turnstile, Hostinger,
+> Hetzner, Kommentar- und Bewertungsdaten, Analytics-Momentaufnahmen, Sprachaufnahmen und das
+> Kostenprotokoll). Änderungen bitte direkt in `assets/datenschutz.html` vornehmen - diese Datei
+> bleibt nur als Ursprungsdokument erhalten.
+>
+> **Die ausgelieferte Fassung ist weiterhin ein Entwurf in fertiger Form und vor endgültiger
+> Verwendung anwaltlich bzw. über die WKO zu prüfen.**
 
 ---
+
 
 ## 1. Verantwortlicher
 
