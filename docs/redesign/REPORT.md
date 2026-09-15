@@ -1,7 +1,9 @@
 # Abschlussbericht — Panel-Redesign „Flow"
 
-Stand: 15.09.2026 · Branch `panel-redesign` · Rollback-Tag `pre-redesign`
-**Produktion ist unverändert.** `public/panel/index.html` ist byte-identisch (md5 `089c8228…`).
+Stand: 15.09.2026 · in `main` · Rollback-Tags `pre-flow-live` (Stand vor dem Livegang) und `pre-redesign`
+**Seit 15.09.2026, 13:45 Uhr ist das neue Panel live** unter https://mcp.pipebot.at/panel/
+(`public/panel/index.html`, md5 `653e985c…`). Alles bis dahin Beschriebene entstand in der Sandbox,
+Produktion blieb während der gesamten Bauzeit unangetastet. Rollback siehe Abschnitt 6.
 
 ---
 
@@ -223,7 +225,8 @@ melden. Empfehlung für die nächste Runde: Feld auch im deaktivierten Zustand m
 | `node scripts/redesign-check.mjs` | kein horizontales Scrollen bei 390 und 1440, **keine Konsolenfehler** |
 | `npm run test:onboarding` (neu) | **62/62** — Vorschau wächst mit (Firma, Branche, Beschreibung, Säule, Farbe, Hashtags, Emojis, Aufruf, Kanal), Platzhalter statt erfundenem Text, Website-Vorschlag als Knopf mit Erklärung und Prüfschritt, kein horizontales Scrollen, axe ohne kritische/ernste Verstöße |
 | `npm run test:admin` (neu) | **41/41** — Anmeldung (richtig/falsch), Statussatz, Kundenliste, Detail-Dialog mit Escape und Fokus-Rückgabe, eigener Eingabedialog statt `window.prompt`, kein horizontales Scrollen, axe ohne kritische/ernste Verstöße, **keine externen Anfragen** |
-| Produktion unverändert | `md5sum public/panel/index.html` = `089c8228…`, `public/panel/admin.html` = `10c4a76d…` (beide wie bei `pre-redesign`) |
+| `node scripts/live-smoke.mjs` (nach dem Livegang) | **13/13** — alle Dateien 200 (`index.html`, `panel.css`, `panel.js`, `admin.html`, Manifest, Schrift, Icon, `/api/health`), Seite rendert, Schrift selbst gehostet, **keine externen Anfragen**, keine Konsolenfehler, kein horizontales Scrollen bei 390 |
+| Produktion während der Bauzeit unverändert | bis zum Livegang `md5sum public/panel/index.html` = `089c8228…` (wie bei `pre-redesign`); seither `653e985c…` |
 
 Vier Fehler haben erst diese Tests gefunden: ein Beitragsbild ohne `max-width` sprengte bei 390 px
 das Layout; der Reiterwechsel legte keinen History-Eintrag an (Zurück-Geste sprang aus dem Bereich);
@@ -237,7 +240,10 @@ das breiteste Element.
 ## 6. Schritte für Paul
 
 ### Sandbox-Adresse
-**https://mcp.pipebot.at/panel/sandbox/**
+**https://mcp.pipebot.at/panel/sandbox/** — zeigt seit dem Livegang dieselben Dateien wie
+Produktion, aber weiterhin die Staging-Datenbank. Zum gefahrlosen Durchklicken mit Testkonten ist
+sie also unverändert brauchbar; zum Bauen an einer neuen Fassung genügt künftig `PANEL_PUBLIC_DIR`
+in der Staging-Umgebung.
 
 Testkunden (echte Sandbox-Konten, keine Kundendaten):
 - Ohne Freigabe-Modus: `…/panel/sandbox/login?key=4ld5fnINw5ZeNUEjOZNhRXp-PZTxS4je`
@@ -250,6 +256,7 @@ sobald Sie es freigeben oder überspringen — zum Neuanlegen genügt ein Hinwei
 Einzeiler.
 
 ### Admin-Seite (nur für Sie)
+Live: **https://mcp.pipebot.at/panel/admin/** (echte Kunden) · Sandbox:
 **https://mcp.pipebot.at/panel/sandbox/admin/** — Passwort wie gehabt aus der `.env`. Zu sehen sind
 dort die zehn Testkunden der Staging-Datenbank, keine echten. Bitte kurz prüfen: Sagt Ihnen der
 Satz ganz oben, ob etwas zu tun ist? Und fühlt sich die Kundenliste am Handy kürzer an als vorher?
@@ -278,18 +285,31 @@ Sie zu, wie „Ihr erster Beitrag" darunter entsteht. Zwei Fragen dazu: Wird dam
 Angaben gut sind? Und ist deutlich genug, dass das ein **Beispiel** ist und nicht der fertige
 Beitrag? Vorher/Nachher: `docs/redesign/after/21-onboarding-*.png`.
 
-### Produktions-Deploy (erst nach Ihrer ausdrücklichen Freigabe)
-1. `git checkout main && git merge panel-redesign`
-2. Die Sandbox-Weiche in `src/panel/router.ts` entfernen und die neuen Dateien nach
-   `public/panel/` übernehmen (`index.html`, `panel.css`, `panel.js`, `admin.html`,
-   `manifest.webmanifest`, die drei Icons). **Achtung:** In dem Moment, in dem
-   `public/panel/index.html` ersetzt wird, ist das neue Panel live — es gibt dafür keinen
-   Deploy-Schritt.
-3. `npm run build && npm run test:panel && npm run test:admin`
-4. `pm2 restart instagram-mcp` — **nicht** zwischen :38 und :48 (stündliches Routine-Fenster).
-5. Danach `https://mcp.pipebot.at/panel/` am Handy gegenprüfen.
+### Livegang — erledigt am 15.09.2026, 13:45 Uhr (auf Ihre ausdrückliche Freigabe)
+So ist es gelaufen:
+1. Datenbank gesichert (`npm run backup:db`), Tag `pre-flow-live` auf den letzten Stand vor dem
+   Livegang gesetzt.
+2. `panel-redesign` nach `main` gemergt (Fast-Forward).
+3. Sandbox-Weiche aus `src/panel/router.ts` entfernt; die CSP verschärft — `fonts.googleapis.com`
+   und `fonts.gstatic.com` sind raus, weil nur noch das alte Panel sie brauchte. Das Panel lädt
+   damit **nichts mehr von Dritten**.
+4. `npm run build`.
+5. **Erst** `pm2 restart instagram-mcp`, **unmittelbar danach** die Dateien nach `public/panel/`
+   kopiert. Diese Reihenfolge ist wichtig: andersherum wäre das neue Panel für die Dauer des
+   Neustarts live, während der alte Prozess `panel.css`/`panel.js` noch gar nicht ausliefern kann
+   — es wäre für ein paar Sekunden kaputt gewesen. So blieb in diesen Sekunden das alte Panel voll
+   funktionsfähig.
+6. `node scripts/live-smoke.mjs` — 13/13 grün (siehe Nachweise). Danach `instagram-mcp-staging`
+   neu gestartet, damit die Sandbox dieselben Dateien zeigt, und `public/panel-redesign` gelöscht.
+
+Zum Zeitpunkt des Neustarts lief nachweislich kein Veröffentlichungslauf (0 aktive Anfragen,
+letzter Beitrag drei Stunden alt) — sonst gilt weiterhin: **nicht** zwischen :38 und :48 neu
+starten.
 
 ### Rollback
-`git checkout pre-redesign -- public/panel/ src/panel/router.ts && npm run build && pm2 restart instagram-mcp`
+`git checkout pre-flow-live -- public/panel/ src/panel/router.ts && npm run build && pm2 restart instagram-mcp`
 
-Da Produktion aktuell unverändert ist, genügt bis zum Deploy sogar: nichts tun.
+Das setzt Panel **und** Server-Code auf den Stand von vor dem Livegang zurück. `pre-redesign` zeigt
+auf denselben Stand der Panel-Dateien und bleibt als zweiter Anker bestehen. Die Datenbank ist von
+beidem nicht betroffen (kein Schema- und kein Datenänderung im Redesign); das Backup vom 15.09.
+liegt unter `/root/backups/panel/`.
