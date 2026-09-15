@@ -691,8 +691,8 @@
     stopActiveDictation(); // wird bei Hinzufuegen/Entfernen/Uebernehmen neu gerendert
     const rows = S.pillarsDraft.map((p, i) => `
       <div class="pillar-row" data-pillar-index="${i}">
-        ${withDictate(`<input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">`)}
-        ${withDictate(`<input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">`)}
+        ${`<input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">`}
+        ${`<input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">`}
         <select data-pillar-weight aria-label="Gewichtung">${[1, 2, 3, 4, 5].map((w) => `<option value="${w}" ${p.weight === w ? "selected" : ""}>${w}×</option>`).join("")}</select>
         <button type="button" class="link" data-pillar-remove="${i}">Entfernen</button>
       </div>`).join("");
@@ -706,7 +706,7 @@
       <div id="pillar-ai-block" ${S.pillarAiOpen ? "" : "hidden"}>
         <div class="field">
           <label for="f-pillar-keywords" class="vh">Stichworte für Themen-Ideen</label>
-          ${withDictate(`<input id="f-pillar-keywords" type="text" placeholder="Stichworte für Themen-Ideen (optional, z. B. Osteopressur, Faszientherapie, Mühlviertel)" maxlength="300" value="${esc(S.pillarAiKeywords)}">`)}
+          ${`<input id="f-pillar-keywords" type="text" placeholder="Stichworte für Themen-Ideen (optional, z. B. Osteopressur, Faszientherapie, Mühlviertel)" maxlength="300" value="${esc(S.pillarAiKeywords)}">`}
         </div>
         <div class="actions">
           <button type="button" class="link" id="pillar-ai-fetch">Vorschläge holen</button>
@@ -824,7 +824,7 @@
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-            ${withDictate(`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`)}
+            ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`}
             <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
             <p class="hint">So ungefähr sehen Ihre Bilder aus (Beispiel, kein echtes Bild):</p>
             <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
@@ -836,12 +836,12 @@
         ${edit ? `<div class="field" id="themes-section">${themesSectionHtml(c)}</div>` : ""}
         ${edit ? `<div class="field" id="logo-section">${logoSectionHtml(c)}</div>` : ""}
         <fieldset class="field">
-          <legend>An welchen Tagen posten - Instagram?</legend>
-          <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+          <legend>Tage für Instagram</legend>
+          <div class="daypicker" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
         </fieldset>
         <fieldset class="field">
-          <legend>An welchen Tagen posten - LinkedIn?</legend>
-          <div class="seg wd" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+          <legend>Tage für LinkedIn</legend>
+          <div class="daypicker" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
         </fieldset>
         <div class="grid2">
           <div class="field">
@@ -865,18 +865,18 @@
           </div>
           <div class="field">
             <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-            ${withDictate(`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`)}
+            ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`}
             <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
           </div>
         </div>
         <div class="field">
           <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
-          ${withDictate(`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`)}
+          ${`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`}
           <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
         </div>
         <div class="field">
           <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
-          ${withDictate(`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`)}
+          ${`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`}
           <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
         </div>
         <div class="field">
@@ -887,13 +887,13 @@
           <p class="hint">Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.</p>
         </div>
         <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben - bevor etwas online geht, prüfen Sie es im Dashboard und geben es frei.</span></label>
-        <p class="hint" style="margin:-16px 0 22px">Ohne Ihre Freigabe wird nichts veröffentlicht. Wir bereiten Beiträge vor, Sie sehen sie unter „Vorschau“ und „Warten auf Ihre Freigabe“, und geben sie frei, sobald Sie zufrieden sind - danach wird in der Regel innerhalb weniger Minuten veröffentlicht.</p>
+        <p class="hint under-check">Ohne Ihre Freigabe wird nichts veröffentlicht. Wir bereiten Beiträge vor, Sie sehen sie unter „Vorschau“ und „Warten auf Ihre Freigabe“, und geben sie frei, sobald Sie zufrieden sind - danach wird in der Regel innerhalb weniger Minuten veröffentlicht.</p>
         <label class="check"><input type="checkbox" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""}><span>Ich möchte eine E-Mail bekommen, wenn ein Beitrag veröffentlicht wird${c.approvalMode ? " (bzw. sobald ein neuer Beitrag auf meine Freigabe wartet)" : ""}.</span></label>
-        <p class="hint" style="margin:-16px 0 22px">Optional, standardmäßig aus - Sie bekommen dann bei jeder tatsächlichen Veröffentlichung sofort eine kurze E-Mail.</p>
+        <p class="hint under-check">Optional, standardmäßig aus - Sie bekommen dann bei jeder tatsächlichen Veröffentlichung sofort eine kurze E-Mail.</p>
         <label class="check"><input type="checkbox" name="notifyWeeklyReport" ${c.notifyWeeklyReport ? "checked" : ""}><span>Ich möchte einmal pro Woche einen Analytics-Bericht per E-Mail bekommen (Kennzahlen + kurze Einordnung).</span></label>
-        <p class="hint" style="margin:-16px 0 22px">Optional, standardmäßig aus - unabhängig von der Benachrichtigung oben.</p>
+        <p class="hint under-check">Optional, standardmäßig aus - unabhängig von der Benachrichtigung oben.</p>
         <label class="check"><input type="checkbox" name="commentAutomationEnabled" ${c.commentAutomationEnabled ? "checked" : ""}><span>Instagram-Kommentare automatisch mit KI beantworten.</span></label>
-        <p class="hint" style="margin:-16px 0 22px">Nur echte Fragen bekommen eine Antwort - Lob, neutrale Kommentare, Spam und Hass-Kommentare werden immer übersprungen, nie beantwortet. Standardmäßig aus.</p>
+        <p class="hint under-check">Nur echte Fragen bekommen eine Antwort - Lob, neutrale Kommentare, Spam und Hass-Kommentare werden immer übersprungen, nie beantwortet. Standardmäßig aus.</p>
         <div class="field">
           <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
           <label class="check"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher und geben sie frei.</span></label>
@@ -985,7 +985,7 @@
       ${bannerHtml()}
       ${emailVerifyBannerHtml(c)}
       <h1>Einstellungen</h1>
-      <p class="lede">Alles, was wir für Sie tun, lässt sich hier ändern - in sieben Gruppen. Wenn Sie etwas suchen, tippen Sie es einfach ein.</p>
+      <p class="lede">Sieben Gruppen. Suchen geht auch.</p>
       <div class="settings-layout" id="set-layout" data-mobile-group="${esc(S.settingsGroup || "")}">
         <aside class="set-side">
           <ul style="list-style:none;margin:0;padding:0">${SETTINGS_GROUPS.map((g) => `<li><button type="button" data-setjump="${g.id}">${esc(g.label)}</button></li>`).join("")}</ul>
@@ -1000,15 +1000,14 @@
           <button type="button" class="link set-back" data-setgroup="">Zurück zu allen Einstellungen</button>
           <div class="set-search">
             <label class="vh" for="set-search-input">Einstellung suchen</label>
-            ${withDictate(`<input id="set-search-input" type="search" placeholder="Einstellung suchen, z. B. Kommentar, Farbe, Hashtag" autocomplete="off" value="${esc(S.settingsQuery)}">`)}
-            <p class="hint" id="set-search-hint">Zeigt sofort nur die passenden Einstellungen an.</p>
+            ${`<input id="set-search-input" type="search" placeholder="Einstellung suchen" autocomplete="off" value="${esc(S.settingsQuery)}">`}
           </div>
           <form id="company" novalidate>
-            ${group("unternehmen", "Wer Sie sind und worum es in Ihren Beiträgen geht. Diese Angaben sind die Grundlage für jeden generierten Text.", `
+            ${group("unternehmen", "Die Grundlage für jeden generierten Text.", `
               <div class="grid2">
                 <div class="field">
                   <label for="f-company">Firmenname</label>
-                  ${withDictate(`<input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization">`)}
+                  ${`<input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization">`}
                 </div>
                 <div class="field">
                   <label for="f-website">Website <span class="opt">(optional)</span></label>
@@ -1017,7 +1016,7 @@
                 </div>
                 <div class="field">
                   <label for="f-contactName">Ihr Name</label>
-                  ${withDictate(`<input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name">`)}
+                  ${`<input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name">`}
                 </div>
                 <div class="field">
                   <label for="f-email">E-Mail</label>
@@ -1027,7 +1026,7 @@
               <div id="website-suggestion" hidden></div>
               <div class="field">
                 <label for="f-industry">Branche <span class="opt">(optional)</span></label>
-                ${withDictate(`<input id="f-industry" name="industry" type="text" value="${esc(c.industry)}" placeholder="z. B. Physiotherapie, Tischlerei, Steuerberatung">`)}
+                ${`<input id="f-industry" name="industry" type="text" value="${esc(c.industry)}" placeholder="z. B. Physiotherapie, Tischlerei, Steuerberatung">`}
               </div>
               <div class="field">
                 <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
@@ -1055,7 +1054,7 @@
                 </div>
                 <div class="field">
                   <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-                  ${withDictate(`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`)}
+                  ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`}
                   <p class="hint">Erscheint klein am Bildrand. Leer lassen, um Ihren Firmennamen zu verwenden.</p>
                   <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
                     <span class="lp-headline" id="lp-headline" style="font-family:'${esc(fontOption(c.fontChoice).cssFamily)}'">Ihr Beitrag</span>
@@ -1115,21 +1114,21 @@
               <label class="check"><input type="checkbox" name="emojisEnabled" ${c.emojisEnabled !== false ? "checked" : ""}><span>Emojis in Beiträgen verwenden</span></label>
               <div class="field" style="margin-top:22px">
                 <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
-                ${withDictate(`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`)}
+                ${`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`}
                 <p class="hint">Fehlt eines dieser Elemente, wird der Beitrag nicht veröffentlicht.</p>
               </div>
               <div class="field">
                 <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
-                ${withDictate(`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`)}
+                ${`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`}
                 <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
               </div>
               <div class="field">
                 <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-                ${withDictate(`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`)}
+                ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`}
                 <p class="hint">Eine Bitte an die KI - wird berücksichtigt, aber nicht hart erzwungen.</p>
               </div>`)}
 
-            ${group("kanaele", "Wo und wann veröffentlicht wird. Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.", `
+            ${group("kanaele", "Wo und wann veröffentlicht wird.", `
               <div class="field">
                 <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
                 <label class="check"><input type="checkbox" name="igFeedEnabled" ${c.igFeedEnabled !== false ? "checked" : ""}><span>Instagram Feed-Beiträge</span></label>
@@ -1149,18 +1148,18 @@
                     <option value="weekly" ${c.carouselAutoFrequency === "weekly" ? "selected" : ""}>Etwa einmal pro Woche</option>
                     <option value="always" ${c.carouselAutoFrequency === "always" ? "selected" : ""}>Immer statt Einzelbild</option>
                   </select>
-                  <p class="hint">Nur für die automatische Instagram-Feed-Routine - "Jetzt posten" wählt das Format jedes Mal einzeln.</p>
+                  <p class="hint">Bei „Jetzt posten" wählen Sie das Format jedes Mal selbst.</p>
                 </div>
               </div>
               <fieldset class="field">
-                <legend>An welchen Tagen posten - Instagram?</legend>
-                <div class="seg wd" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+                <legend>Tage für Instagram</legend>
+                <div class="daypicker" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
               </fieldset>
               <fieldset class="field">
-                <legend>An welchen Tagen posten - LinkedIn?</legend>
-                <div class="seg wd" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+                <legend>Tage für LinkedIn</legend>
+                <div class="daypicker" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
               </fieldset>
-              <span class="consequence">Jeder angehakte Tag bedeutet einen echten Beitrag, der <strong>automatisch veröffentlicht wird</strong> (bzw. auf Ihre Freigabe wartet, wenn der Freigabe-Modus an ist).</span>
+              <p class="hint">Jeder aktive Tag ergibt einen Beitrag.</p>
               <div class="grid2">
                 <div class="field">
                   <label for="f-postTime">Um wie viel Uhr?</label>
@@ -1178,7 +1177,7 @@
               </div>
               <div class="field">
                 <label>Posting vorübergehend anhalten</label>
-                <p class="hint" style="margin:0 0 10px">${c.customerPaused ? "Aktuell pausiert - es wird nichts veröffentlicht, bis Sie fortsetzen." : "Läuft. Sie können jederzeit anhalten, ohne Einstellungen zu verlieren."}</p>
+                <p class="hint" style="margin:0 0 10px">${c.customerPaused ? "Aktuell pausiert - es wird nichts veröffentlicht, bis Sie fortsetzen." : "Läuft. Anhalten geht jederzeit."}</p>
                 <button type="button" class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
               </div>`)}
 
@@ -1192,9 +1191,11 @@
                 ? `<p class="locked">Dafür fehlt der Instagram-Verbindung noch die Berechtigung zum Lesen und Beantworten von Kommentaren. <button type="button" class="link" data-go="instagram">Instagram einmal neu verbinden</button>, danach lässt sich das hier einschalten.</p>`
                 : `<span class="consequence">Nur echte Fragen bekommen eine Antwort. Lob, neutrale Kommentare, Spam und Hass-Kommentare werden <strong>immer übersprungen</strong>, nie beantwortet.</span>`}
               <div class="field">
-                <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
-                <label class="check"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher.</span></label>
-                <label class="check"><input type="radio" name="commentAutomationMode" value="auto" ${c.commentAutomationMode === "auto" ? "checked" : ""} ${igMissing ? "disabled" : ""}><span>Automatisch abschicken</span></label>
+                <label>Wie mit den Antworten umgehen?</label>
+                <div class="choices">
+                  <label class="choice"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""} ${igMissing ? "disabled" : ""}><span><strong>Erst zur Freigabe</strong><em>Sie sehen jede Antwort vorher.</em></span></label>
+                  <label class="choice"><input type="radio" name="commentAutomationMode" value="auto" ${c.commentAutomationMode === "auto" ? "checked" : ""} ${igMissing ? "disabled" : ""}><span><strong>Automatisch abschicken</strong><em>Antworten gehen sofort online.</em></span></label>
+                </div>
                 ${c.commentAutomationEnabled && c.commentAutomationMode === "auto"
                   ? `<span class="consequence" style="margin-top:10px">Aktuell automatisch: Antworten gehen <strong>sofort und ungeprüft</strong> unter Ihrem Namen online (höchstens 10 pro Stunde).</span>`
                   : ""}
@@ -2141,7 +2142,8 @@
     return `
       <div class="an-chart-wrap">
         <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}-Trend der letzten ${points.length} Tage">
-          <polyline points="${coords.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" />
+          <polyline points="${coords.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke" />
+          ${coords.map((c) => { const [x, y] = c.split(","); return `<circle cx="${x}" cy="${y}" r="3" fill="var(--ink)" vector-effect="non-scaling-stroke" />`; }).join("")}
         </svg>
         <div class="an-chart-label"><span>${esc(fmtDate(points[0].date))}</span><span>${esc(label)}</span><span>${esc(fmtDate(points[points.length - 1].date))}</span></div>
       </div>`;
@@ -2181,10 +2183,10 @@
         ${anStatHtml("Views (7 Tage)", d.current.views, anDelta(d.current.views, d.previous.views))}
         ${anStatHtml("Engagement-Rate", d.current.engagementRate != null ? `${d.current.engagementRate}%` : "–", anDelta(d.current.engagementRate, d.previous.engagementRate))}
       </div>
-      <h2>Follower-Verlauf</h2>
-      ${anChartSvg(d.trend, "followerCount", "Follower")}
-      <h2>Reichweite-Verlauf</h2>
-      ${anChartSvg(d.trend, "reach", "Reichweite")}
+      <div class="an-charts">
+        <section><h2>Follower-Verlauf</h2>${anChartSvg(d.trend, "followerCount", "Follower")}</section>
+        <section><h2>Reichweite-Verlauf</h2>${anChartSvg(d.trend, "reach", "Reichweite")}</section>
+      </div>
       <h2>Top-Beiträge (30 Tage)</h2>
       ${d.topPosts.length ? `<div class="an-top-posts">${d.topPosts.map(anTopPostHtml).join("")}</div>` : `<p class="empty">Noch keine Beiträge mit genug Daten.</p>`}
       <h2>Was bedeutet das für mich?</h2>
@@ -2310,7 +2312,7 @@
           <summary>Text bearbeiten</summary>
           <div class="field" style="margin-top:var(--s4)">
             <label for="pp-headline-${esc(p.id)}">Schlagzeile im Bild</label>
-            ${withDictate(`<input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Schlagzeile">`)}
+            ${`<input id="pp-headline-${esc(p.id)}" type="text" value="${esc(p.headline || "")}" maxlength="100" placeholder="Schlagzeile">`}
           </div>
           ${p.channel !== "ig_story" ? `<div class="field">
             <label for="pp-caption-${esc(p.id)}">Beitragstext</label>

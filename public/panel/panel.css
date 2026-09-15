@@ -295,6 +295,10 @@ input[type=password], input[type=number], textarea, select {
   transition: border-color var(--dur-1) var(--ease);
 }
 textarea { min-height: 96px; resize: vertical; }
+/* Ein Uhrzeit- oder Datumsfeld ist so breit wie sein Inhalt, nicht wie die Spalte. */
+input[type=time] { max-width: 150px; }
+input[type=date] { max-width: 190px; }
+input[type=number] { max-width: 120px; }
 input:hover, textarea:hover, select:hover { border-color: var(--stone); }
 input:focus, textarea:focus, select:focus { border-color: var(--ink); outline: none; box-shadow: 0 0 0 1px var(--ink); }
 input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--stop); }
@@ -585,14 +589,18 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .tour-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 
 /* Hilfe-Chat */
+/* Feste Groesse und flex:none - sonst zieht der Knopf sich in manchen Browsern in die Laenge.
+   Zurueckhaltend statt schwarz gefuellt: er soll nicht mit dem Inhalt konkurrieren. */
 .chat-fab {
   position: fixed; right: var(--s4); z-index: 65;
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s4));
-  width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--ink);
-  background: var(--ink); color: var(--paper); cursor: pointer;
+  flex: none; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--line-strong);
+  background: var(--paper); color: var(--ink); cursor: pointer; line-height: 0;
   display: grid; place-content: center; box-shadow: var(--shadow-menu);
-  transition: transform var(--dur-1) var(--ease);
+  transition: transform var(--dur-1) var(--ease), background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
+.chat-fab:hover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .chat-fab:active { transform: scale(.94); }
 .chat-fab svg { fill: currentColor; }
 .chat-log { display: flex; flex-direction: column; gap: var(--s3); max-height: 46dvh; overflow: auto; margin-bottom: var(--s4); }
@@ -1082,3 +1090,75 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 .cal-day.today { border-color: var(--ink); color: var(--ink); font-weight: 700; }
 .cal-legend { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s4); margin-top: var(--s3); font-size: var(--t-micro); color: var(--stone); }
 .cal-legend span { display: inline-flex; align-items: center; gap: var(--s2); }
+
+/* ===========================================================================
+   Nachbesserung 15.09.2026 (Rueckmeldung Paul: "wirkt zusammengestaucht")
+   =========================================================================== */
+
+/* --- Wochentage: runde Umschalter statt einer Liste mit Kaestchen. Die alte Regel .wd hat den
+       CONTAINER erwischt (flex-direction: column) - die sieben Tage standen untereinander. --- */
+.daypicker { display: flex; flex-wrap: wrap; gap: var(--s1); }
+.daypicker label { position: relative; }
+.daypicker input { position: absolute; opacity: 0; width: 0; height: 0; }
+.daypicker span {
+  display: grid; place-content: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid var(--line-strong); background: var(--paper);
+  font-size: var(--t-small); font-weight: 500; color: var(--stone); cursor: pointer;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.daypicker span:hover { border-color: var(--ink); color: var(--ink); }
+.daypicker input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.daypicker input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+.daypicker input:disabled + span { opacity: .45; cursor: not-allowed; }
+
+/* --- Erklaerung unter einem Schalter: eingerueckt und leiser, damit Beschriftung, Erklaerung und
+       Schalter nicht ineinanderlaufen (ersetzt negative Abstaende). --- */
+.under-check { margin: 0 0 var(--s5) 32px; }
+.check + .consequence, .check + .locked { display: block; margin: var(--s1) 0 var(--s5) 32px; }
+.check { padding: var(--s3) 0; }
+/* `.field > label` (display:block, 500er Schnitt) hat die Checkbox-Zeilen ueberschrieben - das
+   Kaestchen klebte am Text und die Zeile wirkte gequetscht. Hoehere Spezifitaet gewinnt zurueck. */
+.field > label.check, .field > .check {
+  display: flex; align-items: flex-start; gap: var(--s3);
+  font-weight: 400; font-size: var(--t-small); margin-bottom: 0;
+}
+/* Abstand zwischen einem Hinweis und dem naechsten Block (z. B. Wochentage -> Uhrzeit). */
+p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
+
+/* --- Auswahl mit zwei Moeglichkeiten: klar getrennte Felder statt zweier Textzeilen --- */
+.choices { display: grid; gap: var(--s2); }
+.choice {
+  display: flex; align-items: flex-start; gap: var(--s3);
+  border: 1px solid var(--line-strong); border-radius: var(--r1);
+  padding: var(--s3) var(--s4); cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.choice:hover { border-color: var(--ink); }
+.choice input { margin-top: 3px; flex: none; }
+.choice span { display: grid; gap: 2px; }
+.choice strong { font-size: var(--t-small); font-weight: 700; }
+.choice em { font-style: normal; font-size: var(--t-micro); color: var(--stone); }
+.choice:has(input:checked) { border-color: var(--ink); background: var(--wash); }
+.choice:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+
+/* --- Einstellungs-Suche: ein Feld, das sich der Breite anpasst (vorher lief der Diktat-Knopf
+       daneben aus dem Layout) --- */
+.set-search { margin: 0 0 var(--s6); }
+.set-search input { width: 100%; max-width: 420px; }
+
+/* --- Analytics am Desktop: die Breite wirklich nutzen --- */
+.an-charts { display: grid; gap: var(--s6); }
+@media (min-width: 900px) {
+  .an-charts { grid-template-columns: 1fr 1fr; gap: var(--s7); }
+  .an-charts h2 { margin-top: 0; }
+  .an-top-posts { grid-template-columns: 1fr 1fr; gap: var(--s4) var(--s7); }
+  .an-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .an-top-posts { grid-template-columns: 1fr 1fr 1fr; }
+}
+/* Mit wenigen Messpunkten sah die Kurve aus wie ein Fehler: jetzt sitzt auf jedem Tag ein Punkt,
+   die Linienstaerke wird durch das Strecken nicht mehr verzerrt, und die Flaeche ist niedriger. */
+.an-chart-wrap svg { height: 96px; }
+.an-chart-wrap { border-bottom: 1px solid var(--rule); padding-bottom: var(--s3); }
