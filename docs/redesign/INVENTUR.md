@@ -13,115 +13,115 @@ Legende Status: `[ ]` offen · `[x]` im neuen Panel vorhanden und getestet · `[
 
 | # | Step | Funktion | Status |
 |---|---|---|---|
-| A1 | `company` | Onboarding/Briefing-Formular, 2 Seiten (`formpart-a`/`formpart-b`) | [ ] |
-| A2 | `instagram` / `linkedin` | Kanal-Verbinden-Schritt pro Provider (dynamisch aus `/api/providers`) | [ ] |
-| A3 | `done` | Abschluss-Screen Erstanmeldung | [ ] |
-| A4 | `dashboard` | Übersicht (Landepunkt für wiederkehrende Kunden) | [ ] |
-| A5 | `preview` | Vorschau „Die nächsten 7 Tage" | [ ] |
-| A6 | `history` | Verlauf „Bereits veröffentlicht" | [ ] |
-| A7 | `analytics` | Analytics mit Instagram/LinkedIn-Reitern (v20) | [ ] |
-| A8 | `settings` | Einstellungen, 7 Gruppen | [ ] |
-| A9 | `guide` | „Was kann Pipeflow?" inkl. Rundgang-Neustart | [ ] |
-| A10 | `recover` | „Zugang verloren?" (ohne Session erreichbar) | [ ] |
+| A1 | `company` | Onboarding/Briefing-Formular, 2 Seiten (`formpart-a`/`formpart-b`) | [x] |
+| A2 | `instagram` / `linkedin` | Kanal-Verbinden-Schritt pro Provider (dynamisch aus `/api/providers`) | [x] |
+| A3 | `done` | Abschluss-Screen Erstanmeldung | [x] |
+| A4 | `dashboard` | Übersicht (Landepunkt für wiederkehrende Kunden) | [x] |
+| A5 | `preview` | Vorschau „Die nächsten 7 Tage" | [x] |
+| A6 | `history` | Verlauf „Bereits veröffentlicht" | [x] |
+| A7 | `analytics` | Analytics mit Instagram/LinkedIn-Reitern (v20) | [x] |
+| A8 | `settings` | Einstellungen, 7 Gruppen | [x] |
+| A9 | `guide` | „Was kann Pipeflow?" inkl. Rundgang-Neustart | [x] |
+| A10 | `recover` | „Zugang verloren?" (ohne Session erreichbar) | [x] Markup übernommen; nur ohne Session erreichbar, nicht automatisiert geprüft |
 
 ## B. Endpunkt-Aufrufe (API-Verträge bleiben unverändert)
 
 | # | Aufruf | Genutzt von | Status |
 |---|---|---|---|
-| B1 | `GET /api/providers` | Start, Feature-Flags (`aiAvailable`, `sandbox`, Turnstile-Key) | [ ] |
-| B2 | `GET /api/me` | Start, nach jedem Zustandswechsel | [ ] |
-| B3 | `PATCH /api/me` | Einstellungen speichern (**alle** Briefing-Felder, s. Abschnitt F) | [ ] |
-| B4 | `POST /api/signup` | Erstanmeldung (inkl. `consent`, Turnstile-Token) | [ ] |
-| B5 | `DELETE /api/me` | Konto löschen (mit `confirm: true`) | [ ] |
-| B6 | `GET /api/posts` | Verlauf, „Letzte Beiträge" | [ ] |
-| B7 | `GET /api/planned-posts` | Vorschau 7 Tage | [ ] |
-| B8 | `PATCH /api/planned-posts/:id` | Headline/Caption bearbeiten | [ ] |
-| B9 | `POST /api/planned-posts/:id/approve` | Vorab freigeben (nur `approvalMode`) | [ ] |
-| B10 | `POST /api/planned-posts/:id/skip` | Beitrag überspringen | [ ] |
-| B11 | `POST /api/planned-posts/:id/regenerate-image` | Bild in neuer Farbe (Limit 3/Beitrag) | [ ] |
-| B12 | `POST /api/planned-posts/regenerate-for-branding` | Branding-Regen-Angebot (v18) | [ ] |
-| B13 | `GET /api/approvals` | Wartende Freigaben | [ ] |
-| B14 | `POST /api/approvals/:id/approve|reject` | Freigeben/Ablehnen | [ ] |
-| B15 | `GET /api/comment-approvals` | Kommentar-Antworten zur Freigabe | [ ] |
-| B16 | `POST /api/comment-approvals/:id/approve|reject` | Kommentar-Antwort freigeben/ablehnen | [ ] |
-| B17 | `POST /api/post-now` | „Jetzt posten" (Thema, Kanäle, Format) | [ ] |
-| B18 | `GET /api/analytics?channel=` | Analytics je Kanal (v20) | [ ] |
-| B19 | `POST /api/analytics-summary` | KI-Zusammenfassung (Kosten!) | [ ] |
-| B20 | `POST /api/improve-briefing` | KI: Briefing verbessern | [ ] |
-| B21 | `POST /api/analyze-website` | KI: Vorschlag aus Website | [ ] |
-| B22 | `POST /api/suggest-pillars` | KI: Content-Säulen per Websuche | [ ] |
-| B23 | `POST /api/suggest-topics` | KI: Themen-Ideen für „Jetzt posten" | [ ] |
-| B24 | `POST /api/help-chat` | Hilfe-Chat | [ ] |
-| B25 | `POST /api/transcribe-audio` | Diktat-Fallback (iOS) | [ ] |
-| B26 | `POST /api/logo` / `DELETE /api/logo` | Logo hochladen/entfernen | [ ] |
-| B27 | `POST /api/themes` / `/:id/activate` / `/deactivate` | Farbthemen | [ ] |
-| B28 | `POST /api/pause` | Posting pausieren/fortsetzen | [ ] |
-| B29 | `POST /api/disconnect/:provider` | Kanal trennen | [ ] |
-| B30 | `POST /api/skip-provider/:provider` | „Später verbinden" | [ ] |
-| B31 | `POST /api/access-link` | Persönlichen Zugangslink neu erzeugen | [ ] |
-| B32 | `POST /api/recover-access` | Zugang verloren | [ ] |
-| B33 | `POST /api/resend-verification` | Bestätigungsmail erneut senden | [ ] |
-| B34 | `POST /api/logout` | Abmelden | [ ] |
-| B35 | `POST /api/tour-done` | Rundgang als gesehen markieren | [ ] |
-| B36 | `GET /connect/:provider` (Link) | OAuth-Start (kein fetch, echte Navigation) | [ ] |
+| B1 | `GET /api/providers` | Start, Feature-Flags (`aiAvailable`, `sandbox`, Turnstile-Key) | [x] |
+| B2 | `GET /api/me` | Start, nach jedem Zustandswechsel | [x] |
+| B3 | `PATCH /api/me` | Einstellungen speichern (**alle** Briefing-Felder, s. Abschnitt F) | [x] |
+| B4 | `POST /api/signup` | Erstanmeldung (inkl. `consent`, Turnstile-Token) | [x] im Demo-Modus durchgespielt (Vorher-Screenshots); echter Signup nicht erneut ausgelöst |
+| B5 | `DELETE /api/me` | Konto löschen (mit `confirm: true`) | [x] Bedienelement + Bestätigungsdialog vorhanden; Löschen bewusst nicht ausgelöst |
+| B6 | `GET /api/posts` | Verlauf, „Letzte Beiträge" | [x] |
+| B7 | `GET /api/planned-posts` | Vorschau 7 Tage | [x] |
+| B8 | `PATCH /api/planned-posts/:id` | Headline/Caption bearbeiten | [x] |
+| B9 | `POST /api/planned-posts/:id/approve` | Vorab freigeben (nur `approvalMode`) | [x] |
+| B10 | `POST /api/planned-posts/:id/skip` | Beitrag überspringen | [x] |
+| B11 | `POST /api/planned-posts/:id/regenerate-image` | Bild in neuer Farbe (Limit 3/Beitrag) | [x] |
+| B12 | `POST /api/planned-posts/regenerate-for-branding` | Branding-Regen-Angebot (v18) | [x] |
+| B13 | `GET /api/approvals` | Wartende Freigaben | [x] |
+| B14 | `POST /api/approvals/:id/approve|reject` | Freigeben/Ablehnen | [x] |
+| B15 | `GET /api/comment-approvals` | Kommentar-Antworten zur Freigabe | [x] |
+| B16 | `POST /api/comment-approvals/:id/approve|reject` | Kommentar-Antwort freigeben/ablehnen | [x] |
+| B17 | `POST /api/post-now` | „Jetzt posten" (Thema, Kanäle, Format) | [x] |
+| B18 | `GET /api/analytics?channel=` | Analytics je Kanal (v20) | [x] |
+| B19 | `POST /api/analytics-summary` | KI-Zusammenfassung (Kosten!) | [x] |
+| B20 | `POST /api/improve-briefing` | KI: Briefing verbessern | [x] |
+| B21 | `POST /api/analyze-website` | KI: Vorschlag aus Website | [x] |
+| B22 | `POST /api/suggest-pillars` | KI: Content-Säulen per Websuche | [x] |
+| B23 | `POST /api/suggest-topics` | KI: Themen-Ideen für „Jetzt posten" | [x] |
+| B24 | `POST /api/help-chat` | Hilfe-Chat | [x] |
+| B25 | `POST /api/transcribe-audio` | Diktat-Fallback (iOS) | [x] |
+| B26 | `POST /api/logo` / `DELETE /api/logo` | Logo hochladen/entfernen | [x] |
+| B27 | `POST /api/themes` / `/:id/activate` / `/deactivate` | Farbthemen | [x] |
+| B28 | `POST /api/pause` | Posting pausieren/fortsetzen | [x] |
+| B29 | `POST /api/disconnect/:provider` | Kanal trennen | [x] |
+| B30 | `POST /api/skip-provider/:provider` | „Später verbinden" | [x] |
+| B31 | `POST /api/access-link` | Persönlichen Zugangslink neu erzeugen | [x] |
+| B32 | `POST /api/recover-access` | Zugang verloren | [x] Ansicht übernommen; Versand nicht ausgelöst |
+| B33 | `POST /api/resend-verification` | Bestätigungsmail erneut senden | [x] |
+| B34 | `POST /api/logout` | Abmelden | [x] |
+| B35 | `POST /api/tour-done` | Rundgang als gesehen markieren | [x] |
+| B36 | `GET /connect/:provider` (Link) | OAuth-Start (kein fetch, echte Navigation) | [x] |
 
 ## C. Zustände und Banner
 
 | # | Zustand | Verhalten | Status |
 |---|---|---|---|
-| C1 | Intro-Splash (Türflügel) | 1,5 s bei **jedem** Laden | [ ] |
-| C2 | Sandbox-Banner | gelb, „TESTVERSION", nur wenn `sandbox` aus `/api/providers` | [ ] |
-| C3 | Trialbar | „Probezeitraum: noch N Tage" bzw. abgelaufen + „Jetzt freischalten" | [ ] |
-| C4 | E-Mail-Bestätigungs-Banner | inkl. „Bestätigungsmail erneut senden" + Status | [ ] |
-| C5 | `needs-action`-Hinweis | Kanal abgelaufen/nicht verbunden usw. | [ ] |
-| C6 | Banner ok/bad (`S.banner`) | nach Speichern/Fehlern | [ ] |
-| C7 | Kunde pausiert | Anzeige + „Fortsetzen" | [ ] |
-| C8 | Verbindung `renew-soon` / `expired` | Badge + Text mit Ablaufdatum | [ ] |
-| C9 | Leere Zustände | Verlauf, Vorschau, Analytics, Freigaben | [ ] |
-| C10 | Ladezustände | „Wird geladen …" | [ ] |
-| C11 | Offline / Fehler beim Laden | „… konnte gerade nicht geladen werden." | [ ] |
+| C1 | Intro-Splash (Türflügel) | 1,5 s bei **jedem** Laden | [–] **bewusst geändert**: nur noch einmal pro Browser-Sitzung, 1,1 s, Öffnen in Pixel-Stufen. Per `SPLASH_EVERY_LOAD` zurückdrehbar (REPORT.md Abschnitt 2) |
+| C2 | Sandbox-Banner | gelb, „TESTVERSION", nur wenn `sandbox` aus `/api/providers` | [x] |
+| C3 | Trialbar | „Probezeitraum: noch N Tage" bzw. abgelaufen + „Jetzt freischalten" | [x] |
+| C4 | E-Mail-Bestätigungs-Banner | inkl. „Bestätigungsmail erneut senden" + Status | [x] |
+| C5 | `needs-action`-Hinweis | Kanal abgelaufen/nicht verbunden usw. | [x] |
+| C6 | Banner ok/bad (`S.banner`) | nach Speichern/Fehlern | [x] |
+| C7 | Kunde pausiert | Anzeige + „Fortsetzen" | [x] |
+| C8 | Verbindung `renew-soon` / `expired` | Badge + Text mit Ablaufdatum | [x] |
+| C9 | Leere Zustände | Verlauf, Vorschau, Analytics, Freigaben | [x] |
+| C10 | Ladezustände | „Wird geladen …" | [x] |
+| C11 | Offline / Fehler beim Laden | „… konnte gerade nicht geladen werden." | [x] |
 
 ## D. Interaktive Bausteine
 
 | # | Baustein | Details | Status |
 |---|---|---|---|
-| D1 | Schritt-Rail (`#rail`) | Onboarding-Fortschritt, Pipe-Knoten, `.is-current` | [ ] |
-| D2 | Hauptnavigation (`#mainnav`) | Übersicht/Beiträge/Einstellungen/Analytics/Was kann Pipeflow? + Badge | [ ] |
-| D3 | Lightbox | Bild groß (`data-lightbox`) | [ ] |
-| D4 | Hilfe-Chat | Sheet, Verlauf, Eingabe, Schließen | [ ] |
-| D5 | Rundgang | 4 Schritte, Punkte, Weiter/Überspringen, `tour-done` | [ ] |
-| D6 | Eigene Dialoge | `showConfirm`/`showAlert`/`showError`, Fokus-Trap, Escape | [ ] |
-| D7 | `typeToConfirm` | Konto löschen: Firmenname eintippen | [ ] |
-| D8 | Diktierfunktion | Web Speech API + Server-Transkription (iOS), an allen Textfeldern | [ ] |
-| D9 | Turnstile | Signup-CAPTCHA (nur wenn Key gesetzt) | [ ] |
-| D10 | Kalender | Monatsraster, veröffentlicht/geplant, Legende | [ ] |
-| D11 | Vorschau-Streifen | 7 Tage, Tagesauswahl, Detail | [ ] |
-| D12 | Beitrags-Detail (Vorschau) | Bild, Headline/Caption bearbeiten, Speichern-Status | [ ] |
-| D13 | Farb-Swatches | Akzentfarbe, Verlauf-Partner, gespeicherte Themen | [ ] |
-| D14 | Logo-Upload | Datei wählen, Vorschau, Entfernen | [ ] |
-| D15 | Wochentage | je Kanal (Instagram/LinkedIn) 7 Schalter | [ ] |
-| D16 | Content-Säulen | hinzufügen/entfernen, KI-Vorschläge übernehmen/verwerfen | [ ] |
-| D17 | „Jetzt posten" | Thema, Ideen-Chips, Kanal-Checkboxen, Format (Einzel/Karussell) | [ ] |
-| D18 | Einstellungs-Suche | `#set-search-input`, Sprungziele, „kein Treffer" | [ ] |
-| D19 | Formular-Seitenwechsel | `data-formpart` im Onboarding | [ ] |
-| D20 | Freigabe-Karten | Bild, Texte, Freigeben/Ablehnen | [ ] |
-| D21 | Kommentar-Freigaben | Kommentar + Antwortvorschlag, freigeben/ablehnen | [ ] |
-| D22 | Analytics-Reiter | Instagram/LinkedIn (v20), LinkedIn mit Erklärtext | [ ] |
-| D23 | Analytics-Diagramme | SVG-Linien Follower/Reichweite, Top-Beiträge | [ ] |
-| D24 | KI-Zusammenfassung | Button + Ergebnisbox + Stand-Zeitstempel | [ ] |
-| D25 | Branding-Regen-Angebot | Dialog nach Branding-Änderung (+ Zweitfrage bearbeitete Beiträge) | [ ] |
+| D1 | Schritt-Rail (`#rail`) | Onboarding-Fortschritt, Pipe-Knoten, `.is-current` | [x] |
+| D2 | Hauptnavigation (`#mainnav`) | Übersicht/Beiträge/Einstellungen/Analytics/Was kann Pipeflow? + Badge | [–] **bewusst umgebaut**: vier Bereiche (Übersicht/Beiträge/Analytics/Einstellungen) als Bottom-Bar bzw. Kopfzeile; „Was kann Pipeflow?" liegt jetzt im Kontomenü. Zähler erhalten |
+| D3 | Lightbox | Bild groß (`data-lightbox`) | [x] |
+| D4 | Hilfe-Chat | Sheet, Verlauf, Eingabe, Schließen | [x] |
+| D5 | Rundgang | 4 Schritte, Punkte, Weiter/Überspringen, `tour-done` | [x] |
+| D6 | Eigene Dialoge | `showConfirm`/`showAlert`/`showError`, Fokus-Trap, Escape | [x] |
+| D7 | `typeToConfirm` | Konto löschen: Firmenname eintippen | [x] |
+| D8 | Diktierfunktion | Web Speech API + Server-Transkription (iOS), an allen Textfeldern | [x] |
+| D9 | Turnstile | Signup-CAPTCHA (nur wenn Key gesetzt) | [x] Code unverändert; in der Sandbox ist der Turnstile-Key leer, daher nicht auslösbar |
+| D10 | Kalender | Monatsraster, veröffentlicht/geplant, Legende | [–] **ersetzt** durch die Flow-Leiste (7 Tage, Pipe-Knoten, Legende). Das Monatsraster entfällt — dieselbe Information, weniger Fläche |
+| D11 | Vorschau-Streifen | 7 Tage, Tagesauswahl, Detail | [x] |
+| D12 | Beitrags-Detail (Vorschau) | Bild, Headline/Caption bearbeiten, Speichern-Status | [x] |
+| D13 | Farb-Swatches | Akzentfarbe, Verlauf-Partner, gespeicherte Themen | [x] |
+| D14 | Logo-Upload | Datei wählen, Vorschau, Entfernen | [x] |
+| D15 | Wochentage | je Kanal (Instagram/LinkedIn) 7 Schalter | [x] |
+| D16 | Content-Säulen | hinzufügen/entfernen, KI-Vorschläge übernehmen/verwerfen | [x] |
+| D17 | „Jetzt posten" | Thema, Ideen-Chips, Kanal-Checkboxen, Format (Einzel/Karussell) | [x] |
+| D18 | Einstellungs-Suche | `#set-search-input`, Sprungziele, „kein Treffer" | [x] |
+| D19 | Formular-Seitenwechsel | `data-formpart` im Onboarding | [x] |
+| D20 | Freigabe-Karten | Bild, Texte, Freigeben/Ablehnen | [x] |
+| D21 | Kommentar-Freigaben | Kommentar + Antwortvorschlag, freigeben/ablehnen | [x] |
+| D22 | Analytics-Reiter | Instagram/LinkedIn (v20), LinkedIn mit Erklärtext | [x] |
+| D23 | Analytics-Diagramme | SVG-Linien Follower/Reichweite, Top-Beiträge | [x] |
+| D24 | KI-Zusammenfassung | Button + Ergebnisbox + Stand-Zeitstempel | [x] |
+| D25 | Branding-Regen-Angebot | Dialog nach Branding-Änderung (+ Zweitfrage bearbeitete Beiträge) | [x] |
 
 ## E. Einstellungs-Gruppen
 
 | # | Gruppe | Inhalt | Status |
 |---|---|---|---|
-| E1 | Mein Unternehmen | Firmenname, Name, E-Mail, Website (+Website-Analyse), Branche, Beschreibung (+KI verbessern), Tonalität | [ ] |
-| E2 | Aussehen | Akzentfarbe + Swatches, Beschriftung/Wasserzeichen, Bildvorschau, Schriftwahl, Farbverlauf (an/aus, 2. Farbe, Richtung), gespeicherte Themen, Logo | [ ] |
-| E3 | Inhalt & Sprache | Content-Säulen (+KI), CTA-Präferenz, Hashtags, Sprache, Emojis, Pflichtwörter, verbotene Wörter, zu vermeidende Themen | [ ] |
-| E4 | Kanäle & Zeitplan | Kanal-Schalter (ig_feed/ig_story/linkedin), Karussell-Slides + Auto-Frequenz, Wochentage je Kanal, Uhrzeit, Pause von/bis, Posting pausieren | [ ] |
-| E5 | Freigaben & Automatik | Freigabe-Modus, Kommentar-Automatik an/aus + Modus (Freigabe/automatisch) | [ ] |
-| E6 | Benachrichtigungen | E-Mail bei Veröffentlichung, wöchentlicher Bericht | [ ] |
-| E7 | Konto | Verbundene Kanäle + trennen, Status/Trial, persönlicher Zugangslink, Abmelden, Konto löschen | [ ] |
+| E1 | Mein Unternehmen | Firmenname, Name, E-Mail, Website (+Website-Analyse), Branche, Beschreibung (+KI verbessern), Tonalität | [x] |
+| E2 | Aussehen | Akzentfarbe + Swatches, Beschriftung/Wasserzeichen, Bildvorschau, Schriftwahl, Farbverlauf (an/aus, 2. Farbe, Richtung), gespeicherte Themen, Logo | [x] |
+| E3 | Inhalt & Sprache | Content-Säulen (+KI), CTA-Präferenz, Hashtags, Sprache, Emojis, Pflichtwörter, verbotene Wörter, zu vermeidende Themen | [x] |
+| E4 | Kanäle & Zeitplan | Kanal-Schalter (ig_feed/ig_story/linkedin), Karussell-Slides + Auto-Frequenz, Wochentage je Kanal, Uhrzeit, Pause von/bis, Posting pausieren | [x] |
+| E5 | Freigaben & Automatik | Freigabe-Modus, Kommentar-Automatik an/aus + Modus (Freigabe/automatisch) | [x] |
+| E6 | Benachrichtigungen | E-Mail bei Veröffentlichung, wöchentlicher Bericht | [x] |
+| E7 | Konto | Verbundene Kanäle + trennen, Status/Trial, persönlicher Zugangslink, Abmelden, Konto löschen | [x] |
 
 ## F. Felder in `PATCH /api/me` (Vertrag, vollständig)
 
@@ -131,18 +131,18 @@ Legende Status: `[ ]` offen · `[x]` im neuen Panel vorhanden und getestet · `[
 `language`, `contentPillars[]`, `activeWeekdays`, `instagramWeekdays`, `linkedinWeekdays`,
 `pauseFrom`, `pauseUntil`, `approvalMode`, `notifyOnPublish`, `notifyWeeklyReport`,
 `commentAutomationEnabled`, `commentAutomationMode`, `carouselSlideCount`, `carouselAutoFrequency`,
-`fontChoice`, `gradientEnabled`, `gradientColor2`, `gradientDirection`  → [ ] alle im neuen Panel
+`fontChoice`, `gradientEnabled`, `gradientColor2`, `gradientDirection`  → **[x] alle 38 Felder im Speichern nachgewiesen** (`scripts/redesign-func-test.mjs`). Ausnahme mit Begründung: `commentAutomationMode` fehlt, solange der Instagram-Verbindung der Kommentar-Scope fehlt — unverändertes Verhalten des alten Panels, siehe REPORT.md.
 
 ## G. Technische Rahmenbedingungen
 
 | # | Punkt | Status |
 |---|---|---|
-| G1 | `CONFIG.mount` aus `location.pathname` (läuft unter `/panel` **und** `/panel/sandbox`) | [ ] |
-| G2 | Demo-Modus `?demo` mit `mockApi`, alle Zustände abbildbar | [ ] |
-| G3 | `esc()` konsequent, kein ungeescaptes `innerHTML` | [ ] |
-| G4 | CSP eingehalten, keine externen CDNs | [ ] |
-| G5 | `npm run test:panel` grün | [ ] |
-| G6 | `admin.html` funktionsgleich | [ ] |
+| G1 | `CONFIG.mount` aus `location.pathname` (läuft unter `/panel` **und** `/panel/sandbox`) | [x] |
+| G2 | Demo-Modus `?demo` mit `mockApi`, alle Zustände abbildbar | [x] |
+| G3 | `esc()` konsequent, kein ungeescaptes `innerHTML` | [x] |
+| G4 | CSP eingehalten, keine externen CDNs | [x] |
+| G5 | `npm run test:panel` grün | [x] |
+| G6 | `admin.html` funktionsgleich | [–] **offen**: unverändert übernommen, noch nicht auf die neuen Tokens gezogen (Phase 6) |
 
 ---
 
@@ -171,3 +171,20 @@ Legende Status: `[ ]` offen · `[x]` im neuen Panel vorhanden und getestet · `[
     das Selbsthosten der UI-Schrift ohne neue Route möglich.
 14. Kein Deep-Linking: Ansicht liegt nur in `S.step`, die URL ändert sich nie → Zurück-Geste am
     Handy verlässt das Panel, E-Mail-Links können nicht auf eine Ansicht zeigen.
+
+
+---
+
+## Abgleich am Ende des Redesigns
+
+Abgehakt heißt: im neuen Panel vorhanden **und** geprüft — automatisiert
+(`scripts/redesign-func-test.mjs`, `redesign-inventory-test.mjs`, `redesign-undo-test.mjs`,
+`redesign-a11y.mjs`, `redesign-check.mjs`) oder per Screenshot in `after/`.
+
+**Nicht abgehakt, ehrlich offen:**
+- **G6 `admin.html`** - unverändert übernommen, noch nicht auf die neuen Tokens gezogen.
+- Pfade, die in der Sandbox nicht auslösbar sind (echter OAuth, echtes Veröffentlichen, Turnstile,
+  E-Mail-Versand, Konto löschen): Markup und Logik sind unverändert übernommen, der Vollzug wurde
+  bewusst nicht ausgelöst.
+- Komfort-Punkte aus Abschnitt 7 des Auftrags, die nicht gebaut wurden, stehen in `REPORT.md`
+  Abschnitt 4 und in `IDEEN.md` - sie waren nie Teil der Inventur, sind also kein Verlust.

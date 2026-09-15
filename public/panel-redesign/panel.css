@@ -888,3 +888,12 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
   /* Suche blendet Gruppen per .is-hidden aus - das darf die Auswahl nicht überstimmen */
   .setgroup.is-hidden { display: none !important; }
 }
+
+/* "Was kann Pipeflow?": Überschrift/Text/Link brauchen Luft, sonst kleben die Einträge aneinander */
+.guide-grid { display: grid; gap: var(--s6); }
+@media (min-width: 768px) { .guide-grid { grid-template-columns: 1fr 1fr; gap: var(--s6) var(--s7); } }
+.guide-item h3 { font-size: var(--t-h2); margin-bottom: var(--s2); }
+.guide-item p { color: var(--stone); font-size: var(--t-small); max-width: 60ch; }
+.guide-item .link { margin-top: var(--s2); display: inline-block; font-size: var(--t-small); }
+.guide-item.is-off { opacity: .55; }
+/* Pfeile in Linktexten sind Teil der bestehenden Texte - keine zusätzlichen Zeichen ergänzen. */
