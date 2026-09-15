@@ -15,7 +15,7 @@ import { db, nowIso, type CustomerRow, type ConnectionRow, type PostRow } from "
 import { randomToken, sha256 } from "./crypto.js";
 import { connectionStatus, isTrialExpired, trialDaysLeft } from "./credentials.js";
 import { sendMail } from "./mailer.js";
-import { firstPostLiveEmail, pendingApprovalsSummaryEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
+import { firstPostLiveEmail, pendingApprovalsSummaryEmail, tokenExpiringEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
 import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
 import { commentStatsForCustomer } from "./comments.js";
 
@@ -318,7 +318,7 @@ export function createAdminRouter(panelPublicDir?: string): Router {
   // Panel v6 Aufgabe 4: laesst Paul den technischen Mail-Versand selbst pruefen, ohne einen
   // echten Kunden zu behelligen - schickt IMMER mit "[TEST]" im Betreff, nutzt sendMail (nicht
   // sendMailBestEffort), damit ein echter Fehlschlag hier sichtbar wird statt nur geloggt.
-  const TEST_EMAIL_TEMPLATES = ["approvals", "trial-ending", "first-post", "verification", "weekly-report"] as const;
+  const TEST_EMAIL_TEMPLATES = ["approvals", "trial-ending", "first-post", "verification", "weekly-report", "token-expiring"] as const;
   router.post(
     "/api/test-email",
     safe((req, res) => {
@@ -339,6 +339,10 @@ export function createAdminRouter(panelPublicDir?: string): Router {
           to, company: testCompany, followerCount: 542, followerGrowth7d: 12, reach7d: 2860, reachPrev7d: 2450,
           views7d: 3018, engagementRate7d: 14.6,
           aiSummary: "(Test-Text) In der letzten Woche lief es gut: mehr Reichweite als in der Vorwoche und stetiges Follower-Wachstum. Ein Beitrag mit einer konkreten Kundenfrage performte besonders gut - Tipp: das kommende Woche wiederholen.",
+        }) :
+        template === "token-expiring" ? tokenExpiringEmail({
+          to, company: testCompany, channelLabel: "LinkedIn",
+          expiresAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
         }) :
         pendingApprovalsSummaryEmail({ to, company: testCompany, count: 2 });
       mail.subject = `[TEST] ${mail.subject}`;
