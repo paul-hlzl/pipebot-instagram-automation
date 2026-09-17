@@ -1,11 +1,20 @@
 // src/linkedin-oauth-route.ts – einmaliger OAuth-Callback für LinkedIn
 //
-// WICHTIG: Diese Route nur temporär aktiv lassen (oder mit Basic-Auth
-// schützen), da sie Tokens im Klartext im Browser anzeigt.
+// Abgesichert: die Route existiert nur, wenn LINKEDIN_OAUTH_CALLBACK_ENABLED
+// in der .env auf "true" steht (Standard: aus, Route antwortet dann mit 404,
+// als gäbe es sie nicht). Zum erneuten Autorisieren also kurz einschalten,
+// den Ablauf einmal durchführen, danach wieder ausschalten.
+//
+// Tokens erscheinen NICHT mehr im Klartext im Browser: sie landen in einer
+// Datei mit Rechten 600 im Datenordner, die nur root lesen kann. Der Browser
+// zeigt nur eine Erfolgsmeldung.
 
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import express, { type Request, type Response } from "express";
 
 const REDIRECT_URI = "https://mcp.pipebot.at/linkedin/callback";
+const ERGEBNIS_DATEI = join(process.cwd(), "data", ".linkedin-oauth-ergebnis.json");
 
 interface LinkedInAccessTokenResponse {
   access_token?: string;
@@ -19,7 +28,18 @@ interface LinkedInUserInfoResponse {
 
 export const linkedinOAuthRouter = express.Router();
 
+function eingeschaltet(): boolean {
+  return process.env.LINKEDIN_OAUTH_CALLBACK_ENABLED?.trim() === "true";
+}
+
 linkedinOAuthRouter.get("/linkedin/callback", async (req: Request, res: Response) => {
+  // Ohne den Schalter existiert die Route nicht - 404, kein Hinweis, dass
+  // es sie ueberhaupt gibt.
+  if (!eingeschaltet()) {
+    res.status(404).send("Not found");
+    return;
+  }
+
   const { code, error, error_description } = req.query;
 
   if (error) {
@@ -57,9 +77,10 @@ linkedinOAuthRouter.get("/linkedin/callback", async (req: Request, res: Response
     const tokenData = (await tokenRes.json()) as LinkedInAccessTokenResponse;
 
     if (!tokenRes.ok || !tokenData.access_token) {
-      res
-        .status(tokenRes.ok ? 502 : tokenRes.status)
-        .send(`<h2>Token-Tausch fehlgeschlagen</h2><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
+      // Auch der Fehlerfall zeigt keine Rohantwort mehr im Browser - die
+      // koennte Teile des Codes oder interne Details enthalten.
+      res.status(tokenRes.ok ? 502 : tokenRes.status).send("<h2>Token-Tausch fehlgeschlagen.</h2><p>Details im Server-Log.</p>");
+      console.error("[linkedin-callback] Token-Tausch fehlgeschlagen:", JSON.stringify(tokenData));
       return;
     }
 
@@ -70,21 +91,39 @@ linkedinOAuthRouter.get("/linkedin/callback", async (req: Request, res: Response
     const me = (await meRes.json()) as LinkedInUserInfoResponse;
     const personUrn = `urn:li:person:${me.sub}`;
 
-    // Nur zur Anzeige – NICHT automatisch in Dateien schreiben,
-    // damit nichts versehentlich committed wird.
+    // Nur in eine Datei mit Rechten 600 schreiben, NICHT im Browser anzeigen
+    // und NICHT automatisch in .env eintragen, damit nichts versehentlich
+    // committed wird oder im Browser-Verlauf/Referrer/Proxy-Log auftaucht.
+    writeFileSync(
+      ERGEBNIS_DATEI,
+      JSON.stringify(
+        {
+          hinweis: "Per SSH lesen und in die .env uebernehmen, dann diese Datei loeschen.",
+          erzeugt_am: new Date().toISOString(),
+          LINKEDIN_ACCESS_TOKEN: tokenData.access_token,
+          LINKEDIN_REFRESH_TOKEN: tokenData.refresh_token ?? null,
+          LINKEDIN_PERSON_URN: personUrn,
+          gueltig_tage: tokenData.expires_in ? Math.round(tokenData.expires_in / 86400) : null,
+        },
+        null,
+        2,
+      ),
+      { mode: 0o600 },
+    );
+
     res.send(`
-      <h2>Erfolgreich! Trag diese Werte in deine .env ein:</h2>
-      <pre>
-LINKEDIN_ACCESS_TOKEN=${tokenData.access_token}
-LINKEDIN_REFRESH_TOKEN=${tokenData.refresh_token ?? "(kein Refresh Token erhalten - siehe Hinweis unten)"}
-LINKEDIN_PERSON_URN=${personUrn}
-      </pre>
-      <p>Access Token gültig für ${tokenData.expires_in ? Math.round(tokenData.expires_in / 86400) : "?"} Tage.</p>
-      <p><b>Wichtig:</b> Diese Seite danach neu laden oder Route deaktivieren,
-      damit die Tokens nicht offen im Browser-Verlauf stehen bleiben.</p>
+      <h2>Erfolgreich.</h2>
+      <p>Die Werte stehen NICHT hier im Browser, sondern in einer Datei mit
+      Rechten 600 auf dem Server:</p>
+      <pre>${ERGEBNIS_DATEI}</pre>
+      <p>Per SSH auslesen, in die .env uebernehmen, Datei danach loeschen
+      (<code>shred -u ${ERGEBNIS_DATEI}</code>) und
+      <code>LINKEDIN_OAUTH_CALLBACK_ENABLED</code> wieder auf
+      <code>false</code> stellen.</p>
     `);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    res.status(500).send(`<h2>Unerwarteter Fehler</h2><pre>${message}</pre>`);
+    console.error("[linkedin-callback] Unerwarteter Fehler:", message);
+    res.status(500).send("<h2>Unerwarteter Fehler.</h2><p>Details im Server-Log.</p>");
   }
 });
