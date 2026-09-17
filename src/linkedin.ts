@@ -29,6 +29,31 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+/**
+ * Fallback auf das eine geteilte Konto aus der .env, wenn ein Aufruf ohne
+ * customer_id kommt (Legacy-Verhalten von vor der Mehrkunden-Anbindung).
+ *
+ * Der geteilte LINKEDIN_ACCESS_TOKEN ist seit dem 17.09.2026 widerrufen
+ * (REVOKED_ACCESS_TOKEN) und wird von keinem bekannten Aufrufer mehr
+ * produktiv gebraucht - das eigene Konto laeuft inzwischen genauso wie ein
+ * Kunde ueber `connections` (customer_id cus_bW0p_HapELUZ). Deshalb ist der
+ * Fallback standardmaessig AUS: statt eines rohen Token-Fehlers gibt es
+ * dieselbe verstaendliche Meldung wie bei einem nicht verbundenen Kunden.
+ * Mit LINKEDIN_LEGACY_FALLBACK_ENABLED=true in der .env laesst er sich
+ * wieder einschalten (z. B. mit einem frischen Token in LINKEDIN_ACCESS_TOKEN).
+ */
+function resolveFallbackCredentials(): LinkedInCredentials {
+  if (env("LINKEDIN_LEGACY_FALLBACK_ENABLED") !== "true") {
+    throw new ToolError(
+      "Kein LinkedIn-Konto verbunden: kein customer_id angegeben, und die frühere geteilte " +
+        ".env-Anmeldung ist deaktiviert (LINKEDIN_LEGACY_FALLBACK_ENABLED ist nicht \"true\"). " +
+        "Entweder customer_id eines verbundenen Kunden angeben, oder den Schalter in der .env " +
+        "setzen, nachdem LINKEDIN_ACCESS_TOKEN erneuert wurde.",
+    );
+  }
+  return { accessToken: requiredEnv("LINKEDIN_ACCESS_TOKEN"), personUrn: requiredEnv("LINKEDIN_PERSON_URN") };
+}
+
 function headers(token: string, extra: Record<string, string> = {}): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
@@ -108,7 +133,7 @@ interface UserInfoResponse {
 
 /** Prüft, ob das Token noch lebt – für den täglichen Health-Check. */
 export async function checkLinkedInToken(creds?: LinkedInCredentials): Promise<TokenCheckResult> {
-  const accessToken = creds?.accessToken ?? requiredEnv("LINKEDIN_ACCESS_TOKEN");
+  const accessToken = creds?.accessToken ?? resolveFallbackCredentials().accessToken;
   const res = await fetch(`${API}/v2/userinfo`, {
     headers: headers(accessToken),
   });
@@ -147,8 +172,9 @@ async function resolveImageBytes(imageSource: string | Buffer): Promise<Buffer> 
  * 3. Image-URN zurückgeben, die dann im Post referenziert wird
  */
 export async function uploadLinkedInImage(imageSource: string | Buffer, creds?: LinkedInCredentials): Promise<string> {
-  const accessToken = creds?.accessToken ?? requiredEnv("LINKEDIN_ACCESS_TOKEN");
-  const owner = creds?.personUrn ?? requiredEnv("LINKEDIN_PERSON_URN");
+  const resolved = creds ?? resolveFallbackCredentials();
+  const accessToken = resolved.accessToken;
+  const owner = resolved.personUrn;
 
   // Schritt 1
   const initRes = await fetch(`${API}/rest/images?action=initializeUpload`, {
@@ -212,8 +238,9 @@ export async function publishLinkedInPost(
   },
   creds?: LinkedInCredentials,
 ): Promise<PublishResult> {
-  const accessToken = creds?.accessToken ?? requiredEnv("LINKEDIN_ACCESS_TOKEN");
-  const author = creds?.personUrn ?? requiredEnv("LINKEDIN_PERSON_URN");
+  const resolved = creds ?? resolveFallbackCredentials();
+  const accessToken = resolved.accessToken;
+  const author = resolved.personUrn;
 
   const payload: Record<string, unknown> = {
     author,
