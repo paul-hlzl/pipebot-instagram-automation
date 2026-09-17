@@ -25,8 +25,10 @@
  * Kommentar-Volumen kleiner Business-Accounts - betrifft nur den Cron-Pfad, der Webhook-Pfad
  * bekommt jeden Kommentar einzeln zugestellt und braucht keine Pagination).
  */
+import axios from "axios";
 import { db, nowIso, type CustomerRow, type PostRow, type ProcessedCommentRow } from "./db.js";
 import { resolveInstagramCredentials } from "./credentials.js";
+import { clearCommentFetchFailures, mayFetchComments, recordCommentFetchFailure } from "./comment-backoff.js";
 import { fetchTopLevelComments, postCommentReply, type IncomingComment } from "../instagram-comments.js";
 import { classifyAndAnswerComment } from "../anthropic.js";
 import { logUsageCost } from "./analytics.js";
@@ -319,11 +321,32 @@ async function processCustomerComments(customer: CustomerRow): Promise<CustomerC
   const ownUsername = connRow.account_name ? stripAt(connRow.account_name) : null;
 
   for (const post of posts) {
+    const mediaId = post.external_post_id as string;
+
+    // Medien-IDs, die die Graph-API dauerhaft ablehnt, werden zurückgehalten statt bei jedem
+    // Lauf erneut abgefragt (siehe comment-backoff.ts). Ein übersprungener Versuch ist kein
+    // Fehler und wird deshalb weder gezählt noch geloggt.
+    if (!mayFetchComments(customer.id, mediaId)) continue;
+
     let comments: IncomingComment[];
     try {
-      comments = await fetchTopLevelComments(post.external_post_id as string, creds);
+      comments = await fetchTopLevelComments(mediaId, creds);
+      clearCommentFetchFailures(customer.id, mediaId);
     } catch (err) {
-      console.error(`[comments] ${customer.id}/${post.external_post_id}: Kommentare konnten nicht geladen werden:`, err instanceof Error ? err.message : err);
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      const message = err instanceof Error ? err.message : String(err);
+      const outcome = recordCommentFetchFailure(customer.id, mediaId, status, message);
+      if (outcome.firstPause) {
+        console.error(
+          `[comments] ${customer.id}/${mediaId}: Abruf ${outcome.failures}x hintereinander gescheitert (zuletzt HTTP ${status ?? "-"}) - ` +
+            `diese Medien-ID pausiert jetzt ${outcome.retryIn}. Letzter Fehler: ${message}`,
+        );
+      } else if (outcome.shouldLog) {
+        console.error(
+          `[comments] ${customer.id}/${mediaId}: Kommentare konnten nicht geladen werden (Versuch ${outcome.failures}, nächster in ${outcome.retryIn}):`,
+          message,
+        );
+      }
       result.errors++;
       continue;
     }
@@ -332,7 +355,7 @@ async function processCustomerComments(customer: CustomerRow): Promise<CustomerC
       if (isCommentProcessed(comment.id)) continue;
       if (comment.username && ownUsername && stripAt(comment.username) === ownUsername) continue; // eigener Kommentar/eigene Antwort
 
-      const outcome = await classifyAndRespondToComment(customer, post, post.external_post_id as string, comment, creds);
+      const outcome = await classifyAndRespondToComment(customer, post, mediaId, comment, creds);
       if (outcome === "rate_limited") return result; // restliche neue Kommentare folgen im naechsten Lauf
       tallyOutcome(result, outcome);
     }

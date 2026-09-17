@@ -303,6 +303,24 @@ CREATE TABLE IF NOT EXISTS google_reviews (
 CREATE INDEX IF NOT EXISTS google_reviews_customer ON google_reviews(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS google_reviews_status ON google_reviews(customer_id, status);
 CREATE INDEX IF NOT EXISTS google_reviews_post_status ON google_reviews(customer_id, social_post_status);
+
+-- Merkliste für Medien-IDs, deren Kommentar-Abruf dauerhaft scheitert (siehe backoff.ts).
+-- Ohne sie hat der Cron dieselbe tote ID alle 45 Minuten erneut abgefragt und pro Versuch eine
+-- Fehlerzeile geschrieben. Eine Zeile lebt nur solange, wie es Fehlschläge gibt: der erste
+-- erfolgreiche Abruf löscht sie wieder (clearMediaFetchFailures).
+CREATE TABLE IF NOT EXISTS comment_fetch_failures (
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  media_id TEXT NOT NULL,
+  failures INTEGER NOT NULL DEFAULT 0,
+  first_failed_at TEXT NOT NULL,
+  last_failed_at TEXT NOT NULL,
+  last_status INTEGER,
+  last_error TEXT,
+  retry_after TEXT NOT NULL,
+  paused_logged_at TEXT,
+  PRIMARY KEY (customer_id, media_id)
+);
+CREATE INDEX IF NOT EXISTS comment_fetch_failures_retry ON comment_fetch_failures(customer_id, retry_after);
 `);
 
 // Migration: add columns to a table that existed before this version. SQLite has no
@@ -529,6 +547,22 @@ migrateColumns("customers", [
 migrateColumns("connections", [["expiry_warning_sent_at", "TEXT"]]);
 
 /**
+ * Plattform-Sperre einer einzelnen Verbindung (siehe connection-block.ts).
+ *
+ * Wenn LinkedIn mit RESTRICTED_MEMBER oder Instagram mit "We restrict certain activity"
+ * (code=4 subcode=2207051) antwortet, ist das KEIN vorübergehender Fehler: die Plattform hat das
+ * Konto eingeschränkt, und jeder weitere Versuch scheitert identisch. Vorher wurde genau das
+ * endlos wiederholt (allein 44 RESTRICTED_MEMBER-Zeilen im Log). Diese Spalten merken sich den
+ * Zustand, damit die Routinen die Verbindung überspringen und das Panel dem Kunden den Grund
+ * anzeigen kann. Zurückgesetzt wird beim Neu-Verbinden oder beim nächsten erfolgreichen Aufruf.
+ */
+migrateColumns("connections", [
+  ["blocked_at", "TEXT"],
+  ["blocked_code", "TEXT"],
+  ["blocked_reason", "TEXT"],
+]);
+
+/**
  * Panel v20: Analytics nach Kanal getrennt (Instagram/LinkedIn) statt implizit nur Instagram -
  * siehe Session-Bericht. Nur analytics_account_snapshots braucht die neue Spalte:
  * analytics_post_snapshots ist über post_id schon an eine posts-Zeile gebunden, die ihrerseits
@@ -687,6 +721,25 @@ export interface ConnectionRow {
   connected_at: string;
   updated_at: string;
   expiry_warning_sent_at: string | null;
+  /** Gesetzt, sobald die Plattform diese Verbindung gesperrt hat - siehe connection-block.ts. */
+  blocked_at: string | null;
+  /** Kurzschlüssel der Sperre, z.B. "RESTRICTED_MEMBER" oder "IG_RESTRICTED_ACTIVITY". */
+  blocked_code: string | null;
+  /** Klartext für das Panel, ohne technische Rohdaten. */
+  blocked_reason: string | null;
+}
+
+/** Eine Medien-ID, deren Kommentar-Abruf wiederholt gescheitert ist (comment-backoff.ts). */
+export interface CommentFetchFailureRow {
+  customer_id: string;
+  media_id: string;
+  failures: number;
+  first_failed_at: string;
+  last_failed_at: string;
+  last_status: number | null;
+  last_error: string | null;
+  retry_after: string;
+  paused_logged_at: string | null;
 }
 
 export interface PostRow {

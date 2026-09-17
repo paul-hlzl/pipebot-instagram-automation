@@ -5,6 +5,7 @@ import { getConfig } from "./config.js";
 import { generateImageUrl, FAL_IMAGE_COST_USD, type ImageBranding } from "./fal.js";
 import { ensureAdminPassword, ensureAuthToken, writeAccessToken, writeLinkedInTokens } from "./env-file.js";
 import { toToolMessage, ToolError } from "./errors.js";
+import { ConnectionBlockedError, noteConnectionError } from "./panel/connection-block.js";
 import {
   getPublishingLimit,
   publishImageToInstagram,
@@ -27,6 +28,8 @@ import { startPostRequestExpiry, startVideoSchedule } from "./panel/videos.js";
 import { startStandstillWatch } from "./panel/standstill-watch.js";
 import {
   assertChannelEnabled,
+  PROVIDER_FOR_CHANNEL,
+  type PublishChannel,
   assertLinkedInHasImage,
   assertNoBannedWords,
   assertRequiredElements,
@@ -88,6 +91,29 @@ function errorResult(error: unknown) {
     isError: true as const,
     content: [{ type: "text" as const, text: message }],
   };
+}
+
+/**
+ * Fehlerbehandlung der kundengebundenen Veroeffentlichungs-Tools.
+ *
+ * Drei Faelle, bewusst unterschiedlich laut:
+ *  - Die Plattform meldet ERSTMALIG eine Kontosperre (LinkedIn RESTRICTED_MEMBER, Instagram
+ *    subcode=2207051): einmal deutlich loggen und die Verbindung vermerken. Ab dann bricht
+ *    assertChannelEnabled jeden weiteren Versuch ab, bevor ueberhaupt ein Aufruf hinausgeht.
+ *  - Der Abbruch wegen einer BEREITS vermerkten Sperre: gar nicht loggen. Genau diese Zeile ist es,
+ *    die vorher 44x im Log stand, ohne je etwas Neues zu sagen.
+ *  - Alles andere: unveraendert wie bisher.
+ */
+function publishFailure(tool: string, error: unknown, customerId: string | undefined, channel: PublishChannel) {
+  const block = noteConnectionError(customerId, PROVIDER_FOR_CHANNEL[channel], error);
+  if (block) {
+    console.error(
+      `${tool}: ${customerId} - ${block.code}. Verbindung als gesperrt vermerkt, weitere Versuche werden uebersprungen, bis der Kunde sie neu verbindet.`,
+    );
+  } else if (!(error instanceof ConnectionBlockedError)) {
+    console.error(`${tool}:`, toToolMessage(error));
+  }
+  return errorResult(error);
 }
 
 function createServer(): McpServer {
@@ -239,8 +265,7 @@ function createServer(): McpServer {
         }
         return textResult(result);
       } catch (error) {
-        console.error("publish_generated_post:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("publish_generated_post", error, customer_id, "ig_feed");
       }
     },
   );
@@ -290,8 +315,7 @@ function createServer(): McpServer {
           warning: published.warning,
         });
       } catch (error) {
-        console.error("generate_and_publish_post:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("generate_and_publish_post", error, customer_id, "ig_feed");
       }
     },
   );
@@ -376,8 +400,7 @@ function createServer(): McpServer {
         }
         return textResult({ postId: published.postId, topic, imageUrls, warning: published.warning });
       } catch (error) {
-        console.error("generate_and_publish_carousel_post:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("generate_and_publish_carousel_post", error, customer_id, "ig_feed");
       }
     },
   );
@@ -468,8 +491,7 @@ function createServer(): McpServer {
         }
         return textResult(published);
       } catch (error) {
-        console.error("publish_approved_carousel_post:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("publish_approved_carousel_post", error, customer_id, "ig_feed");
       }
     },
   );
@@ -561,8 +583,7 @@ function createServer(): McpServer {
         }
         return textResult(result);
       } catch (error) {
-        console.error("publish_generated_story:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("publish_generated_story", error, customer_id, "ig_story");
       }
     },
   );
@@ -609,8 +630,7 @@ function createServer(): McpServer {
           prompt: generated.prompt,
         });
       } catch (error) {
-        console.error("generate_and_publish_story:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("generate_and_publish_story", error, customer_id, "ig_story");
       }
     },
   );
@@ -703,8 +723,7 @@ function createServer(): McpServer {
         }
         return textResult(result);
       } catch (error) {
-        console.error("publish_linkedin_post:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("publish_linkedin_post", error, customer_id, "linkedin");
       }
     },
   );
@@ -756,8 +775,7 @@ function createServer(): McpServer {
         }
         return textResult(result);
       } catch (error) {
-        console.error("publish_linkedin_image_post:", toToolMessage(error));
-        return errorResult(error);
+        return publishFailure("publish_linkedin_image_post", error, customer_id, "linkedin");
       }
     },
   );

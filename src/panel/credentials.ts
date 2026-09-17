@@ -19,6 +19,7 @@ import {
 } from "./db.js";
 import { randomToken } from "./crypto.js";
 import { decrypt, encrypt } from "./crypto.js";
+import { assertConnectionUsable } from "./connection-block.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr, type ScheduleInput } from "./schedule.js";
@@ -30,7 +31,7 @@ import { approvalNeededEmail, firstPostLiveEmail, pendingApprovalsSummaryEmail, 
 
 const DAY = 86_400_000;
 
-export type ConnectionStatus = "ok" | "renew-soon" | "expired";
+export type ConnectionStatus = "ok" | "renew-soon" | "expired" | "blocked";
 
 function canAutoRefresh(provider: Provider, row: ConnectionRow): boolean {
   if (!provider.refresh) return false;
@@ -44,6 +45,9 @@ function canAutoRefresh(provider: Provider, row: ConnectionRow): boolean {
 export const RENEW_SOON_WINDOW_DAYS = 14;
 
 export function connectionStatus(row: ConnectionRow): ConnectionStatus {
+  // Eine Plattform-Sperre schlaegt alles andere: ein noch gueltiger Token nuetzt nichts, solange
+  // LinkedIn/Instagram das Konto eingeschraenkt hat (siehe connection-block.ts).
+  if (row.blocked_at) return "blocked";
   if (!row.expires_at) return "ok";
   const left = new Date(row.expires_at).getTime() - Date.now();
   if (left <= 0) {
@@ -64,6 +68,10 @@ export interface ChannelOverview {
   accountName: string | null;
   expiresAt: string | null;
   status: ConnectionStatus;
+  /** Zeitpunkt, seit dem die Plattform diese Verbindung gesperrt hat (null = nicht gesperrt). */
+  blockedAt: string | null;
+  /** Klartext-Begruendung fuer den Kunden, wenn gesperrt. */
+  blockedReason: string | null;
 }
 
 export interface CustomerOverview {
@@ -149,6 +157,8 @@ function channelsFor(customerId: string): ChannelOverview[] {
     accountName: r.account_name,
     expiresAt: r.expires_at,
     status: connectionStatus(r),
+    blockedAt: r.blocked_at,
+    blockedReason: r.blocked_reason,
   }));
 }
 
@@ -232,6 +242,13 @@ export const CHANNEL_LABEL: Record<PublishChannel, string> = {
   linkedin: "LinkedIn",
 };
 
+/** Welcher Verbindungs-Provider hinter einem Veroeffentlichungs-Kanal steht. */
+export const PROVIDER_FOR_CHANNEL: Record<PublishChannel, string> = {
+  ig_feed: "instagram",
+  ig_story: "instagram",
+  linkedin: "linkedin",
+};
+
 const CHANNEL_COLUMN: Record<PublishChannel, "ig_feed_enabled" | "ig_story_enabled" | "linkedin_enabled"> = {
   ig_feed: "ig_feed_enabled",
   ig_story: "ig_story_enabled",
@@ -258,6 +275,10 @@ export function assertChannelEnabled(customerId: string | undefined, channel: Pu
   if (row && !row.enabled) {
     throw new Error(`Kunde ${customerId}: ${CHANNEL_LABEL[channel]} ist im Panel deaktiviert - keine Veröffentlichung möglich.`);
   }
+  // Hat die Plattform selbst das Konto gesperrt, hat ein weiterer Aufruf keinen Zweck: er
+  // scheitert garantiert identisch. Hier abzubrechen ist der Punkt, an dem aus einer endlosen
+  // Wiederholung ein einmaliger, klarer Hinweis wird (siehe connection-block.ts).
+  assertConnectionUsable(customerId, PROVIDER_FOR_CHANNEL[channel]);
 }
 
 /** True if this customer has a trial end date in the past. Routines should skip these instead of posting. */

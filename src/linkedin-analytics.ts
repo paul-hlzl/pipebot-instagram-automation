@@ -11,13 +11,13 @@
  * for one target costs 7 requests, not 1.
  */
 import { ToolError } from "./errors.js";
+import { LINKEDIN_ANALYTICS_VERSION } from "./linkedin-version.js";
 
 const API = "https://api.linkedin.com";
-// LinkedIn-Version explicitly pinned here (independent of linkedin.ts's own VERSION constant) -
-// the metricType response shape changed at 202605 (object -> plain string, see parseMetricType
-// below), so this client must always know exactly which shape to expect. Bump deliberately, not
-// as a side effect of bumping linkedin.ts's posting-API version.
-const ANALYTICS_VERSION = "202608";
+// This client uses its OWN version, independent of linkedin.ts's posting-API version: the
+// metricType response shape changed at 202605 (object -> plain string, see parseMetricType below),
+// so it must always know exactly which shape to expect. Bump deliberately, not as a side effect of
+// bumping the posting-API version. Value and full rationale: linkedin-version.ts.
 
 export type MemberPostMetricType =
   | "IMPRESSION"
@@ -73,7 +73,7 @@ export function parseMetricType(raw: string | Record<string, string>): MemberPos
 function headers(accessToken: string): Record<string, string> {
   return {
     Authorization: `Bearer ${accessToken}`,
-    "LinkedIn-Version": ANALYTICS_VERSION,
+    "LinkedIn-Version": LINKEDIN_ANALYTICS_VERSION,
     "X-Restli-Protocol-Version": "2.0.0",
   };
 }

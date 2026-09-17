@@ -1959,7 +1959,8 @@ export function createPanelRouter(): Router {
            account_id = excluded.account_id, account_name = excluded.account_name,
            access_token_enc = excluded.access_token_enc, refresh_token_enc = excluded.refresh_token_enc,
            expires_at = excluded.expires_at, scopes = excluded.scopes,
-           connected_at = excluded.connected_at, updated_at = excluded.updated_at, expiry_warning_sent_at = NULL`,
+           connected_at = excluded.connected_at, updated_at = excluded.updated_at, expiry_warning_sent_at = NULL,
+           blocked_at = NULL, blocked_code = NULL, blocked_reason = NULL`,
       ).run({
         customer_id: stored.customer_id,
         provider: pid,

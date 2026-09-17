@@ -12,6 +12,7 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test:limit": "tsx scripts/check-limit.ts",
+    "test:backoff": "node --import tsx --test scripts/backoff.test.ts",
     "audit:panel": "node scripts/audit-panel.mjs",
     "pretest:panel": "npm run audit:panel && pm2 restart instagram-mcp-staging > /dev/null",
     "test:panel": "node scripts/test-panel.mjs",

@@ -2,9 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { PACKAGE_ROOT } from "./config.js";
 import { ToolError } from "./errors.js";
+import { LINKEDIN_VERSION } from "./linkedin-version.js";
 
 const API = "https://api.linkedin.com";
-const VERSION = "202509"; // LinkedIn-Versions-Header, ca. quartalsweise anheben
 
 /** Overrides the .env-configured profile. Passed through from a tool's optional `customer_id`. */
 export interface LinkedInCredentials {
@@ -32,7 +32,7 @@ function requiredEnv(name: string): string {
 function headers(token: string, extra: Record<string, string> = {}): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
-    "LinkedIn-Version": VERSION,
+    "LinkedIn-Version": LINKEDIN_VERSION,
     "X-Restli-Protocol-Version": "2.0.0",
     "Content-Type": "application/json",
     ...extra,
