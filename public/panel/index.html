@@ -25,7 +25,19 @@
 </script>
 
 <link rel="preload" href="fonts/SchibstedGrotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="panel.css">
+<link rel="preload" href="fonts/InstrumentSerif-normal-latin.woff2" as="font" type="font/woff2" crossorigin>
+<!-- Aufgabe 0 (18.09.2026): Cache-Control war max-age=300 ohne Versionsparameter - eine
+     Aenderung konnte bis zu 5 Minuten alt beim Kunden ankommen. ?v=... erzwingt eine neue
+     URL bei jeder inhaltlichen Aenderung. WICHTIG: bei jedem Deploy, der panel.css/panel.js/
+     panel-theme.css inhaltlich aendert, muss dieser Wert hier UND unten beim <script> UND in
+     admin.html von Hand hochgezaehlt werden - es gibt keinen Build-Schritt, der das automatisch
+     erledigt (siehe OFFEN-FUER-PAUL.md fuer einen dauerhafteren Vorschlag). -->
+<link rel="stylesheet" href="panel.css?v=20260918b">
+<!-- Design-Tokens aus der echten Pipeflow-Website (pipeflow.at), siehe Kopf der Datei.
+     Nach panel.css geladen: ueberschreibt dieselben Variablennamen mit den echten
+     Website-Werten und ergaenzt Schriften (Instrument Serif, Inter, JetBrains Mono),
+     ohne dass panel.css selbst angefasst werden musste. -->
+<link rel="stylesheet" href="panel-theme.css?v=20260918b">
 <link rel="manifest" href="manifest.webmanifest">
 </head>
 <body>
@@ -133,6 +145,6 @@
 
 <button type="button" class="chat-fab" id="chat-fab" aria-label="Hilfe-Chat öffnen" hidden></button>
 
-<script src="panel.js"></script>
+<script src="panel.js?v=20260918b"></script>
 </body>
 </html>

@@ -750,14 +750,19 @@
     stopActiveDictation(); // wird bei Hinzufuegen/Entfernen/Uebernehmen neu gerendert
     const rows = S.pillarsDraft.map((p, i) => `
       <div class="pillar-row" data-pillar-index="${i}">
-        ${`<input type="text" data-pillar-title placeholder="z. B. Tipps" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">`}
+        ${`<input type="text" data-pillar-title placeholder="Projekte zeigen" value="${esc(p.title)}" maxlength="60" aria-label="Titel der Säule">`}
         ${`<input type="text" data-pillar-desc placeholder="Worum geht es dabei? (optional)" value="${esc(p.description)}" maxlength="300" aria-label="Beschreibung der Säule">`}
         <select data-pillar-weight aria-label="Gewichtung">${[1, 2, 3, 4, 5].map((w) => `<option value="${w}" ${p.weight === w ? "selected" : ""}>${w}×</option>`).join("")}</select>
         <button type="button" class="link" data-pillar-remove="${i}">Entfernen</button>
       </div>`).join("");
     return `
       <label>Content-Säulen <span class="opt">(optional)</span></label>
-      <p class="hint">Themen, zwischen denen abgewechselt wird. Gewicht = wie oft.</p>
+      <!-- Aufgabe 3 (18.09.2026): vorher nur eine Zeile Kleingedrucktes - Kunden verstanden
+           nicht, was gemeint ist. Jetzt: ein normal lesbarer Satz, ein konkretes Beispiel,
+           und optional 3-4 Saetze mehr hinter dem bestehenden "?"-Muster (infoHtml). -->
+      <p class="pillars-intro">Content-Säulen sind deine festen Themenbereiche. Pipeflow wechselt sie durch, damit nicht jeden Tag dasselbe kommt.</p>
+      <p class="pillars-example">Beispiel Tischlerei: Projekte zeigen · Material erklären · Team vorstellen · Kundenstimmen</p>
+      ${infoHtml("Statt eines einzigen Themas fuer alle Beitraege legst du hier mehrere feste Bereiche an, zum Beispiel \"Projekte\", \"Tipps\" und \"Team\". Pipeflow waehlt bei jedem neuen Beitrag automatisch eine Saeule aus und wechselt so ab. Die Gewichtung (1&times; bis 5&times;) steuert, wie oft eine Saeule im Vergleich zu den anderen drankommt - eine 3 kommt etwa dreimal so oft wie eine 1. Ohne eigene Saeulen entscheidet Pipeflow selbst, worueber es schreibt.")}
       <div id="pillars-list">${rows}</div>
       ${S.pillarsDraft.length < 6 ? `<button type="button" class="link" id="pillar-add">+ Säule hinzufügen</button>` : `<p class="hint">Maximal 6 Säulen.</p>`}
       ${S.aiAvailable ? `
@@ -807,7 +812,7 @@
       <div class="actions" style="margin-top:0">
         <button type="button" class="link" id="recover-submit">Neuen Zugangslink anfordern</button>
       </div>
-      <p id="recover-status" style="margin-top:8px;font-size:14px" aria-live="polite"></p>
+      <p id="recover-status" class="field-status" aria-live="polite"></p>
     </details>`;
   }
 
@@ -884,20 +889,28 @@
       </div>` : "";
 
     const partAHtml = `
+        <!-- Aufgabe 2 (18.09.2026): Firmenname+Website als zusammengehoerige Gruppe mit
+             Sektionslabel statt vier lose in einem Grid schwebender Felder; der Website-Button
+             sitzt jetzt direkt am Feld (eigene .field-group statt eigenstaendigem margin-top-
+             Absatz), eine Haarlinie trennt "Unternehmen" sichtbar von "Inhalt". -->
+        <p class="card-kicker">Unternehmen</p>
         <div class="grid2">
-          ${f("company", "Firmenname", "text", { ac: "organization" })}
-          <div class="field">
-            <label for="f-website">Website <span class="opt">(optional)</span></label>
-            <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
-            ${S.aiAvailable ? `<div class="website-suggest">
-              <button type="button" class="btn" id="analyze-website">Vorschlag aus meiner Website holen</button>
-              <p class="hint" id="analyze-website-hint">Vorschlag zum Prüfen - übernommen wird nichts von selbst.</p>
-            </div>` : ""}
+          <div class="field-group">
+            ${f("company", "Firmenname", "text", { ac: "organization", ph: "Testfirma GmbH" })}
+            <div class="field">
+              <label for="f-website">Website <span class="opt">(optional)</span></label>
+              <div class="field-with-action">
+                <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://www.testfirma.at" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
+                ${S.aiAvailable ? `<button type="button" class="btn" id="analyze-website">Vorschlag aus meiner Website holen</button>` : ""}
+              </div>
+              ${S.aiAvailable ? `<p class="hint" id="analyze-website-hint">Vorschlag zum Prüfen - übernommen wird nichts von selbst.</p>` : ""}
+            </div>
           </div>
-          ${f("contactName", "Ihr Name", "text", { ac: "name" })}
-          ${f("email", "E-Mail", "email", { ac: "email" })}
+          ${f("contactName", "Ihr Name", "text", { ac: "name", ph: "Max Mustermann" })}
+          ${f("email", "E-Mail", "email", { ac: "email", ph: "max.mustermann@testfirma.at" })}
         </div>
         <div id="website-suggestion" hidden></div>
+        <p class="card-kicker section-rule">Inhalt</p>
         ${f("industry", "Branche", "text", { optional: true, ph: "z. B. Physiotherapie, Tischlerei, Steuerberatung" })}
         <div class="field">
           <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
@@ -927,7 +940,7 @@
           </div>
           <div class="field">
             <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-            ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`}
+            ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "z. B. Testfirma")}">`}
             <p class="hint">Leer = Ihr Firmenname.</p>
             <p class="hint">Beispiel:</p>
             <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
@@ -968,7 +981,7 @@
           </div>
           <div class="field">
             <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-            ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`}
+            ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. Rabatte, Politik, Konkurrenz nennen">`}
             <p class="hint">Wird berücksichtigt, nicht erzwungen.</p>
           </div>
         </div>
@@ -1202,20 +1215,20 @@
               <div class="grid2">
                 <div class="field">
                   <label for="f-company">Firmenname</label>
-                  ${`<input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization">`}
+                  ${`<input id="f-company" name="company" type="text" value="${esc(c.company)}" required autocomplete="organization" placeholder="Testfirma GmbH">`}
                 </div>
                 <div class="field">
                   <label for="f-website">Website <span class="opt">(optional)</span></label>
-                  <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://">
+                  <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://www.testfirma.at">
                   ${S.aiAvailable ? `<p class="hint"><button type="button" class="link" id="analyze-website">Vorschlag aus meiner Website holen</button></p>` : ""}
                 </div>
                 <div class="field">
                   <label for="f-contactName">Ihr Name</label>
-                  ${`<input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name">`}
+                  ${`<input id="f-contactName" name="contactName" type="text" value="${esc(c.contactName)}" required autocomplete="name" placeholder="Max Mustermann">`}
                 </div>
                 <div class="field">
                   <label for="f-email">E-Mail</label>
-                  <input id="f-email" name="email" type="email" value="${esc(c.email)}" required autocomplete="email">
+                  <input id="f-email" name="email" type="email" value="${esc(c.email)}" required autocomplete="email" placeholder="max.mustermann@testfirma.at">
                 </div>
               </div>
               <div id="website-suggestion" hidden></div>
@@ -1225,7 +1238,7 @@
               </div>
               <div class="field">
                 <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
-                ${withDictate(`<textarea id="f-about" name="about" placeholder="Stichworte reichen.">${esc(c.about)}</textarea>`)}
+                ${withDictate(`<textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>`)}
                 <p class="hint">Stichworte reichen.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
                 <div id="ai-suggestion" hidden></div>
               </div>
@@ -1249,7 +1262,7 @@
                 </div>
                 <div class="field">
                   <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-                  ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "Ihr Firmenname")}">`}
+                  ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "z. B. Testfirma")}">`}
                   <p class="hint">Leer = Ihr Firmenname.</p>
                   <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
                     <span class="lp-headline" id="lp-headline" style="font-family:'${esc(fontOption(c.fontChoice).cssFamily)}'">Ihr Beitrag</span>
@@ -1297,7 +1310,7 @@
               </div>
               <div class="field">
                 <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-                ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. keine Preise nennen, kein Humor">`}
+                ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. Rabatte, Politik, Konkurrenz nennen">`}
                 <p class="hint">Wird berücksichtigt, nicht erzwungen.</p>
               </div>`)}
 
@@ -2278,7 +2291,7 @@
         <span class="channel-badge">Instagram-Kommentar</span>
         <p class="hint" style="margin:2px 0 10px">${esc(a.authorUsername ? `@${a.authorUsername}` : "Jemand")} schrieb: „${esc(a.commentText)}“</p>
         <label style="display:block;margin-bottom:4px">Ihre Antwort</label>
-        ${withDictate(`<textarea class="comment-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>`)}
+        ${withDictate(`<textarea class="comment-reply-text" rows="3" maxlength="1000" placeholder="Ihre Antwort auf den Kommentar …">${esc(a.generatedReply || "")}</textarea>`)}
         <div class="actions">
           <button class="btn" data-comment-approve="${esc(a.id)}">Freigeben</button>
           <button class="link" data-comment-reject="${esc(a.id)}">Ablehnen</button>
@@ -2302,7 +2315,7 @@
         <span class="channel-badge">Google-Bewertung</span>
         <p class="hint" style="margin:2px 0 10px">${esc(sterne)} ${esc(a.reviewerName || "Jemand")} schrieb: ${a.reviewText ? `„${esc(a.reviewText)}“` : "(nur Sterne, kein Text)"}</p>
         <label style="display:block;margin-bottom:4px">Ihre Antwort</label>
-        ${withDictate(`<textarea class="review-reply-text" rows="3" maxlength="1000">${esc(a.generatedReply || "")}</textarea>`)}
+        ${withDictate(`<textarea class="review-reply-text" rows="3" maxlength="1000" placeholder="Ihre Antwort auf die Bewertung …">${esc(a.generatedReply || "")}</textarea>`)}
         <div class="actions">
           <button class="btn" data-review-approve="${esc(a.id)}">Freigeben</button>
           <button class="link" data-review-reject="${esc(a.id)}">Ablehnen</button>
@@ -3558,6 +3571,23 @@
     return showAlert({ title: "Fehler", message: message || "Etwas ist schiefgelaufen." });
   }
 
+  /* Aufgabe 5: einheitliche, deutlich sichtbare Rueckmeldung DIREKT am Formular statt eines
+   * stummen oder nur unauffaellig eingefaerbten Texts. kind ist "ok" oder "bad" (nutzt dieselben
+   * .notice-Farben wie ueberall sonst im Panel). Scrollt das Element in den sichtbaren Bereich,
+   * falls es (z. B. nach einem langen Formular) gerade ausserhalb liegt - aria-live bleibt vom
+   * Aufrufer gesetzt (auf dem Element selbst im HTML), das aendert diese Funktion nicht an.
+   */
+  function setFieldStatus(el, kind, text) {
+    if (!el) return;
+    el.textContent = text || "";
+    el.className = text ? `field-status notice ${kind}` : "field-status";
+    if (text) {
+      const rect = el.getBoundingClientRect();
+      const viewH = window.innerHeight || document.documentElement.clientHeight;
+      if (rect.top < 0 || rect.bottom > viewH) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
   /* ================= Events ================= */
   function openLightbox(src, alt) {
     if (!src) return;
@@ -4137,21 +4167,34 @@
       return;
     }
     if (e.target.closest("#recover-submit")) {
+      // Aufgabe 5 (Bug): Klick loeste die Mail zwar aus, aber sichtbar passierte nichts - kein
+      // Ladezustand (busy griff nicht, siehe .link.busy in panel.css), keine auffaellige
+      // Rueckmeldung danach. Jetzt: Button-Text als Ladezustand, echte Deaktivierung als
+      // Doppelklick-Schutz (zuverlaessiger als nur die busy-Klasse), und eine .notice-Box
+      // direkt unterm Formular statt eines stillen 14px-Texts.
       const btn = e.target.closest("#recover-submit");
       const email = $("#f-recover-email")?.value.trim() || "";
       const status = $("#recover-status");
       if (!email) {
-        if (status) { status.textContent = "Bitte geben Sie Ihre E-Mail-Adresse ein."; status.style.color = "var(--stop)"; }
+        setFieldStatus(status, "bad", "Bitte geben Sie Ihre E-Mail-Adresse ein.");
         return;
       }
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
       btn.classList.add("busy");
+      btn.textContent = "Wird gesendet …";
+      setFieldStatus(status, "ok", "");
       try {
         await api("POST", "/api/recover-access", { email });
-        if (status) { status.textContent = "Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine E-Mail mit einem neuen Zugangslink verschickt."; status.style.color = ""; }
+        // Wortlaut bewusst unveraendert nicht-bestaetigend: sagt nichts darueber, ob die
+        // Adresse tatsaechlich existiert (verhindert das Ausspaehen registrierter E-Mails).
+        setFieldStatus(status, "ok", "Wenn zu dieser Adresse ein Konto besteht, ist der Zugangslink unterwegs. Schau in dein Postfach (auch im Spam).");
       } catch (err) {
-        if (status) { status.textContent = err.message || "Anfrage fehlgeschlagen."; status.style.color = "var(--stop)"; }
+        setFieldStatus(status, "bad", err.message || "Anfrage fehlgeschlagen. Bitte in ein paar Minuten erneut versuchen.");
       } finally {
+        btn.disabled = false;
         btn.classList.remove("busy");
+        btn.textContent = originalLabel;
       }
       return;
     }

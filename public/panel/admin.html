@@ -269,6 +269,11 @@ tbody tr:hover td { background: var(--wash); }
   .modal { padding: var(--s4); }
 }
 </style>
+<!-- Design-Tokens aus der echten Pipeflow-Website, siehe public/panel/panel-theme.css.
+     Nach dem obigen <style> geladen: ueberschreibt --paper/--ink/--rule/--wash usw. mit
+     den echten Website-Werten, damit Admin und Kunden-Panel dieselben Grundfarben
+     benutzen ("Admin darf schlichter bleiben, aber gleiche Tokens"). -->
+<link rel="stylesheet" href="../panel-theme.css?v=20260918b">
 </head>
 <body>
 

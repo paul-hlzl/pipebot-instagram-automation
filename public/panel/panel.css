@@ -92,7 +92,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--sans, "Schibsted Grotesk"), system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: var(--t-body);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -100,9 +100,18 @@ body {
   overscroll-behavior-y: none;
 }
 
-h1, h2, h3 { margin: 0; text-wrap: balance; letter-spacing: -.02em; line-height: 1.18; }
-h1 { font-size: var(--t-h1); font-weight: 700; }
-h2 { font-size: var(--t-h2); font-weight: 700; line-height: 1.25; }
+/* Aufgabe 1: Ueberschriften in der Display-Serif der Website (Instrument Serif, wie
+   pipeflow.at/.display). Kein font-weight:700 - die Schrift hat nur Regular/Italic, ein
+   synthetisches Fett saehe hohl aus; die Wirkung kommt aus Groesse und Serifenkontrast. */
+h1, h2, h3 {
+  margin: 0; text-wrap: balance;
+  font-family: var(--serif, inherit);
+  font-weight: 400;
+  letter-spacing: var(--display-tracking, -.02em);
+  line-height: 1.08;
+}
+h1 { font-size: var(--t-h1); }
+h2 { font-size: var(--t-h2); line-height: 1.15; }
 p { margin: 0; text-wrap: pretty; }
 a { color: inherit; }
 
@@ -163,19 +172,23 @@ a { color: inherit; }
 /* ===========================================================================
    Kopfzeile (Desktop) / Bottom-Bar (Mobil)
    =========================================================================== */
+/* Aufgabe 1 (18.09.2026): Hoehe und Wortmarke wie auf pipeflow.at (dort .top__in/.mark) -
+   70px hohe Kopfzeile, "Pipeflow" in der Display-Serif statt fett gesetzter Sans. */
 .appbar {
   position: sticky; top: 0; z-index: 60;
   display: flex; align-items: center; gap: var(--s5);
-  padding: var(--s3) var(--s4);
+  min-height: 70px; padding: 0 var(--s5);
   background: color-mix(in srgb, var(--paper) 88%, transparent);
   backdrop-filter: saturate(1.2) blur(10px);
   border-bottom: 1px solid var(--rule);
 }
 .brand {
-  display: inline-flex; align-items: center; gap: var(--s2);
-  font-weight: 700; letter-spacing: -.02em; text-decoration: none; flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 0.22em; flex: 0 0 auto;
+  font-family: var(--serif, inherit); font-weight: 400; font-size: 25px;
+  letter-spacing: var(--display-tracking, -.02em); line-height: 1;
+  text-decoration: none;
 }
-.brand svg { fill: currentColor; display: block; }
+.brand svg { fill: currentColor; display: block; width: 1.15em; height: 1.15em; }
 
 .appnav { display: none; gap: var(--s5); flex: 1 1 auto; position: relative; }
 .appnav a {
@@ -261,8 +274,9 @@ a { color: inherit; }
    =========================================================================== */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
-  min-height: 44px; padding: var(--s3) var(--s5);
-  border: 1px solid var(--ink); border-radius: var(--r3);
+  min-height: var(--btn-h, 44px); padding: var(--s3) var(--s5);
+  border: 1px solid var(--ink); border-radius: var(--r-pill, var(--r3));
+  letter-spacing: var(--btn-tracking, normal);
   background: var(--paper); color: var(--ink); font: inherit; font-weight: 500;
   cursor: pointer; text-decoration: none; text-align: center;
   transition: transform var(--dur-1) var(--ease), background var(--dur-1) var(--ease), opacity var(--dur-1) var(--ease);
@@ -291,6 +305,13 @@ a { color: inherit; }
   text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
 }
 .link:hover { text-decoration-thickness: 2px; }
+/* Aufgabe 5: ~15 Stellen im Panel setzen classList.add("busy")/disabled auf Buttons mit
+   class="link" statt class="btn" - die .btn.busy-Regel oben griff dort nie, das war die
+   Hauptursache fuer "nichts passiert sichtbar beim Klick". Eine Regel behebt es ueberall
+   auf einmal, ohne jede einzelne Stelle einzeln anfassen zu muessen. */
+.link.busy, .link[disabled], .link[aria-disabled="true"] {
+  opacity: .5; pointer-events: none; cursor: default; text-decoration-color: transparent;
+}
 
 .field { margin-bottom: var(--s5); }
 .field > label, .lbl {
@@ -315,6 +336,11 @@ input[type=date] { max-width: 190px; }
 input[type=number] { max-width: 120px; }
 input:hover, textarea:hover, select:hover { border-color: var(--stone); }
 input:focus, textarea:focus, select:focus { border-color: var(--ink); outline: none; box-shadow: 0 0 0 1px var(--ink); }
+/* Aufgabe 2: gedaempftes, aber lesbares Grau statt des variierenden Browser-Standards -
+   und garantiert NICHT die normale Textfarbe, damit ein Platzhalter nie mit echtem Inhalt
+   verwechselt wird. */
+input::placeholder, textarea::placeholder { color: var(--stone); opacity: 1; }
+
 input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--stop); }
 .err { color: var(--stop); font-size: var(--t-small); margin-top: var(--s2); }
 .hint { color: var(--stone); font-size: var(--t-small); margin-top: var(--s2); }
@@ -467,7 +493,16 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .card-media { width: 100%; aspect-ratio: 1; background: var(--wash); display: block; object-fit: cover; }
 .card-media.story { aspect-ratio: 9 / 16; max-height: 60dvh; object-fit: contain; background: var(--ink); }
 .card-body { padding: var(--s4); }
-.card-kicker { font-size: var(--t-micro); font-weight: 500; color: var(--stone); display: flex; align-items: center; gap: var(--s2); }
+/* Aufgabe 1: Sektionslabels als gesperrte Mono-Uppercase-Kleinlabels wie auf der Website
+   (dort .kicker/.bay__t). Bewusst bei 11px belassen (Website-Originalwert) - das ist ein
+   Stilelement der Marke, kein Hinweistext; die 14px-Mindestgroesse aus Aufgabe 4 gilt fuer
+   Hilfe-/Rechtstexte, nicht fuer dieses Typografie-Detail. */
+.card-kicker {
+  font-family: var(--kicker-family, inherit); font-size: var(--kicker-size, var(--t-micro));
+  letter-spacing: var(--kicker-tracking, normal); text-transform: uppercase;
+  font-weight: 400; color: var(--kicker-color, var(--stone));
+  display: flex; align-items: center; gap: var(--s2);
+}
 .card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
 .card-actions .btn { flex: 1 1 auto; }
 
@@ -525,9 +560,15 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
   border-radius: var(--r1); padding: var(--s4); background: var(--paper);
 }
 .notice.warn { border-left-color: var(--warn-line); background: var(--warn-bg); }
-.notice.bad { border-left-color: var(--stop); }
-.notice.ok { border-left-color: var(--go); }
+.notice.bad { border-left-color: var(--stop); background: color-mix(in srgb, var(--stop) 6%, var(--paper)); }
+.notice.ok { border-left-color: var(--go); background: color-mix(in srgb, var(--go) 8%, var(--paper)); }
 .notice strong { display: block; margin-bottom: var(--s1); }
+/* Aufgabe 5: Container fuer Formular-Rueckmeldungen (z. B. #recover-status). Leer = kein
+   Platzbedarf; sobald JS .notice ok/bad ergaenzt (siehe setFieldStatus), sieht es aus wie
+   jede andere Erfolgs-/Fehlermeldung im Panel - ein einheitliches Muster statt eines
+   eigenen kleinen Sonderfalls. */
+.field-status:empty { display: none; }
+.field-status.notice { margin-top: var(--s3); font-size: var(--t-small); }
 
 /* ===========================================================================
    Toasts (mit Rückgängig)
@@ -756,8 +797,10 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .check span { flex: 1 1 auto; }
 
 .banner { border: 1px solid var(--rule); border-left: 3px solid var(--ink); border-radius: var(--r1); padding: var(--s3) var(--s4); font-size: var(--t-small); margin-bottom: var(--s4); }
-.banner.ok { border-left-color: var(--go); }
-.banner.bad { border-left-color: var(--stop); }
+/* Aufgabe 5: nicht nur der linke Rand faerbt sich - ein dezent getoentes Feld ist deutlich
+   sichtbarer als ein 3px-Strich, besonders bei fluechtigem Ueberfliegen. */
+.banner.ok { border-left-color: var(--go); background: color-mix(in srgb, var(--go) 8%, var(--paper)); }
+.banner.bad { border-left-color: var(--stop); background: color-mix(in srgb, var(--stop) 6%, var(--paper)); }
 /* Anfrage hat nicht geklappt: Warnfarbe statt Rot - es ist kein Defekt, sondern etwas, das der
    Kunde meist selbst beheben kann (siehe markPostRequestSkipped). */
 .banner.warn { border-left-color: var(--warn-line); background: var(--warn-bg); }
@@ -844,10 +887,28 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 
 /* „Vorschlag aus meiner Website holen": war ein Textlink in einer Fußnote und wurde übersehen -
    jetzt eine eigene Aktion mit Erklärung, am Handy volle Breite (Daumenzone). */
-.website-suggest { margin-top: var(--s3); }
-.website-suggest .btn { width: 100%; }
-.website-suggest .hint { margin-top: var(--s2); }
-@media (min-width: 640px) { .website-suggest .btn { width: auto; } }
+/* Aufgabe 2 (18.09.2026): Firmenname+Website als zusammengehoerige Gruppe, statt vier lose
+   im Grid schwebender Felder. .field-group hat selbst keinen eigenen Abstand - die Gruppierung
+   entsteht durch das gemeinsame Sektionslabel darueber, nicht durch einen Rahmen. */
+.field-group > .field:last-child { margin-bottom: 0; }
+/* Website-Button direkt am Feld verankert statt frei schwebend darunter: enger Abstand statt
+   eines eigenen margin-top-Absatzes, voll breit auf schmalen Screens. */
+.field-with-action { display: flex; flex-direction: column; gap: var(--s2); }
+.field-with-action .btn { width: 100%; }
+@media (min-width: 640px) { .field-with-action .btn { width: auto; align-self: flex-start; } }
+/* Sektionslabel mit Haarlinie darueber statt eines reinen Abstandslochs zwischen Gruppen. */
+.card-kicker.section-rule { margin-top: var(--s7); padding-top: var(--s5); border-top: 1px solid var(--rule); }
+.card-kicker + .grid2, .card-kicker + .field { margin-top: var(--s3); }
+/* Aufgabe 3 (18.09.2026): Content-Saeulen-Erklaerung war zusammengestaucht (14px, kein
+   eigener Abstand, Beispiel im selben optischen Block wie der Erklaersatz). Jetzt 15px,
+   lockerer Zeilenabstand, begrenzte Zeilenbreite (~60 Zeichen), das Beispiel optisch als
+   eigene, abgesetzte Zeile in Mono - dieselbe Anmutung wie die Mono-Kleinlabels der Website,
+   aber gut lesbar (nicht 11px). */
+.pillars-intro { font-size: 15px; line-height: 1.6; max-width: 60ch; color: var(--ink); margin: var(--s3) 0 var(--s4); }
+.pillars-example {
+  font-family: var(--mono, inherit); font-size: 13px; line-height: 1.5; color: var(--stone);
+  margin: 0 0 var(--s5); padding: var(--s3); background: var(--wash); border-radius: var(--r1);
+}
 
 /* „Ihr erster Beitrag": wächst mit, während das Briefing ausgefüllt wird. Dieselbe Kartensprache
    wie eine echte Beitragskarte - nur mit dem Bildquadrat aus der Aussehen-Vorschau. */
@@ -1121,7 +1182,7 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 .ai-box .row { margin-top: var(--s4); }
 .ai-box button {
   min-height: 40px; padding: var(--s2) var(--s4);
-  border: 1px solid var(--ink); border-radius: var(--r3);
+  border: 1px solid var(--ink); border-radius: var(--r-pill, var(--r3));
   background: var(--ink); color: var(--paper); font: inherit; font-weight: 500; cursor: pointer;
 }
 .ai-box button.ghost { background: var(--paper); color: var(--ink); border-color: var(--line-strong); }
@@ -1143,7 +1204,7 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
 /* --- Kleintexte, die ohne Regel wie Fliesstext aussahen --- */
 .fine { font-size: var(--t-small); color: var(--stone); margin-top: var(--s3); }
 .locked { font-size: var(--t-small); color: var(--stone); border-left: 3px solid var(--line-strong); padding-left: var(--s3); margin-top: var(--s2); }
-.preview-hint { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s2); }
+.preview-hint { font-size: var(--t-small); color: var(--stone); margin-top: var(--s2); }
 .set-noresult { color: var(--stone); padding: var(--s6) 0; }
 .intro { margin-bottom: var(--s4); }
 .intro-trial { font-size: var(--t-small); color: var(--stone); }
@@ -1255,7 +1316,12 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
    =========================================================================== */
 
 /* --- Rangfolge: Gruppentitel deutlich, Beschriftung normal, Hinweis dezent --- */
-.hint { font-size: var(--t-micro); line-height: 1.45; }
+/* Aufgabe 4 (18.09.2026): war hier am 15.09. panel-weit auf --t-micro (12px) verkleinert -
+   das traf JEDEN .hint im Panel, nicht nur die vermeintlich unwichtigen. Kontrastarmer,
+   zu kleiner Text war genau das gemeldete Problem. --t-small (14px) ist die neue
+   Mindestgroesse, dezent bleibt .hint weiterhin ueber die Farbe (var(--stone)), nicht
+   mehr ueber die Groesse. */
+.hint { font-size: var(--t-small); line-height: 1.45; }
 .setgroup > h2 { font-size: var(--t-h2); }
 .setgroup-lede { color: var(--stone); font-size: var(--t-small); margin-bottom: var(--s5); max-width: 60ch; }
 
@@ -1282,7 +1348,7 @@ p.hint + .grid2, p.hint + .field, p.hint + fieldset { margin-top: var(--s5); }
 .info > summary::-webkit-details-marker { display: none; }
 .info > summary:hover { border-color: var(--ink); color: var(--ink); }
 .info[open] > summary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.info p { font-size: var(--t-micro); color: var(--stone); margin-top: var(--s2); max-width: 52ch; }
+.info p { font-size: var(--t-small); color: var(--stone); margin-top: var(--s2); max-width: 52ch; }
 
 /* --- B1: Senden-Knopf passt zur Hoehe des Eingabefelds (das Textfeld erbte min-height:96px,
        der Knopf streckte sich per align-items:stretch auf denselben Block) --- */
