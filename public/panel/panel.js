@@ -996,6 +996,11 @@
           <p class="hint">Fehlt eines, wird nicht veröffentlicht.</p>
         </div>
         <div class="field">
+          <label for="f-customHashtags">Eigene Hashtags <span class="opt">(optional)</span></label>
+          <input id="f-customHashtags" name="customHashtags" type="text" value="${esc(c.customHashtags || "")}" placeholder="#tischlerei #handwerk #oberoesterreich">
+          <p class="hint">Werden zusätzlich zu den erzeugten Hashtags verwendet.</p>
+        </div>
+        <div class="field">
           <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
           <label class="check"><input type="checkbox" name="igFeedEnabled" ${c.igFeedEnabled !== false ? "checked" : ""}><span>Instagram Feed-Beiträge</span></label>
           <label class="check"><input type="checkbox" name="igStoryEnabled" ${c.igStoryEnabled !== false ? "checked" : ""}><span>Instagram Storys</span></label>
@@ -1302,6 +1307,11 @@
                 <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
                 ${`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`}
                 <p class="hint">Fehlt eines, wird nicht veröffentlicht.</p>
+              </div>
+              <div class="field">
+                <label for="f-customHashtags">Eigene Hashtags <span class="opt">(optional)</span></label>
+                <input id="f-customHashtags" name="customHashtags" type="text" value="${esc(c.customHashtags || "")}" placeholder="#tischlerei #handwerk #oberoesterreich">
+                <p class="hint">Werden zusätzlich zu den erzeugten Hashtags verwendet.</p>
               </div>
               <div class="field">
                 <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>

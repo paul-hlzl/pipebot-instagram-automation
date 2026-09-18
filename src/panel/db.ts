@@ -628,6 +628,12 @@ migrateColumns("post_requests", [["note", "TEXT"], ["notify_email", "INTEGER NOT
 migrateColumns("planned_posts", [["branding_version_at_generation", "TEXT"]]);
 migrateColumns("pending_approvals", [["branding_version_at_generation", "TEXT"]]);
 
+// Panel-Feinschliff, Aufgabe 4 (18.09.2026): eigene Hashtags als Freitext, zusaetzlich zur
+// bestehenden hashtag_pref-Mengensteuerung (keine/wenige/viele). NULL/leer aendert nichts am
+// bisherigen Verhalten - erst wenn ein Kunde etwas eintraegt, wird es beim Erzeugen
+// beruecksichtigt (siehe anthropic.ts).
+migrateColumns("customers", [["custom_hashtags", "TEXT"]]);
+
 // 15.09.2026: Zeilen aus der Zeit VOR dieser Spalte bekommen created_at nachgetragen. Fuer sie
 // ist created_at exakt der Moment, in dem ihr Text geschrieben wurde - jeder Weg, der einen Text
 // spaeter ersetzt, setzt die Spalte naemlich mit. Ohne diesen Nachtrag gilt "NULL" als "Alter
@@ -665,6 +671,7 @@ export interface CustomerRow {
   customer_paused: number;
   banned_words: string | null;
   required_elements: string | null;
+  custom_hashtags: string | null;
   active_weekdays: string | null;
   instagram_weekdays: string | null;
   linkedin_weekdays: string | null;

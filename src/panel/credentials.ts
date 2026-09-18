@@ -93,6 +93,8 @@ export interface CustomerOverview {
   bannedWords: string | null;
   /** Comma-separated elements that MUST appear somewhere in headline+caption combined, or publish tools refuse. */
   requiredElements: string | null;
+  /** Freitext eigener Hashtags (Panel-Feinschliff, 18.09.2026) - noch nicht in der Erzeugung beruecksichtigt, siehe OFFEN-FUER-PAUL.md. */
+  customHashtags: string | null;
   /** Preferred call-to-action slug: link_bio | anrufen | nachricht | termin | keiner */
   ctaPreference: string | null;
   /** ISO timestamp - if set and in the past, treat as an expired trial (still "active" status, but routines should skip it). Null = no trial limit. */
@@ -201,6 +203,7 @@ function overview(c: CustomerRow): CustomerOverview {
     avoidTopics: c.avoid_topics,
     bannedWords: c.banned_words,
     requiredElements: c.required_elements,
+    customHashtags: c.custom_hashtags,
     ctaPreference: c.cta_preference,
     trialEndsAt: c.trial_ends_at,
     trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),

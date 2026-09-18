@@ -236,7 +236,7 @@ const bool = (v: unknown, fallback: boolean): boolean => (typeof v === "boolean"
 interface BriefingInput {
   company: string; contactName: string; email: string; website: string; industry: string;
   about: string; tone: string; frequency: string; postTime: string;
-  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string; bannedWords: string; requiredElements: string;
+  accentColor: string; watermarkText: string; avoidTopics: string; ctaPreference: string; bannedWords: string; requiredElements: string; customHashtags: string;
   igFeedEnabled: boolean; igStoryEnabled: boolean; linkedinEnabled: boolean;
   hashtagPreference: string; emojisEnabled: boolean; language: string;
   contentPillars: { title: string; description?: string; weight?: number }[];
@@ -310,6 +310,7 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     ctaPreference: str(body.ctaPreference, 30),
     bannedWords: str(body.bannedWords, 500),
     requiredElements: str(body.requiredElements, 500),
+    customHashtags: str(body.customHashtags, 500),
     igFeedEnabled: bool(body.igFeedEnabled, true),
     igStoryEnabled: bool(body.igStoryEnabled, true),
     linkedinEnabled: bool(body.linkedinEnabled, true),
@@ -448,6 +449,7 @@ function publicState(c: CustomerRow) {
       avoidTopics: c.avoid_topics ?? "", ctaPreference: c.cta_preference ?? "link_bio",
       bannedWords: c.banned_words ?? "",
       requiredElements: c.required_elements ?? "",
+      customHashtags: c.custom_hashtags ?? "",
       trialEndsAt: c.trial_ends_at,
       trialExpired: isTrialExpired({ trialEndsAt: c.trial_ends_at }),
       trialDaysLeft: trialDaysLeft(c.trial_ends_at),
@@ -1067,7 +1069,7 @@ export function createPanelRouter(): Router {
          Einbau des Verlaufs ins Onboarding, betraf aber 13 weitere Felder mit. */
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
-         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements,
+         ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements, custom_hashtags,
          active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode, notify_on_publish, notify_weekly_report,
          gradient_enabled, gradient_color2, gradient_direction, font_choice,
          comment_automation_enabled, comment_automation_mode,
@@ -1075,11 +1077,11 @@ export function createPanelRouter(): Router {
          video_enabled, video_weekdays, video_post_time, video_length_seconds, video_zoom_direction, video_voice, video_voice_enabled,
          carousel_slide_count, carousel_auto_frequency,
          login_key_hash, email_verify_token_hash, consent_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
-      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+      data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null, data.customHashtags || null,
       data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
       data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection, data.fontChoice,
       data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
@@ -1131,7 +1133,7 @@ export function createPanelRouter(): Router {
     db.prepare(
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
-         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?,
+         ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?, custom_hashtags=?,
          active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
          comment_automation_enabled=?, comment_automation_mode=?,
          google_review_automation_enabled=?, google_review_mode=?, google_review_posts_enabled=?, google_review_post_min_stars=?,
@@ -1145,7 +1147,7 @@ export function createPanelRouter(): Router {
         data.company, data.contactName, data.email, data.website || null, data.industry || null, data.about || null,
         data.tone, data.frequency, data.postTime,
         data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
-        data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null,
+        data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null, data.customHashtags || null,
         data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
         data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
         data.googleReviewAutomationEnabled ? 1 : 0, data.googleReviewMode, data.googleReviewPostsEnabled ? 1 : 0, data.googleReviewPostMinStars,
