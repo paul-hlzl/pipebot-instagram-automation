@@ -4242,6 +4242,10 @@
       aktualisiereWertAnzeige("f-gradientColor2");
       document.querySelectorAll("[data-gradient-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === gradientSwatch)));
       updateLivePreview();
+      // Nachtrag (18.09.2026): gleicher Fehler wie bei den Akzentfarb-Swatches (P0.2) - picker.value = hex
+      // ist eine Skript-Zuweisung, loest kein input/change aus, die Onboarding-Vorschau blieb deshalb
+      // stehen, bis das naechste ECHTE Eingabeereignis kam. Hier fehlte bisher der explizite Aufruf.
+      updateOnboardingChrome();
       return;
     }
     const formPartBtn = e.target.closest("[data-formpart]");
