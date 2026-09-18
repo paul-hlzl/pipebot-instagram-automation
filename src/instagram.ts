@@ -103,6 +103,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export interface TokenCheckResult {
+  valid: boolean;
+  reason?: string;
+  username?: string;
+}
+
+/**
+ * Nachtrag 3 (18.09.2026, Einstellungsgruppe "Verknüpfungen"): echter Live-Check gegen Instagram
+ * selbst, statt sich nur auf den gespeicherten Ablaufzeitpunkt zu verlassen (der sagt nichts
+ * darüber, ob der Kunde die Freigabe zwischenzeitlich bei Instagram selbst entzogen hat). Gleiche
+ * Form wie checkLinkedInToken (linkedin.ts) - dort ist es der bereits bestehende tägliche
+ * Health-Check, hier neu ergänzt, weil es bisher kein Instagram-Äquivalent gab.
+ */
+export async function checkInstagramToken(creds: InstagramCredentials): Promise<TokenCheckResult> {
+  try {
+    const { data } = await client().get<{ username?: string }>(`${GRAPH_BASE}/me`, {
+      params: { access_token: creds.accessToken, fields: "username" },
+    });
+    return { valid: true, username: data.username };
+  } catch (err) {
+    const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+    if (status === 401 || status === 400) return { valid: false, reason: "Token abgelaufen oder widerrufen" };
+    return { valid: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function getPublishingLimit(creds?: InstagramCredentials): Promise<PublishingLimit> {
   const igUserId = await resolveIgUserId(creds);
   const { data } = await client().get<GraphLimitResponse>(

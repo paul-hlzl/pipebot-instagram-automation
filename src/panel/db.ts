@@ -645,6 +645,12 @@ for (const tabelle of ["planned_posts", "pending_approvals"]) {
   db.prepare(`UPDATE ${tabelle} SET branding_version_at_generation = created_at WHERE branding_version_at_generation IS NULL`).run();
 }
 
+// Nachtrag 3 (18.09.2026): neue Einstellungsgruppe "Verknüpfungen" - /connect/:provider soll nach
+// der Rückkehr wissen, ob der Kunde von der Einstellungsseite kam (dann zurück zur Gruppe
+// "Verknüpfungen" mit Erfolgsmeldung am Eintrag) oder aus dem Erst-Onboarding (bisheriges
+// Verhalten: naechster Onboarding-Schritt). NULL = altes Verhalten, unveraendert.
+migrateColumns("oauth_states", [["return_to", "TEXT"]]);
+
 export interface CustomerRow {
   standstill_alert_sent_at: string | null;
   id: string;

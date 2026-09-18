@@ -14,8 +14,10 @@ import {
   assertRequiredElements,
   CHANNEL_IMAGE_FORMAT,
   CHANNEL_LABEL,
+  checkConnectionHealth,
   connectionStatus,
   countRegenerableBrandingPlannedPosts,
+  disconnectProvider,
   createPostRequest,
   createSavedTheme,
   deactivateTheme,
@@ -1558,14 +1560,37 @@ export function createPanelRouter(): Router {
     res.json({ post: updated });
   });
 
-  router.post("/api/disconnect/:provider", (req, res) => {
+  // Nachtrag 3 (18.09.2026, "Verknüpfungen trennen"): ruft jetzt disconnectProvider() statt nur
+  // die connections-Zeile zu loeschen - siehe Docblock dort fuer die drei Schritte (Widerruf bei
+  // der Plattform, Kanal im Zeitplan abschalten, offene Beitraege markieren statt loeschen).
+  router.post("/api/disconnect/:provider", async (req, res) => {
     const c = currentCustomer(req);
     if (!c) {
       res.status(401).json({ error: "Nicht angemeldet" });
       return;
     }
-    db.prepare("DELETE FROM connections WHERE customer_id = ? AND provider = ?").run(c.id, String(req.params.provider));
-    res.json(publicState(c));
+    const providerId = String(req.params.provider);
+    if (!getProvider(providerId)) {
+      res.status(404).json({ error: "Unbekannter Anbieter" });
+      return;
+    }
+    const result = await disconnectProvider(c.id, providerId);
+    res.json({ ...publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow), disconnect: result });
+  });
+
+  // Nachtrag 3: Live-Token-Check fuer die Einstellungsgruppe "Verknüpfungen" - kurz gecacht
+  // (siehe checkConnectionHealth), damit ein Aufruf pro Einstellungsseiten-Besuch nicht bei jedem
+  // Reload erneut gegen Instagram/LinkedIn selbst prueft.
+  router.get("/api/connection-health", async (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const entries = await Promise.all(
+      visibleProviders().map(async (p) => [p.id, await checkConnectionHealth(c.id, p.id)] as const),
+    );
+    res.json(Object.fromEntries(entries));
   });
 
   // Bugcheck-Fix (2026-09-13): "Später verbinden" persistieren, unabhaengig davon ob der
@@ -1927,8 +1952,12 @@ export function createPanelRouter(): Router {
     if (!provider) return backTo(res, { error: "failed" });
     if (!provider.isConfigured()) return backTo(res, { error: "not_configured", provider: provider.id });
     const state = randomToken(24);
-    db.prepare("INSERT INTO oauth_states (state, customer_id, provider, expires_at) VALUES (?, ?, ?, ?)")
-      .run(state, c.id, provider.id, new Date(Date.now() + 15 * 60_000).toISOString());
+    // Nachtrag 3: return=settings (von der Einstellungsgruppe "Verknüpfungen" aus verlinkt) merkt
+    // sich das Panel hier, damit /callback weiss, wohin die Rueckkehr gehoert - Erst-Onboarding
+    // (kein return-Parameter) verhaelt sich exakt wie bisher.
+    const returnTo = req.query.return === "settings" ? "settings" : null;
+    db.prepare("INSERT INTO oauth_states (state, customer_id, provider, expires_at, return_to) VALUES (?, ?, ?, ?, ?)")
+      .run(state, c.id, provider.id, new Date(Date.now() + 15 * 60_000).toISOString(), returnTo);
     res.redirect(302, provider.authorizeUrl(state, redirectUri(provider.id, req)));
   });
 
@@ -1940,16 +1969,20 @@ export function createPanelRouter(): Router {
 
     const state = str(req.query.state, 100);
     const stored = db.prepare("SELECT * FROM oauth_states WHERE state = ?").get(state) as
-      | { customer_id: string; provider: string; expires_at: string }
+      | { customer_id: string; provider: string; expires_at: string; return_to: string | null }
       | undefined;
     if (stored) db.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
+    // Nachtrag 3: return_to (falls gesetzt) haengt an jeder Rueckkehr dran, egal ob Erfolg,
+    // Abbruch oder Fehler - sonst landet ein "Neu verbinden" aus den Einstellungen bei einem
+    // abgebrochenen Login wieder im Erst-Onboarding statt zurueck in "Verknüpfungen".
+    const returnParam: Record<string, string> = stored?.return_to ? { return: stored.return_to } : {};
 
-    if (req.query.error) return backTo(res, { error: "cancelled", provider: pid });
+    if (req.query.error) return backTo(res, { error: "cancelled", provider: pid, ...returnParam });
     if (!stored || stored.provider !== pid || new Date(stored.expires_at).getTime() < Date.now()) {
-      return backTo(res, { error: "state", provider: pid });
+      return backTo(res, { error: "state", provider: pid, ...returnParam });
     }
     const code = str(req.query.code, 2000);
-    if (!code) return backTo(res, { error: "failed", provider: pid });
+    if (!code) return backTo(res, { error: "failed", provider: pid, ...returnParam });
 
     try {
       const result = await provider.exchangeCode(code, redirectUri(pid, req));
@@ -1986,10 +2019,10 @@ export function createPanelRouter(): Router {
           ),
         );
       }
-      backTo(res, { connected: pid });
+      backTo(res, { connected: pid, ...returnParam });
     } catch (err) {
       console.error(`[panel] OAuth ${pid} fehlgeschlagen:`, err);
-      backTo(res, { error: err instanceof ProviderError ? err.code : "failed", provider: pid });
+      backTo(res, { error: err instanceof ProviderError ? err.code : "failed", provider: pid, ...returnParam });
     }
   });
 

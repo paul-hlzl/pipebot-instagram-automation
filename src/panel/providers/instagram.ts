@@ -123,4 +123,16 @@ export const instagram: Provider = {
     );
     return { accessToken: r.access_token, expiresAt: new Date(Date.now() + r.expires_in * 1000) };
   },
+
+  // Nachtrag 3 (18.09.2026, "Verknüpfungen trennen"): dokumentierter Deauthorize-Endpunkt der
+  // "Instagram API with Instagram Login" - widerruft alle von diesem Kunden erteilten
+  // Berechtigungen bei Instagram selbst, nicht nur lokal. https://developers.facebook.com/docs/
+  // instagram-platform/reference/instagram-user/permissions#deleting-permissions
+  async revoke({ accessToken, accountId }) {
+    await requestJson(
+      `${graph(accountId)}/permissions?${new URLSearchParams({ access_token: accessToken })}`,
+      { method: "DELETE" },
+      "Instagram Widerruf",
+    );
+  },
 };

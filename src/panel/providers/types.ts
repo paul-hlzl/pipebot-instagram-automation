@@ -67,6 +67,15 @@ export interface Provider {
   authorizeUrl(state: string, redirectUri: string): string;
   exchangeCode(code: string, redirectUri: string): Promise<ConnectResult>;
   refresh?(tokens: TokenSet): Promise<TokenSet>;
+  /**
+   * Nachtrag 3 (18.09.2026, "Verknüpfungen trennen"): widerruft den Zugriff bei der Plattform
+   * selbst, nicht nur lokal in unserer DB. Optional, weil nicht jede Plattform das anbietet
+   * (siehe linkedin.ts) - fehlt sie, loescht das Trennen trotzdem den lokalen Token (Pipeflow
+   * kann ihn dann nicht mehr benutzen), nur der Widerruf AUF DER PLATTFORM selbst unterbleibt.
+   * Ein Fehler hier darf das Trennen nie verhindern - immer best-effort, vom Aufrufer mit
+   * try/catch umgeben.
+   */
+  revoke?(creds: { accessToken: string; accountId: string }): Promise<void>;
 }
 
 /** Node's fetch hat KEINE eingebaute Zeitgrenze - ohne die folgende Zeile haengt ein Aufruf an

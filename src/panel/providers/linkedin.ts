@@ -99,4 +99,11 @@ export const linkedin: Provider = {
       expiresAt: new Date(Date.now() + r.expires_in * 1000),
     };
   },
+
+  // Nachtrag 3 (18.09.2026, "Verknüpfungen trennen"): bewusst KEIN revoke() - LinkedIns
+  // Partner-APIs (die hier genutzten Produkte) bieten keinen dokumentierten oeffentlichen
+  // Token-Widerruf-Endpunkt fuer Drittanbieter, anders als Instagram/Meta. Trennen loescht den
+  // Token trotzdem lokal (Pipeflow kann ihn danach nicht mehr benutzen) - ein Widerruf AUF
+  // LinkedIns Seite muesste der Kunde selbst ueber seine LinkedIn-Kontoeinstellungen vornehmen
+  // ("Erlaubte Apps"). Siehe Bericht.
 };

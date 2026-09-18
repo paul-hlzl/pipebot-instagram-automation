@@ -23,7 +23,8 @@ import { assertConnectionUsable } from "./connection-block.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
 import { isDue, isDueForChannel, nextPostAt, viennaDateStr, type ScheduleInput } from "./schedule.js";
-import { getRecentMedia, type InstagramCredentials } from "../instagram.js";
+import { getRecentMedia, checkInstagramToken, type InstagramCredentials } from "../instagram.js";
+import { checkLinkedInToken } from "../linkedin.js";
 import type { LinkedInCredentials } from "../linkedin.js";
 import type { ImageBranding } from "../fal.js";
 import { sendMailBestEffort } from "./mailer.js";
@@ -387,6 +388,123 @@ export async function getCredentials(
     }
   }
   return { accountId: row.account_id, accountName: row.account_name, accessToken };
+}
+
+// ---------------------------------------------------------------------------
+// Nachtrag 3 (18.09.2026): Einstellungsgruppe "Verknüpfungen" - echter Live-Token-Status statt
+// nur des gespeicherten Ablaufzeitpunkts, siehe checkConnectionHealth. Kurz gecacht (5 Minuten),
+// weil ein Live-Check bei jedem Seitenaufruf unnötig teuer wäre und der Kunde die Einstellungen
+// typischerweise mehrfach hintereinander öffnet/wechselt. In-Memory (kein DB-Feld) - ein
+// Prozess-Neustart verliert den Cache, das ist unkritisch (naechster Aufruf prueft einfach live).
+// ---------------------------------------------------------------------------
+export interface ConnectionHealth {
+  valid: boolean;
+  reason?: string;
+  checkedAt: string;
+}
+const HEALTH_CACHE_TTL_MS = 5 * 60_000;
+const healthCache = new Map<string, { result: ConnectionHealth; expiresAtMs: number }>();
+
+/** Live-Check gegen die Plattform selbst (Instagram: /me, LinkedIn: bereits bestehender
+ *  taeglicher Health-Check /v2/userinfo) - fuer Provider ohne eigenen Live-Check (bisher keiner)
+ *  faellt diese Funktion auf null zurueck, der Aufrufer zeigt dann nur den gespeicherten Status. */
+export async function checkConnectionHealth(customerId: string, providerId: string): Promise<ConnectionHealth | null> {
+  const cacheKey = `${customerId}:${providerId}`;
+  const cached = healthCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.result;
+
+  const row = db.prepare("SELECT * FROM connections WHERE customer_id = ? AND provider = ?").get(customerId, providerId) as ConnectionRow | undefined;
+  if (!row) return null;
+
+  let checked: { valid: boolean; reason?: string };
+  try {
+    const accessToken = decrypt(row.access_token_enc);
+    if (providerId === "instagram") {
+      checked = await checkInstagramToken({ accessToken, igUserId: row.account_id });
+    } else if (providerId === "linkedin") {
+      checked = await checkLinkedInToken({ accessToken, personUrn: row.account_id });
+    } else {
+      return null; // kein Live-Check fuer diese Plattform verfuegbar
+    }
+  } catch (err) {
+    // Ein Netzwerkfehler beim Live-Check ist kein "Token ungueltig" - lieber den gespeicherten
+    // Status weiter zeigen lassen (Aufrufer faellt darauf zurueck) als faelschlich "abgelaufen" zu melden.
+    console.error(`[panel] Live-Check ${providerId}/${customerId} fehlgeschlagen (kein Rueckschluss auf Token-Gueltigkeit):`, err instanceof Error ? err.message : err);
+    return null;
+  }
+  const result: ConnectionHealth = { valid: checked.valid, reason: checked.reason, checkedAt: nowIso() };
+  healthCache.set(cacheKey, { result, expiresAtMs: Date.now() + HEALTH_CACHE_TTL_MS });
+  return result;
+}
+
+export interface DisconnectResult {
+  deactivatedChannels: PublishChannel[];
+  affectedPlanned: number;
+  affectedPending: number;
+  revokedAtPlatform: boolean;
+}
+
+/**
+ * Nachtrag 3 (18.09.2026): "Trennen" in der Einstellungsgruppe "Verknüpfungen" - anders als das
+ * bisherige /api/disconnect (nur DELETE auf connections), macht diese Funktion alle drei vom
+ * Auftrag verlangten Schritte in einer Transaktion:
+ *   1. Bestmoeglich bei der Plattform selbst widerrufen (Instagram: ja, siehe providers/
+ *      instagram.ts; LinkedIn: kein oeffentlicher Widerruf-Endpunkt verfuegbar, siehe providers/
+ *      linkedin.ts) - ein Fehler hier blockiert das Trennen NIE, siehe try/catch.
+ *   2. Den lokalen Token loeschen (wie bisher) UND die betroffenen Kanal-Schalter abschalten,
+ *      damit die stuendliche Routine (siehe docs/ROUTINE_TEIL1.md, K3) diesen Kunden/Kanal gar
+ *      nicht erst als faellig ansieht - die Routine selbst prueft NIRGENDS den Verbindungsstatus,
+ *      nur igFeedEnabled/igStoryEnabled/linkedinEnabled (K3). Ohne dieses Abschalten wuerde jede
+ *      faellige Stunde einen Generierungs-/Veroeffentlichungsversuch ausloesen, der an
+ *      getCredentials() scheitert (Fehler "hat X nicht verbunden") und von K9 stillschweigend
+ *      uebersprungen wird - ein Fehler pro Stunde, ohne dass es irgendwo sichtbar würde.
+ *   3. Noch offene planned_posts/pending_approvals fuer diesen Kanal NICHT loeschen, sondern auf
+ *      den neuen Status 'channel_disconnected' setzen (Client zeigt dafuer "Kanal getrennt").
+ */
+export async function disconnectProvider(customerId: string, providerId: string): Promise<DisconnectResult> {
+  const row = db.prepare("SELECT * FROM connections WHERE customer_id = ? AND provider = ?").get(customerId, providerId) as ConnectionRow | undefined;
+  const provider = getProvider(providerId);
+
+  // Widerruf bei der Plattform ZUERST, solange wir den Token noch haben - danach folgt die
+  // lokale Loeschung, die niemals von diesem Schritt abhaengt (try/catch: ein Fehler hier
+  // blockiert das Trennen nie, siehe Docblock oben).
+  let revokedAtPlatform = false;
+  if (row && provider?.revoke) {
+    try {
+      await provider.revoke({ accessToken: decrypt(row.access_token_enc), accountId: row.account_id });
+      revokedAtPlatform = true;
+    } catch (err) {
+      console.error(`[panel] Widerruf bei der Plattform fehlgeschlagen (${providerId}/${customerId}) - Token wird trotzdem lokal entfernt:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  db.prepare("DELETE FROM connections WHERE customer_id = ? AND provider = ?").run(customerId, providerId);
+  healthCache.delete(`${customerId}:${providerId}`);
+
+  const channels = (Object.entries(PROVIDER_FOR_CHANNEL) as [PublishChannel, string][])
+    .filter(([, p]) => p === providerId)
+    .map(([ch]) => ch);
+  const now = nowIso();
+  for (const ch of channels) {
+    db.prepare(`UPDATE customers SET ${CHANNEL_COLUMN[ch]} = 0, updated_at = ? WHERE id = ?`).run(now, customerId);
+  }
+
+  let affectedPlanned = 0;
+  let affectedPending = 0;
+  if (channels.length) {
+    const placeholders = channels.map(() => "?").join(",");
+    affectedPlanned = db
+      .prepare(
+        `UPDATE planned_posts SET status = 'channel_disconnected', updated_at = ?
+         WHERE customer_id = ? AND channel IN (${placeholders}) AND status IN ('planned', 'edited', 'approved', 'submitted')`,
+      )
+      .run(now, customerId, ...channels).changes;
+  }
+  affectedPending = db
+    .prepare("UPDATE pending_approvals SET status = 'channel_disconnected', updated_at = ? WHERE customer_id = ? AND provider = ? AND status = 'pending'")
+    .run(now, customerId, providerId).changes;
+
+  return { deactivatedChannels: channels, affectedPlanned, affectedPending, revokedAtPlatform };
 }
 
 /**

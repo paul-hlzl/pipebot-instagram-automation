@@ -138,7 +138,10 @@
     // Status-Satz und die Zähler in Navigation/Bottom-Bar aus derselben Quelle).
     postTab: "geplant", approvalCount: 0,
     // Mobil: welche Einstellungs-Gruppe gerade offen ist ("" = Gruppenliste).
-    settingsGroup: "" };
+    settingsGroup: "",
+    // Nachtrag 3: Live-Token-Status pro Provider (siehe loadConnectionHealth) und eine kurze
+    // Erfolgs-/Fehlermeldung direkt an einem "Verknüpfungen"-Eintrag (Connect-Rückkehr, Trennen).
+    connHealth: null, chanNotice: null };
 
   const $ = (s) => document.querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1509,10 +1512,16 @@
     { id: "aussehen", label: "Aussehen" },
     { id: "inhalt", label: "Inhalt & Sprache" },
     { id: "kanaele", label: "Kanäle & Zeitplan" },
+    { id: "verknuepfungen", label: "Verknüpfungen" },
     { id: "automatik", label: "Freigaben & Automatik" },
     { id: "mail", label: "Benachrichtigungen" },
     { id: "konto", label: "Konto" },
   ];
+  // Nachtrag 3 (18.09.2026): "Sieben Gruppen." war fest in den Text geschrieben - aus der
+  // tatsaechlichen Anzahl berechnet, damit eine neue/entfernte Gruppe die Unterzeile nie wieder
+  // von Hand nachziehen muss. Nur 1-10 als Wort (mehr Gruppen hat das Panel nicht annaehernd).
+  const GROUP_COUNT_WORDS = ["Null", "Eine", "Zwei", "Drei", "Vier", "Fünf", "Sechs", "Sieben", "Acht", "Neun", "Zehn"];
+  const groupCountWord = (n) => GROUP_COUNT_WORDS[n] || String(n);
 
   /** True, wenn die Instagram-Verbindung die erst in v10 ergaenzte Kommentar-Berechtigung noch
    *  nicht hat - aeltere Verbindungen haben sie nie erteilt bekommen und muessen einmal neu
@@ -1546,7 +1555,7 @@
       ${bannerHtml()}
       ${emailVerifyBannerHtml(c)}
       <h1>Einstellungen</h1>
-      <p class="lede">Sieben Gruppen. Suchen geht auch.</p>
+      <p class="lede">${groupCountWord(SETTINGS_GROUPS.length)} Gruppen. Suchen geht auch.</p>
       <div class="settings-layout" id="set-layout" data-mobile-group="${esc(S.settingsGroup || "")}">
         <aside class="set-side">
           <ul style="list-style:none;margin:0;padding:0">${SETTINGS_GROUPS.map((g) => `<li><button type="button" data-setjump="${g.id}">${esc(g.label)}</button></li>`).join("")}</ul>
@@ -1724,7 +1733,10 @@
                 <p class="hint" style="margin:0 0 10px">${c.customerPaused ? "Aktuell pausiert - es wird nichts veröffentlicht, bis Sie fortsetzen." : "Läuft. Anhalten geht jederzeit."}</p>
                 <button type="button" class="link" id="toggle-pause">${c.customerPaused ? "Posting fortsetzen" : "Posting pausieren"}</button>
               </div>
-              ${videoSettingsHtml(c) ? `<div class="field"><h3>Video-Diashow</h3>${videoSettingsHtml(c)}</div>` : ""}`)}
+              ${videoSettingsHtml(c) ? `<div class="field"><h3>Video-Diashow</h3>${videoSettingsHtml(c)}</div>` : ""}
+              <p class="hint" style="margin-top:14px">Womit gepostet wird (verbinden/trennen), steht unter <button type="button" class="link" data-cross-jump="verknuepfungen">Verknüpfungen</button>.</p>`)}
+
+            ${group("verknuepfungen", "Die Konten, in deren Namen Pipeflow veröffentlicht.", verknuepfungenGroupHtml(c))}
 
             ${group("automatik", "Was ohne Ihr Zutun passiert - und was vorher über Ihren Tisch geht.", `
               <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben</span></label>
@@ -2291,6 +2303,128 @@
   // posten/Beitraege/Kalender/Konto) ist exakt dieselbe Logik wie zuvor auf der "Fertig"-Seite
   // (dashboardSectionsHtml, s.o.), nur umsortiert.
   const CHANNEL_STATUS_LABEL = { ok: "Verbunden", "renew-soon": "Läuft bald ab", expired: "Abgelaufen" };
+
+  // ================= Nachtrag 3 (18.09.2026): Einstellungsgruppe "Verknüpfungen" =================
+  const fmtDateNumeric = (iso) => (iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "");
+  const fmtTimeNumeric = (iso) => (iso ? new Date(iso).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" }) : "");
+
+  /** Ob dieser Provider im Zeitplan (Kanäle & Zeitplan) mindestens einen aktiven Kanal hat -
+   *  fuer Zustand (d): "im Zeitplan aktiv, aber nicht verbunden". */
+  function providerScheduledActive(providerId, c) {
+    if (providerId === "instagram") return c.igFeedEnabled !== false || c.igStoryEnabled !== false;
+    if (providerId === "linkedin") return c.linkedinEnabled !== false;
+    return false;
+  }
+
+  /** Live-Token-Status vom Server (siehe /api/connection-health), einmal pro Einstellungs-Besuch
+   *  nachgeladen (loadConnectionHealth) und hier zusammengeführt - fehlt er (noch nicht geladen /
+   *  Netzwerkfehler), faellt die Anzeige auf den gespeicherten Status (S.connections) zurueck,
+   *  das entspricht weiterhin einem echten, aus der DB abgeleiteten Ablaufzeitpunkt, nur ohne
+   *  Live-Bestaetigung gegen die Plattform selbst. */
+  function connEntryHtml(providerId, c) {
+    const p = prov(providerId);
+    if (!p) return "";
+    const k = conn(providerId);
+    const health = (S.connHealth && S.connHealth[providerId]) || null;
+    const scheduledActive = providerScheduledActive(providerId, c);
+
+    let state; // "connected" | "expired" | "none"
+    if (k) {
+      const liveInvalid = health && health.valid === false;
+      state = k.status === "expired" || k.status === "blocked" || liveInvalid ? "expired" : "connected";
+    } else {
+      state = "none";
+    }
+
+    let stateLine;
+    if (state === "connected") {
+      stateLine = `${esc(k.accountName || p.name)} — verbunden seit ${fmtDateNumeric(k.connectedAt)}`;
+    } else if (state === "expired") {
+      stateLine = "Zugang abgelaufen — bitte neu verbinden";
+    } else {
+      stateLine = "Nicht verbunden — auf diesem Kanal wird nichts veröffentlicht.";
+      if (scheduledActive) stateLine += " Im Zeitplan aktiv, kann aber nicht veröffentlichen.";
+    }
+    const checkedLine = health?.checkedAt ? `<p class="chan-entry-checked">geprüft um ${esc(fmtTimeNumeric(health.checkedAt))}</p>` : "";
+
+    const connectHref = `${CONFIG.mount}/connect/${p.id}?return=settings`;
+    const actions = state === "connected"
+      ? `<a class="btn btn-small" href="${connectHref}">Neu verbinden</a>
+         <button type="button" class="link chan-entry-disconnect" data-disconnect="${p.id}">Trennen</button>`
+      : state === "expired"
+        ? `<a class="btn btn-primary btn-small" href="${connectHref}">Neu verbinden</a>
+           <button type="button" class="link chan-entry-disconnect" data-disconnect="${p.id}">Trennen</button>`
+        : `<a class="btn btn-primary btn-small" href="${connectHref}">Verbinden</a>`;
+
+    const notice = S.chanNotice && S.chanNotice.provider === p.id ? S.chanNotice : null;
+
+    // "Falls vorhanden" (Profilbild): es gibt aktuell keine gespeicherte Profilbild-URL fuer eine
+    // Verbindung (weder Instagram noch LinkedIn liefern/speichern das heute) - die Vorgabe deckt
+    // diesen Fall ausdruecklich ab ("falls vorhanden"), das Bild-Element entfaellt deshalb bewusst
+    // statt einen Platzhalter zu zeigen. Siehe Bericht.
+    return `<div class="chan-entry" data-chan-entry="${p.id}">
+      <div class="chan-entry-row">
+        <div class="chan-entry-info">
+          <span class="chan-entry-name">${esc(p.name)}</span>
+          <span class="chan-entry-state${state === "expired" ? " is-warn" : ""}">${stateLine}</span>
+          ${checkedLine}
+        </div>
+        <div class="chan-entry-actions">${actions}</div>
+      </div>
+      ${notice ? `<p class="chan-entry-notice ${notice.kind === "ok" ? "is-ok" : "is-bad"}">${esc(notice.text)}</p>` : ""}
+    </div>`;
+  }
+
+  function verknuepfungenGroupHtml(c) {
+    return `
+      <div id="verknuepfungen-body">
+        <div class="chan-card">
+          ${connEntryHtml("instagram", c)}
+          ${connEntryHtml("linkedin", c)}
+        </div>
+        <p class="hint" style="margin-top:14px">Wann gepostet wird, steht unter <button type="button" class="link" data-cross-jump="kanaele">Kanäle &amp; Zeitplan</button>.</p>
+        <span class="vh">Instagram, LinkedIn, verbinden, trennen, Konto, Zugang</span>
+      </div>`;
+  }
+
+  /** Live-Check einmal pro Einstellungsseiten-Besuch nachladen (der Server cached ihn ohnehin
+   *  kurz, siehe checkConnectionHealth in credentials.ts) - danach nur die Verknüpfungen-Gruppe
+   *  gezielt neu zeichnen, kein voller Re-Render (der würde Fokus/Scrollposition/offene
+   *  Akkordeons an anderer Stelle der Einstellungsseite stören). */
+  async function loadConnectionHealth() {
+    if (!S.customer || !S.connections.length) return;
+    try {
+      S.connHealth = await api("GET", "/api/connection-health");
+    } catch {
+      return; // still zurueckfallen auf den gespeicherten Status - kein Fehlerbanner fuer einen Hintergrund-Check
+    }
+    const el = document.getElementById("verknuepfungen-body");
+    if (el && S.step === "settings") el.outerHTML = verknuepfungenGroupHtml(S.customer);
+  }
+
+  async function disconnectProviderUi(providerId) {
+    const p = prov(providerId);
+    if (!p) return;
+    const ok = await showConfirm({
+      title: `${p.name} trennen?`,
+      message: `Pipeflow veröffentlicht dann nichts mehr auf diesem Kanal. Bereits veröffentlichte Beiträge bleiben unberührt. Sie können das Konto jederzeit wieder verbinden.`,
+      confirmLabel: "Trennen",
+      cancelLabel: "Abbrechen",
+      danger: true,
+    });
+    if (!ok) return;
+    const btn = document.querySelector(`[data-disconnect="${providerId}"]`);
+    if (btn) btn.classList.add("busy");
+    try {
+      const data = await api("POST", `/api/disconnect/${providerId}`);
+      applyState(data);
+      S.chanNotice = { provider: providerId, kind: "ok", text: `${p.name} getrennt. Der Kanal ist im Zeitplan deaktiviert.` };
+    } catch (err) {
+      S.chanNotice = { provider: providerId, kind: "bad", text: err.message || "Trennen ist fehlgeschlagen. Bitte versuchen Sie es erneut." };
+    }
+    render(true);
+  }
+
   function channelsSummaryHtml() {
     return `<ul class="chan-list">${S.providers.map((p) => {
       const k = conn(p.id);
@@ -2526,7 +2660,7 @@
     const todayStr = localDateStr(new Date());
     const byDay = new Map(days.map((d) => [d, []]));
     (planned || []).forEach((p) => {
-      if (byDay.has(p.scheduledFor)) byDay.get(p.scheduledFor).push({ state: p.status === "rejected" ? "none" : p.status === "published" ? "published" : p.status === "submitted" || p.status === "approved" ? "waiting" : "planned", p });
+      if (byDay.has(p.scheduledFor)) byDay.get(p.scheduledFor).push({ state: (p.status === "rejected" || p.status === "channel_disconnected") ? "none" : p.status === "published" ? "published" : p.status === "submitted" || p.status === "approved" ? "waiting" : "planned", p });
     });
     (posted || []).forEach((p) => {
       const d = localDateStr(new Date(p.postedAt));
@@ -2943,7 +3077,7 @@
 
   /* ================= Vorschau (Panel v5, Aufgabe 5) ================= */
   const PP_CHANNEL_LABEL = { ig_feed: "Instagram Feed", ig_story: "Instagram Story", linkedin: "LinkedIn" };
-  const PP_STATUS_LABEL = { planned: "Geplant", edited: "Bearbeitet", approved: "Freigegeben", rejected: "Übersprungen", published: "Veröffentlicht", submitted: "Wartet auf Ihre Freigabe" };
+  const PP_STATUS_LABEL = { planned: "Geplant", edited: "Bearbeitet", approved: "Freigegeben", rejected: "Übersprungen", published: "Veröffentlicht", submitted: "Wartet auf Ihre Freigabe", channel_disconnected: "Kanal getrennt" };
   let previewCache = { posts: [], maxRegenerate: 3 };
   let previewSelectedDate = null;
 
@@ -2981,7 +3115,7 @@
     }
     // Tagesreiter in derselben Pipe-Sprache wie die Übersicht: ein Knoten je Beitrag, Zustand
     // über data-state. Bei schmalen Screens horizontal scrollbar mit scroll-snap.
-    const stateOf = (p) => (p.status === "published" ? "published" : p.status === "approved" || p.status === "submitted" ? "waiting" : p.status === "rejected" ? "none" : "planned");
+    const stateOf = (p) => (p.status === "published" ? "published" : p.status === "approved" || p.status === "submitted" ? "waiting" : (p.status === "rejected" || p.status === "channel_disconnected") ? "none" : "planned");
     return `<div class="preview-days">
       ${dates.map((d) => {
         const items = byDate[d] || [];
@@ -3005,7 +3139,7 @@
     // Panel v7 fix: 'submitted' bedeutet, der Beitrag wurde schon 1:1 in die Freigabe-
     // Warteschlange uebernommen (siehe "Wartet auf Ihre Freigabe") - ab dann lebt der Inhalt dort,
     // ein Bearbeiten/Ueberspringen hier haette keine Wirkung mehr.
-    const editable = p.status !== "published" && p.status !== "submitted";
+    const editable = p.status !== "published" && p.status !== "submitted" && p.status !== "channel_disconnected";
     const canSkip = editable && p.status !== "rejected";
     const canApprove = S.customer.approvalMode && editable && p.status !== "approved" && p.status !== "rejected";
     // Karte zeigt den Beitrag so, wie er erscheinen wird: Bild gross, darunter Kanal + Termin in
@@ -3016,6 +3150,7 @@
       ? `Geht heute${time} raus`
       : `Geht am ${esc(new Date(`${p.scheduledFor}T00:00:00`).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" }))}${time} raus`;
     const statusNote = p.status === "rejected" ? "Übersprungen — wird nicht veröffentlicht."
+      : p.status === "channel_disconnected" ? "Kanal getrennt — wird nicht veröffentlicht."
       : p.status === "published" ? "Bereits veröffentlicht."
       : p.status === "submitted" ? "Liegt zur Freigabe bereit."
       : p.status === "approved" ? "Von Ihnen freigegeben."
@@ -3029,7 +3164,7 @@
         <div class="card-kicker">
           ${icon(p.channel === "linkedin" ? "linkedin" : p.channel === "ig_story" ? "story" : "feed", 12)}
           ${esc(PP_CHANNEL_LABEL[p.channel] || p.channel)}
-          <span class="pipe-node" data-state="${p.status === "published" ? "published" : p.status === "approved" || p.status === "submitted" ? "waiting" : p.status === "rejected" ? "none" : "planned"}"
+          <span class="pipe-node" data-state="${p.status === "published" ? "published" : p.status === "approved" || p.status === "submitted" ? "waiting" : (p.status === "rejected" || p.status === "channel_disconnected") ? "none" : "planned"}"
             style="width:10px;height:10px" role="img" aria-label="${esc(PP_STATUS_LABEL[p.status] || p.status)}"></span>
         </div>
         <p class="small" style="margin:var(--s2) 0 var(--s4)">${statusNote}</p>
@@ -3338,6 +3473,7 @@
       if (S.settingsTarget) { jumpToSettingsGroup(S.settingsTarget); S.settingsTarget = null; }
       updateGradientSuggestions();
       updateLivePreview();
+      loadConnectionHealth();
     }
     maybeStartTour();
   }
@@ -4115,6 +4251,24 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+
+    // Nachtrag 3: gegenseitige Verlinkung "Kanäle & Zeitplan" <-> "Verknüpfungen" (ein Satz je
+    // Gruppe). Anders als die reine Sprungliste im Desktop-Seitenmenü (data-setjump) muss dieser
+    // Link auch auf Mobil funktionieren, wo immer nur eine Gruppe sichtbar ist (display:none auf
+    // den anderen) - deshalb hier beides: Mobil-Gruppe umschalten UND (auf Desktop, wo ohnehin
+    // alle Gruppen gestapelt sichtbar sind) zur Zielgruppe scrollen/kurz hervorheben.
+    const crossJump = e.target.closest("[data-cross-jump]");
+    if (crossJump) {
+      const id = crossJump.dataset.crossJump;
+      S.settingsGroup = id;
+      const layout = $("#set-layout");
+      if (layout) layout.dataset.mobileGroup = id;
+      jumpToSettingsGroup(id);
+      return;
+    }
+
+    const disconnectBtn = e.target.closest("[data-disconnect]");
+    if (disconnectBtn) { await disconnectProviderUi(disconnectBtn.dataset.disconnect); return; }
 
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn && !tabBtn.dataset.go) {
@@ -4943,7 +5097,24 @@
 
     const q = new URLSearchParams(location.search);
     const pName = prov(q.get("provider"))?.name || "";
-    if (q.get("connected") && prov(q.get("connected"))) {
+    // Nachtrag 3: return=settings (siehe /connect im Server - nur gesetzt, wenn der Link aus der
+    // Einstellungsgruppe "Verknüpfungen" kam) fuehrt zurueck dorthin statt in die
+    // Onboarding-Schrittkette, mit einer Meldung direkt am betroffenen Eintrag statt im
+    // allgemeinen Banner oben.
+    const fromSettings = q.get("return") === "settings";
+    if (fromSettings && (q.get("connected") || q.get("error"))) {
+      S.step = "settings";
+      S.settingsGroup = "verknuepfungen";
+      S.settingsTarget = "verknuepfungen";
+      const id = q.get("connected") || q.get("provider");
+      if (q.get("connected") && prov(id)) {
+        const k = conn(id); // applyState() lief oben schon ueber /api/me, hat also den frischen Stand
+        S.chanNotice = { provider: id, kind: "ok", text: `${prov(id).name} verbunden als ${k?.accountName || "—"}.` };
+      } else if (q.get("error")) {
+        const fn = ERRORS[q.get("error")] || ERRORS.failed;
+        S.chanNotice = { provider: q.get("provider"), kind: "bad", text: fn(pName) };
+      }
+    } else if (q.get("connected") && prov(q.get("connected"))) {
       const id = q.get("connected");
       const list = steps();
       S.step = list[list.indexOf(id) + 1];

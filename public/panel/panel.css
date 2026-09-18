@@ -981,6 +981,27 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .chan-state { margin-left: auto; color: var(--stone); }
 .chan-state.bad { color: var(--stop); }
 
+/* ---------- Nachtrag 3 (18.09.2026): Einstellungsgruppe "Verknüpfungen" ---------- */
+.chan-card { border: 1px solid var(--rule); border-radius: var(--r-card); overflow: hidden; }
+.chan-entry { padding: 20px; }
+.chan-entry + .chan-entry { border-top: 1px solid var(--rule-soft); }
+.chan-entry-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
+.chan-entry-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.chan-entry-name { font-size: 15px; font-weight: 500; }
+.chan-entry-state { font-size: 13px; color: var(--muted-2); max-width: 46ch; }
+.chan-entry-state.is-warn { color: var(--stop); }
+.chan-entry-checked { font-size: 12px; color: var(--faint, var(--muted-2)); margin: 2px 0 0; }
+.chan-entry-actions { display: flex; align-items: center; gap: var(--s3); flex: 0 0 auto; }
+.chan-entry-disconnect { font-size: 14px; color: var(--muted); text-decoration: none; }
+.chan-entry-disconnect:hover { text-decoration: underline; }
+.chan-entry-notice { margin: 10px 0 0; font-size: 13px; }
+.chan-entry-notice.is-ok { color: #146c2e; }
+.chan-entry-notice.is-bad { color: var(--stop); }
+@media (max-width: 480px) {
+  .chan-entry-row { flex-direction: column; align-items: stretch; }
+  .chan-entry-actions { justify-content: flex-start; }
+}
+
 /* Die Leitung muss über die volle Tagesbreite laufen, sonst ist sie hinter dem Knoten versteckt
    und die Woche liest sich als einzelne Quadrate statt als eine durchgehende Pipe. */
 .flow-day { align-items: stretch; text-align: center; }
@@ -1107,6 +1128,7 @@ fieldset > legend { padding: 0; margin-bottom: var(--s3); }
   #set-layout[data-mobile-group="aussehen"] .setgroup[data-group="aussehen"],
   #set-layout[data-mobile-group="inhalt"] .setgroup[data-group="inhalt"],
   #set-layout[data-mobile-group="kanaele"] .setgroup[data-group="kanaele"],
+  #set-layout[data-mobile-group="verknuepfungen"] .setgroup[data-group="verknuepfungen"],
   #set-layout[data-mobile-group="automatik"] .setgroup[data-group="automatik"],
   #set-layout[data-mobile-group="mail"] .setgroup[data-group="mail"],
   #set-layout[data-mobile-group="konto"] .setgroup[data-group="konto"] { display: block; }
