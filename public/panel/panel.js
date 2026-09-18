@@ -781,7 +781,12 @@
 
   function syncPillarsDraftFromDom() {
     const rows = document.querySelectorAll(".pillar-row");
-    if (!rows.length && !S.pillarsDraft.length) return;
+    // Onboarding-Neubau (18.09.2026): dort gibt es keine .pillar-row mehr (Chip-Ansicht statt
+    // Zeilen, siehe pillarsChipsHtml/S.pillarsDraft wird dort direkt beim Hinzufuegen/Entfernen
+    // gepflegt). Ohne dieses fruehe return wuerde ein leeres NodeList faelschlich S.pillarsDraft
+    // auf [] zuruecksetzen, sobald schon Saeulen gesetzt waren - der Kunde saehe seine gerade
+    // hinzugefuegten Saeulen beim Absenden wieder verschwinden.
+    if (!rows.length) return;
     const next = [];
     rows.forEach((row) => {
       next.push({
@@ -791,6 +796,296 @@
       });
     });
     S.pillarsDraft = next;
+  }
+
+  /* ================= Onboarding-Neubau (18.09.2026) =================
+   * Sidebar-Wizard nach pixelgenauer Vorgabe. Nur companyHtml() (Erstanmeldung, !edit) nutzt
+   * diese Funktionen und onboarding.css (eigener .ob-*-Namensraum) - settingsHtml() und der Rest
+   * des Panels bleiben unveraendert bei panel.css/panel-theme.css.
+   */
+  const OB_STEPS = [
+    { id: "unternehmen", n: "01", name: "Unternehmen" },
+    { id: "inhalt", n: "02", name: "Inhalt" },
+    { id: "stil", n: "03", name: "Stil" },
+    { id: "kanaele", n: "04", name: "Kanäle" },
+  ];
+  const OB_STEP_LEDE = [
+    "Erzählen Sie uns, wer Sie sind.",
+    "Worum soll es in Ihren Beiträgen gehen?",
+    "Wie sollen Ihre Beiträge aussehen und klingen?",
+    "Welche Kanäle, und wie viel Kontrolle möchten Sie behalten?",
+  ];
+
+  /** Flacher Streifen statt der Karte/des Wochenrasters - nur < 900px sichtbar (siehe
+   *  .ob-preview-strip in onboarding.css). Ein Satz statt der vollen rechten Spalte. */
+  function onboardingPreviewStripHtml(c) {
+    const watermark = fpVal("#f-watermarkText") || c.watermarkText || c.company || "Ihr Firmenname";
+    const accent = document.getElementById("f-accentColor")?.value || c.accentColor || "#0a0e1a";
+    return `
+      <div class="ob-preview-strip-img" style="background:${esc(accent)}"></div>
+      <div class="ob-preview-strip-body">
+        <span class="ob-mono">Vorschau</span>
+        <p>So sieht Ihr erster Beitrag ungefähr aus (${esc(watermark)}).</p>
+        <button type="button" class="ob-btn-text" data-guide-go="unternehmen">Ansehen</button>
+      </div>`;
+  }
+
+  /** Chip statt Zeile: Content-Saeulen im neuen Onboarding. Teilt sich S.pillarsDraft und die
+   *  KI-Vorschlags-Logik mit der alten Zeilen-Ansicht (renderPillarsSection, Dashboard) - nur die
+   *  Darstellung ist neu. "+ Säule" fragt den Titel direkt ab (kein leeres, editierbares Feld wie
+   *  in der alten Zeilen-Ansicht), Gewichtung/Beschreibung bleiben auf ihrem zuletzt gesetzten
+   *  Wert (Default 1/leer) - in dieser Ansicht bewusst nicht mehr einzeln einstellbar, wie in der
+   *  pixelgenauen Vorgabe gezeichnet. */
+  function pillarsChipsHtml() {
+    const chips = S.pillarsDraft.map((p, i) => `
+      <span class="ob-chip">${esc(p.title)}<button type="button" class="ob-chip-remove" data-pillar-remove="${i}" aria-label="„${esc(p.title)}“ entfernen">×</button></span>`).join("");
+    return `
+      <div class="ob-pillars-box" id="pillars-chips-section">
+        <div class="ob-section-head">
+          <span class="ob-mono">Content-Säulen <span class="ob-opt">optional</span></span>
+        </div>
+        <p class="ob-pillars-intro">Content-Säulen sind Ihre festen Themenbereiche. Pipeflow wechselt sie der Reihe nach durch, damit nicht jeden Tag dasselbe kommt.</p>
+        <div class="ob-pillars-actions">
+          <div class="ob-chips">
+            ${chips}
+            ${S.pillarsDraft.length < 6 ? `<button type="button" class="ob-chip-add" id="pillar-chip-add">+ Säule</button>` : ""}
+          </div>
+          ${S.aiAvailable ? `<button type="button" class="ob-btn-text" id="pillar-ai-suggest">Mit KI vorschlagen</button>` : ""}
+        </div>
+        ${S.aiAvailable ? `
+        <div id="pillar-ai-block" ${S.pillarAiOpen ? "" : "hidden"}>
+          <div class="ob-field-wrap" style="margin-top:12px">
+            <label for="f-pillar-keywords" class="vh">Stichworte für Themen-Ideen</label>
+            <input class="ob-input" id="f-pillar-keywords" type="text" placeholder="Stichworte für Themen-Ideen (optional, z. B. Osteopressur, Faszientherapie, Mühlviertel)" maxlength="300" value="${esc(S.pillarAiKeywords)}">
+          </div>
+          <div style="margin-top:10px"><button type="button" class="ob-btn ob-btn-secondary ob-btn-sm" id="pillar-ai-fetch">Vorschläge holen</button></div>
+          <div id="pillar-ai-results">${S.pillarSuggestions.map(pillarSuggestionCardHtml).join("")}</div>
+        </div>` : ""}
+      </div>`;
+  }
+
+  /** Eigene Hashtags als Tag-Feld. customHashtags bleibt ein einzelner, leerzeichengetrennter
+   *  String (unveraendertes DB-Feld/Feldname) - S.customHashtagsDraft ist nur die Zerlegung davon
+   *  fuers Rendern/Bearbeiten, ein verstecktes Feld haelt den zusammengesetzten String aktuell,
+   *  den FormData beim Absenden ganz normal mitschickt. */
+  function customHashtagsList() {
+    return (S.customHashtagsDraft || "").split(/\s+/).map((t) => t.trim()).filter(Boolean);
+  }
+  function normalizeHashtag(raw) {
+    let t = String(raw || "").trim();
+    if (!t) return "";
+    if (!t.startsWith("#")) t = "#" + t;
+    t = "#" + t.slice(1).replace(/[^\p{L}\p{N}_]/gu, "");
+    return t.length > 1 ? t.slice(0, 31) : "";
+  }
+  function hashtagsFieldHtml(c) {
+    if (S.customHashtagsDraft === undefined) S.customHashtagsDraft = c.customHashtags || "";
+    const tags = customHashtagsList();
+    return `
+      <div class="ob-field-wrap" id="hashtags-field-wrap">
+        <span class="ob-mono">Eigene Hashtags <span class="ob-opt">optional</span></span>
+        <div class="ob-tagfield" id="hashtags-tagfield">
+          ${tags.map((t, i) => `<span class="ob-tag-chip">${esc(t)}<button type="button" class="ob-chip-remove" data-hashtag-remove="${i}" aria-label="${esc(t)} entfernen">×</button></span>`).join("")}
+          <input type="text" id="f-customHashtagsInput" placeholder="${tags.length ? "" : "#oberoesterreich"}" aria-label="Hashtag hinzufügen, mit Leertaste oder Enter bestätigen">
+        </div>
+        <input type="hidden" id="f-customHashtags" name="customHashtags" value="${esc(S.customHashtagsDraft)}">
+        <p class="ob-hint">Diese Hashtags kommen zusätzlich zu den erzeugten in jeden Beitrag.</p>
+      </div>`;
+  }
+  function repaintHashtagsField() {
+    const wrap = document.getElementById("hashtags-field-wrap");
+    if (wrap) wrap.outerHTML = hashtagsFieldHtml(S.customer || {});
+  }
+
+  function repaintPillars() {
+    const section = $("#pillars-section");
+    if (section) section.innerHTML = renderPillarsSection();
+    const chips = $("#pillars-chips-section");
+    if (chips) chips.outerHTML = pillarsChipsHtml();
+    updateFirstPostPreview();
+    updateOnboardingChrome();
+  }
+
+  /** Zaehlt ausgefuellte Pflichtfelder innerhalb eines Wurzelelements - liefert die Grundlage fuer
+   *  jeden "x / y"-Zaehler (Seitenleiste, Sektionskoepfe, Fussleile). Absichtlich generisch
+   *  (fragt [required] ab, nicht eine feste Liste), damit ein spaeter hinzugefuegtes Pflichtfeld
+   *  automatisch mitgezaehlt wird, statt den Zaehler stillschweigend falsch zu lassen. */
+  function ob_countProgress(root) {
+    if (!root) return { done: 0, total: 0 };
+    const fields = Array.from(root.querySelectorAll("input[required], textarea[required], select[required]"));
+    const done = fields.filter((f) => String(f.value || "").trim() !== "").length;
+    return { done, total: fields.length };
+  }
+
+  function onboardingStepStatus(stepIndex, currentPart) {
+    if (stepIndex < currentPart - 1) return "fertig";
+    if (stepIndex === currentPart - 1) return "läuft";
+    return "offen";
+  }
+
+  function onboardingSidebarHtml(part) {
+    const items = OB_STEPS.map((s, i) => {
+      const status = onboardingStepStatus(i, part);
+      const active = i === part - 1;
+      const clickable = i < part - 1; // bereits durchlaufene Schritte
+      return `<button type="button" class="ob-step-item${active ? " is-active" : ""}${clickable ? " is-clickable" : ""}"
+        ${clickable ? `data-formpart="${i + 1}"` : "disabled"}>
+        <span class="ob-step-num ob-mono">${s.n}</span>
+        <span class="ob-step-name">${s.name}</span>
+        <span class="ob-step-status">${status}</span>
+      </button>`;
+    }).join("");
+    return `
+      <aside class="ob-side">
+        <a class="ob-side-brand" href="." aria-label="Pipeflow" onclick="return false" tabindex="-1">
+          <svg width="28" height="14" viewBox="0 0 28 14" aria-hidden="true"><path d="M0 10c4 0 4-8 8-8s4 8 8 8 4-8 8-8 4 8 8 8" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          <span>Pipeflow</span>
+        </a>
+        <div class="ob-side-steps">
+          <span class="ob-mono">Einrichtung</span>
+          <div id="ob-sidebar-steps">${items}</div>
+        </div>
+        <div class="ob-side-foot">
+          <p class="ob-side-trial">${S.trialDays} Tage kostenlos testen. Keine Kreditkarte nötig.</p>
+          <span class="ob-mono">Automatisch gespeichert</span>
+        </div>
+      </aside>`;
+  }
+
+  function onboardingMobileHeadHtml(part) {
+    const step = OB_STEPS[part - 1];
+    const dashes = OB_STEPS.map((_, i) => `<span class="ob-mobile-dash${i === part - 1 ? " is-current" : ""}"></span>`).join("");
+    return `
+      <div class="ob-mobile-head">
+        <div class="ob-mobile-bar">
+          <div class="ob-side-brand">
+            <svg width="22" height="11" viewBox="0 0 28 14" aria-hidden="true"><path d="M0 10c4 0 4-8 8-8s4 8 8 8 4-8 8-8 4 8 8 8" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+            <span>Pipeflow</span>
+          </div>
+          <button type="button" class="ob-mobile-help" data-guide-go="unternehmen">Hilfe</button>
+        </div>
+        <div class="ob-mobile-progress">
+          <span class="ob-mono">${step.n} / 04</span>
+          <span class="ob-step-name-mobile">${step.name}</span>
+          <div class="ob-mobile-dashes">${dashes}</div>
+        </div>
+      </div>`;
+  }
+
+  function onboardingFooterHtml(part, root) {
+    const { done, total } = ob_countProgress(root);
+    const isLast = part === OB_STEPS.length;
+    const nextLabel = isLast ? `Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}` : "Weiter";
+    return `
+      <div class="ob-foot">
+        <span class="ob-mono">Schritt ${OB_STEPS[part - 1].n} von 04${total ? ` · ${done}/${total} ausgefüllt` : ""}</span>
+        <span class="ob-foot-spacer"></span>
+        <button type="button" class="ob-foot-later" id="ob-save-later">Später fortsetzen</button>
+        ${part > 1 ? `<button type="button" class="ob-btn ob-btn-secondary" data-formpart="${part - 1}">Zurück</button>` : ""}
+        <button class="ob-btn ob-btn-primary" type="${isLast ? "submit" : "button"}" ${isLast ? "" : `data-formpart="${part + 1}"`}>${nextLabel}</button>
+      </div>`;
+  }
+
+  /** Rechte Spalte: Vorschau-Karte (Schritt 1/2) oder Wochenraster (Schritt 3/4), je nach Stand
+   *  der Eingabe. Liest nur bereits gerenderte Feldwerte aus dem DOM (keine eigene Kopie des
+   *  Zustands) - ruft dieselben kleinen Helfer wie die Kachel-Vorschau in den Einstellungen. */
+  function onboardingPreviewHtml(part, c) {
+    if (part <= 2) {
+      const company = fpVal('#company [name="company"]') || c.company || "";
+      const watermark = fpVal("#f-watermarkText") || company || "Ihr Firmenname";
+      const accent = document.getElementById("f-accentColor")?.value || c.accentColor || "#0a0e1a";
+      const channels = [];
+      if (fpChecked("igFeedEnabled") || c.igFeedEnabled !== false) channels.push("Instagram Feed");
+      if (fpChecked("igStoryEnabled") || c.igStoryEnabled !== false) channels.push("Instagram Story");
+      if (fpChecked("linkedinEnabled") || c.linkedinEnabled !== false) channels.push("LinkedIn");
+      const tone = TONES[fpVal("#f-tone") || c.tone || "sachlich"] || "";
+      const open = [];
+      if (!(fpVal('#company [name="company"]') || c.company)) open.push("Firmenname fehlt");
+      if (!(fpVal("#f-contactName") || c.contactName)) open.push("Ihr Name fehlt");
+      if (!(fpVal("#f-email") || c.email)) open.push("E-Mail fehlt");
+      if (!(fpVal("#f-about") || c.about)) open.push("Beschreibung fehlt");
+      return `
+        <div class="ob-mono" style="margin-bottom:22px">Vorschau</div>
+        <div class="ob-preview-card">
+          <div class="ob-preview-square" style="background:${esc(accent)}">
+            <p class="ob-preview-headline">Ihr Beitrag</p>
+            <span class="ob-preview-watermark">${esc(watermark)}</span>
+          </div>
+          <div class="ob-preview-meta">
+            <div class="ob-preview-meta-row"><span class="ob-label">Kanal</span><span class="ob-value">${esc(channels.join(", ") || "—")}</span></div>
+            <div class="ob-preview-meta-row"><span class="ob-label">Zeitpunkt</span><span class="ob-value">${esc(fpVal("#f-postTime") || c.postTime || "15:00")} Uhr</span></div>
+            <div class="ob-preview-meta-row"><span class="ob-label">Ton</span><span class="ob-value">${esc(tone)}</span></div>
+          </div>
+        </div>
+        ${open.length ? `
+        <div class="ob-open-card">
+          <span class="ob-mono">Noch offen</span>
+          <div style="margin-top:10px">
+            ${open.map((t) => `<div class="ob-open-item"><span class="ob-open-dot"></span>${esc(t)}</div>`).join("")}
+          </div>
+        </div>` : ""}`;
+    }
+    // Schritt 3/4: Wochenraster aus den tatsaechlich eingestellten Wochentagen je Kanal.
+    const freq = fpVal("#f-frequency") || c.frequency || "werktags";
+    const igDays = weekdaysFor(readDaypicker("instagram"), freq);
+    const liDays = weekdaysFor(readDaypicker("linkedin"), freq);
+    const igFeedOn = fpChecked("igFeedEnabled") ?? c.igFeedEnabled !== false;
+    const igStoryOn = fpChecked("igStoryEnabled") ?? c.igStoryEnabled !== false;
+    const liOn = fpChecked("linkedinEnabled") ?? c.linkedinEnabled !== false;
+    const rows = [
+      { label: "Feed", days: igDays, on: igFeedOn },
+      { label: "Story", days: igDays, on: igStoryOn },
+      { label: "LinkedIn", days: liDays, on: liOn },
+    ];
+    const total = rows.reduce((n, r) => n + (r.on ? r.days.length : 0), 0);
+    return `
+      <div class="ob-mono" style="margin-bottom:22px">Ihre Woche</div>
+      <div class="ob-week-card">
+        <div class="ob-week-grid">
+          <span></span>
+          ${WEEKDAYS.map((d, i) => `<span class="ob-week-head${i >= 5 ? " is-weekend" : ""}">${d}</span>`).join("")}
+          ${rows.map((r) => `
+            <span class="ob-week-chan${r.on ? "" : " is-off"}">${r.label}</span>
+            ${WEEKDAYS.map((_, i) => `<span class="ob-week-cell${r.on && r.days.includes(i + 1) ? " is-set" : ""}"></span>`).join("")}
+          `).join("")}
+        </div>
+        <div class="ob-week-foot"><span>Beiträge pro Woche</span><span class="ob-value">${total}</span></div>
+      </div>`;
+  }
+
+  /** Liest die aktuell angehakten Wochentage eines Kanals direkt aus dem DOM (Quelle der
+   *  Wahrheit waehrend der Eingabe, bevor gespeichert wird). Leeres Array, wenn der Daypicker
+   *  fuer diesen Kanal (noch) nicht gerendert ist (z. B. Schritt 1/2). */
+  function readDaypicker(channel) {
+    const boxes = document.querySelectorAll(`[data-weekday-channel="${channel}"] input:checked`);
+    return boxes.length ? Array.from(boxes).map((b) => Number(b.value)) : [];
+  }
+
+  /** Aktualisiert Seitenleiste, mobile Fortschrittszeile, Fussleisten-Zaehler und rechte Spalte,
+   *  OHNE die Formularfelder selbst neu zu rendern (sonst Fokus-/Eingabeverlust). Haengt an den
+   *  bestehenden input/change-Listenern fuer #company (siehe updateFirstPostPreview-Aufrufe). */
+  function updateOnboardingChrome() {
+    if (S.customer) return; // Sidebar-Wizard existiert nur im Onboarding, nicht bearbeitend (edit=true)
+    const part = S.formPart || 1;
+    const sidebarSteps = document.getElementById("ob-sidebar-steps");
+    if (!sidebarSteps) return; // altes/anderes Layout gerade sichtbar (z. B. settingsHtml)
+    const items = OB_STEPS.map((s, i) => {
+      const status = onboardingStepStatus(i, part);
+      const active = i === part - 1;
+      const clickable = i < part - 1;
+      return `<button type="button" class="ob-step-item${active ? " is-active" : ""}${clickable ? " is-clickable" : ""}"
+        ${clickable ? `data-formpart="${i + 1}"` : "disabled"}>
+        <span class="ob-step-num ob-mono">${s.n}</span>
+        <span class="ob-step-name">${s.name}</span>
+        <span class="ob-step-status">${status}</span>
+      </button>`;
+    }).join("");
+    sidebarSteps.innerHTML = items;
+    const activeStepRoot = document.getElementById(`ob-step-${part}`);
+    const footer = document.getElementById("formpart-actions");
+    if (footer) footer.innerHTML = onboardingFooterHtml(part, activeStepRoot);
+    const preview = document.getElementById("ob-preview-col");
+    if (preview) preview.innerHTML = onboardingPreviewHtml(part, S.customer || {});
   }
 
   /* ================= Rendering: Schritte ================= */
@@ -854,6 +1149,16 @@
       </div>`;
   }
 
+  /** Feld nach der pixelgenauen Onboarding-Vorgabe (18.09.2026): Mono-Label statt Sans-Label,
+   *  .ob-input statt .field/input. Nur fuer companyHtml() (!edit-Sidebar-Wizard). */
+  function obFieldHtml(c, name, label, type, opts = {}) {
+    return `
+      <div class="ob-field-wrap">
+        <label class="ob-mono" for="f-${name}">${label}${opts.optional ? ' <span class="ob-opt">optional</span>' : ""}</label>
+        <input class="ob-input" id="f-${name}" name="${name}" type="${type}" value="${esc(c[name])}" ${opts.optional ? "" : "required"} autocomplete="${opts.ac || "off"}" ${opts.ph ? `placeholder="${esc(opts.ph)}"` : ""}>
+      </div>`;
+  }
+
   function companyHtml() {
     const c = S.customer || {
       tone: "sachlich", frequency: "werktags", postTime: "15:00", accentColor: "", watermarkText: "", avoidTopics: "", ctaPreference: "link_bio",
@@ -867,192 +1172,208 @@
     };
     S.pillarsDraft = (c.contentPillars || []).map((p) => ({ title: p.title || "", description: p.description || "", weight: p.weight || 1 }));
     const edit = !!S.customer;
-    const twoPart = !edit; // Beim Bearbeiten alles auf einer Seite - der Kunde kennt das Formular schon.
-    const part = twoPart ? S.formPart : 1;
-    const f = (name, label, type, opts = {}) => `
-      <div class="field">
-        <label for="f-${name}">${label}${opts.optional ? ' <span class="opt">(optional)</span>' : ""}</label>
-        <input id="f-${name}" name="${name}" type="${type}" value="${esc(c[name])}" ${opts.optional ? "" : "required"} autocomplete="${opts.ac || "off"}" ${opts.ph ? `placeholder="${esc(opts.ph)}"` : ""}>
-      </div>`;
+    const part = S.formPart && S.formPart >= 1 && S.formPart <= 4 ? S.formPart : 1;
 
-    // Panel v16 Fix: der fruehere 1/2/3-Erklaerblock hier wiederholte wortgleich, was die Schritt-
-    // Kette (.rail) links bzw. auf Mobil als Text ueber #rail-current bereits zeigt ("Schritt 1 von
-    // 4 · Unternehmen" + die 4 Knoten Unternehmen/Instagram/LinkedIn/Fertig). Auf Desktop steht die
-    // Kette in einer eigenen Spalte, faellt aber auf schmalen Screens (<=820px) in dieselbe
-    // einspaltige Fliessreihenfolge wie dieser Block - zwei fast identische Schritt-Aufzaehlungen
-    // direkt untereinander sahen dann wie zwei verschiedene Onboarding-Versionen aus (Screenshot-
-    // Beweis von Paul, 2026-09-14). Es gab nie zwei Code-Pfade, nur diese eine echte inhaltliche
-    // Dopplung - deshalb hier entfernt statt per CSS versteckt; die Test-Info bleibt einzig unten.
+    // ---------- Schritt 01: Unternehmen ----------
+    const step1 = `
+      <div class="ob-grid2">
+        <div>
+          ${obFieldHtml(c, "company", "Firmenname", "text", { ac: "organization", ph: "Testfirma GmbH" })}
+        </div>
+        <div>
+          <div class="ob-field-wrap">
+            <label class="ob-mono" for="f-website">Website <span class="ob-opt">optional</span></label>
+            <div class="ob-field-inline" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
+              <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://www.testfirma.at">
+              ${S.aiAvailable ? `<button type="button" class="ob-btn ob-btn-primary ob-btn-sm" id="analyze-website">Auslesen</button>` : ""}
+            </div>
+          </div>
+        </div>
+        ${obFieldHtml(c, "contactName", "Ihr Name", "text", { ac: "name", ph: "Max Mustermann" })}
+        ${obFieldHtml(c, "email", "E-Mail", "email", { ac: "email", ph: "max.mustermann@testfirma.at" })}
+      </div>
+      <div id="website-suggestion" hidden></div>
+      ${S.aiAvailable ? `<p class="ob-hint" id="analyze-website-hint">Wir lesen Ihre Website und schlagen Branche, Beschreibung und Tonalität vor. Übernommen wird nichts von selbst.</p>` : ""}`;
+
+    // ---------- Schritt 02: Inhalt ----------
+    const step2 = `
+      ${obFieldHtml(c, "industry", "Branche", "text", { optional: true, ph: "Physiotherapie, Tischlerei, Steuerberatung …" })}
+      <div class="ob-field-wrap">
+        <label class="ob-mono" for="f-about">Worum soll es in den Beiträgen gehen?</label>
+        ${withDictate(`<textarea class="ob-textarea" id="f-about" name="about" rows="4" placeholder="Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen." required>${esc(c.about)}</textarea>`)}
+        <div class="ob-row-between">
+          <span class="ob-hint" style="margin-top:0">Stichworte reichen.</span>
+          ${S.aiAvailable ? `<button type="button" class="ob-btn ob-btn-secondary ob-btn-sm" id="ai-improve">Mit KI verbessern</button>` : ""}
+        </div>
+        <div id="ai-suggestion" hidden></div>
+      </div>
+      ${pillarsChipsHtml()}
+      ${hashtagsFieldHtml(c)}`;
+
+    // ---------- Schritt 03: Stil ----------
+    const step3 = `
+      <div class="ob-grid2">
+        <div class="ob-field-wrap">
+          <label class="ob-mono" for="f-tone">Tonalität</label>
+          <select class="ob-select" id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        </div>
+        ${obFieldHtml(c, "watermarkText", "Beschriftung im Bild", "text", { optional: true, ph: c.company || "Testfirma" })}
+      </div>
+      <div class="ob-field-wrap">
+        <span class="ob-mono">Akzentfarbe für Ihre Bilder <span class="ob-opt">optional</span></span>
+        <div class="ob-swatches" role="group" aria-label="Farbvorschläge" style="margin-top:7px">
+          ${PALETTE.map((hex) => `<button type="button" class="ob-swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}${c.accentColor === hex ? ", ausgewählt" : ""}"></button>`).join("")}
+          <button type="button" class="ob-swatch-custom" id="ob-custom-color-btn">Eigene Farbe</button>
+        </div>
+        <input id="f-accentColor" name="accentColor" type="color" value="${esc(c.accentColor || "#0a0e1a")}" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
+        <p class="ob-hint">Leer = Standard-Design.${c.activeThemeId ? " Hinweis: Aktuell wird stattdessen Ihr aktives Thema verwendet." : ""}</p>
+      </div>
+      <div class="ob-option-row" style="border-top:1px solid var(--rule-soft);padding:18px 0">
+        <div>
+          <div class="ob-option-title">Farbverlauf statt einer Farbe</div>
+          <div class="ob-option-desc">Wirkt auf Bild-Hintergründe, Wasserzeichen-Fläche und Karussell-Slides.</div>
+        </div>
+        <button type="button" class="ob-switch" data-switch-for="f-gradientEnabled" aria-pressed="${c.gradientEnabled ? "true" : "false"}" aria-label="Farbverlauf statt einer Farbe"></button>
+      </div>
+      <div id="gradient-options" ${c.gradientEnabled ? "" : "hidden"}>
+        <div class="ob-grid2">
+          <div class="ob-field-wrap">
+            <label class="ob-mono" for="f-gradientColor2">Zweite Farbe</label>
+            <div class="colorrow">
+              <input id="f-gradientColor2" name="gradientColor2" type="color" value="${esc(c.gradientColor2 || "#137A3F")}">
+              ${wertAnzeigeHtml({ fuer: "f-gradientColor2", wert: c.gradientColor2 || "#137A3F", leerText: "Es wird die vorgeschlagene Farbe verwendet", farbe: true })}
+            </div>
+            <div class="swatches" id="gradient-suggestions" role="group" aria-label="Passende Verlauf-Vorschläge"></div>
+          </div>
+          <div class="ob-field-wrap">
+            <label class="ob-mono" for="f-gradientDirection">Richtung</label>
+            <select class="ob-select" id="f-gradientDirection" name="gradientDirection">
+              ${Object.entries(GRADIENT_DIRECTIONS).map(([k, v]) => `<option value="${k}" ${(c.gradientDirection || "diagonal") === k ? "selected" : ""}>${v}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+      </div>
+      <input type="hidden" name="fontChoice" value="${esc(c.fontChoice || "")}">
+      ${edit ? `<div class="ob-field-wrap" id="themes-section">${themesSectionHtml(c)}</div>` : ""}
+      ${edit ? `<div class="ob-field-wrap" id="logo-section">${logoSectionHtml(c)}</div>` : ""}`;
+
+    // ---------- Schritt 04: Kanäle & Freigabe ----------
+    const channelRow = (name, checked, title, desc) => `
+      <div class="ob-option-row">
+        <div><div class="ob-option-title">${title}</div><div class="ob-option-desc">${desc}</div></div>
+        <button type="button" class="ob-switch" data-switch-for="f-${name}" aria-pressed="${checked ? "true" : "false"}" aria-label="${title}"></button>
+        <input type="checkbox" id="f-${name}" name="${name}" ${checked ? "checked" : ""} hidden>
+      </div>`;
+    const advancedRow = (title, desc, body) => `<div class="ob-option-row" style="display:block"><div class="ob-option-title">${title}</div><div class="ob-option-desc">${desc}</div><div style="margin-top:12px">${body}</div></div>`;
+    const step4 = `
+      <div style="border:1px solid var(--rule);border-radius:var(--r-card)">
+        ${channelRow("igFeedEnabled", c.igFeedEnabled !== false, "Instagram Feed", "Bildbeitrag mit Text, werktags um 15:00.")}
+        ${channelRow("igStoryEnabled", c.igStoryEnabled !== false, "Instagram Story", "Hochformat, ohne sichtbare Bildunterschrift.")}
+        ${channelRow("linkedinEnabled", c.linkedinEnabled !== false, "LinkedIn", "Sachlicher B2B-Ton, immer mit Bild.")}
+      </div>
+      <div class="ob-option-row" style="margin-top:22px;background:var(--wash);border:1px solid var(--rule);border-radius:var(--r-card);padding:20px">
+        <div>
+          <div class="ob-option-title">Erst nach Ihrer Freigabe veröffentlichen</div>
+          <p style="font-size:14px;line-height:1.6;max-width:52ch;color:var(--ink-2);margin:6px 0 0">Wir bereiten jeden Beitrag vor und legen ihn unter „Wartet auf Freigabe" ab. Ohne Ihr Ja geht nichts online — nach der Freigabe meist innerhalb weniger Minuten.</p>
+        </div>
+        <button type="button" class="ob-switch" data-switch-for="f-approvalMode" aria-label="Erst nach Ihrer Freigabe veröffentlichen" aria-pressed="${c.approvalMode ? "true" : "false"}" style="flex-shrink:0"></button>
+        <input type="checkbox" id="f-approvalMode" name="approvalMode" ${c.approvalMode ? "checked" : ""} hidden>
+      </div>
+
+      <details class="ob-advanced" style="margin-top:22px" id="ob-advanced">
+        <summary>
+          <div style="flex:1 1 auto">
+            <div class="ob-advanced-title">Feineinstellungen</div>
+            <div class="ob-advanced-desc">Wochentage, Uhrzeit, Pausen, E-Mails, Wortverbote, Kommentare</div>
+          </div>
+          <span class="ob-advanced-count ob-mono">6 Punkte</span>
+          <svg class="ob-advanced-chevron" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 5l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+        </summary>
+        <div class="ob-advanced-body">
+          ${advancedRow("Wochentage", "An welchen Tagen posten wir für Sie?", `
+            <fieldset style="border:0;padding:0;margin:0 0 12px">
+              <legend class="ob-mono" style="margin-bottom:7px">Instagram</legend>
+              <div class="daypicker" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+            </fieldset>
+            <fieldset style="border:0;padding:0;margin:0">
+              <legend class="ob-mono" style="margin-bottom:7px">LinkedIn</legend>
+              <div class="daypicker" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
+            </fieldset>`)}
+          ${advancedRow("Uhrzeit & Pausen", "Wann am Tag, und ob eine Zeit ausgesetzt wird.", `
+            <div class="ob-grid2">
+              <div class="ob-field-wrap"><label class="ob-mono" for="f-postTime">Um wie viel Uhr?</label><input class="ob-input" id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900"></div>
+              <div class="ob-field-wrap"><label class="ob-mono" for="f-pauseFrom">Pause/Urlaub von <span class="ob-opt">optional</span></label><input class="ob-input" id="f-pauseFrom" name="pauseFrom" type="date" value="${esc(c.pauseFrom || "")}"></div>
+            </div>
+            <div class="ob-field-wrap"><label class="ob-mono" for="f-pauseUntil">Pause/Urlaub bis <span class="ob-opt">optional</span></label><input class="ob-input" id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}"></div>`)}
+          ${advancedRow("Aufruf, Wortverbote, Pflicht-Elemente", "Was am Ende steht, was nie und was immer vorkommen muss.", `
+            <div class="ob-field-wrap"><label class="ob-mono" for="f-ctaPreference">Bevorzugter Aufruf am Ende</label><select class="ob-select" id="f-ctaPreference" name="ctaPreference">${Object.entries(CTAS).map(([k, v]) => `<option value="${k}" ${(c.ctaPreference || "link_bio") === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+            <div class="ob-field-wrap"><label class="ob-mono" for="f-avoidTopics">Was sollen wir vermeiden? <span class="ob-opt">optional</span></label><input class="ob-input" id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="Rabatte, Politik, Konkurrenz nennen"><p class="ob-hint">Wird berücksichtigt, nicht erzwungen.</p></div>
+            <div class="ob-field-wrap"><label class="ob-mono" for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="ob-opt">optional, kommagetrennt</span></label><input class="ob-input" id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="billig, Konkurrenzname, Rabatt"><p class="ob-hint">Wird automatisch blockiert: ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p></div>
+            <div class="ob-field-wrap"><label class="ob-mono" for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="ob-opt">optional, kommagetrennt</span></label><input class="ob-input" id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="#IhrHashtag, @IhrHandle"><p class="ob-hint">Fehlt eines, wird nicht veröffentlicht.</p></div>`)}
+          ${advancedRow("E-Mails", "Wann wir Ihnen schreiben.", `
+            <div class="ob-option-row" style="padding:10px 0"><div class="ob-option-title" style="font-size:14px;font-weight:400">Bei jeder Veröffentlichung${c.approvalMode ? " (bzw. neuer Freigabe)" : ""}</div><button type="button" class="ob-switch" data-switch-for="f-notifyOnPublish" aria-pressed="${c.notifyOnPublish ? "true" : "false"}" aria-label="E-Mail bei Veröffentlichung"></button><input type="checkbox" id="f-notifyOnPublish" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""} hidden></div>
+            <div class="ob-option-row" style="padding:10px 0"><div class="ob-option-title" style="font-size:14px;font-weight:400">Wöchentlicher Analytics-Bericht</div><button type="button" class="ob-switch" data-switch-for="f-notifyWeeklyReport" aria-pressed="${c.notifyWeeklyReport ? "true" : "false"}" aria-label="Wöchentlicher Analytics-Bericht"></button><input type="checkbox" id="f-notifyWeeklyReport" name="notifyWeeklyReport" ${c.notifyWeeklyReport ? "checked" : ""} hidden></div>`)}
+          ${advancedRow("Kommentare", "Ob und wie Instagram-Kommentare automatisch beantwortet werden.", `
+            <div class="ob-option-row" style="padding:10px 0"><div class="ob-option-title" style="font-size:14px;font-weight:400">Automatisch mit KI beantworten</div><button type="button" class="ob-switch" data-switch-for="f-commentAutomationEnabled" aria-pressed="${c.commentAutomationEnabled ? "true" : "false"}" aria-label="Kommentare automatisch beantworten"></button><input type="checkbox" id="f-commentAutomationEnabled" name="commentAutomationEnabled" ${c.commentAutomationEnabled ? "checked" : ""} hidden></div>
+            <p class="ob-hint">Nur echte Fragen bekommen eine Antwort - Lob, neutrale Kommentare, Spam und Hass-Kommentare werden immer übersprungen.</p>
+            <select class="ob-select" name="commentAutomationMode" aria-label="Umgang mit generierten Antworten" style="margin-top:8px">
+              <option value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "selected" : ""}>Erst zur Freigabe vorlegen</option>
+              <option value="auto" ${c.commentAutomationMode === "auto" ? "selected" : ""}>Automatisch abschicken</option>
+            </select>`)}
+          ${advancedRow("Hashtag-Menge, Sprache, Emojis", "Feinjustierung der Erzeugung.", `
+            <div class="ob-grid2">
+              <div class="ob-field-wrap"><label class="ob-mono" for="f-hashtagPreference">Hashtags</label><select class="ob-select" id="f-hashtagPreference" name="hashtagPreference">${Object.entries(HASHTAGS).map(([k, v]) => `<option value="${k}" ${(c.hashtagPreference || "wenige") === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+              <div class="ob-field-wrap"><label class="ob-mono" for="f-language">Sprache</label><select class="ob-select" id="f-language" name="language">${Object.entries(LANGUAGES).map(([k, v]) => `<option value="${k}" ${(c.language || "de") === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+            </div>
+            <div class="ob-option-row" style="padding:10px 0"><div class="ob-option-title" style="font-size:14px;font-weight:400">Emojis in Beiträgen verwenden</div><button type="button" class="ob-switch" data-switch-for="f-emojisEnabled" aria-pressed="${c.emojisEnabled !== false ? "true" : "false"}" aria-label="Emojis in Beiträgen verwenden"></button><input type="checkbox" id="f-emojisEnabled" name="emojisEnabled" ${c.emojisEnabled !== false ? "checked" : ""} hidden></div>`)}
+        </div>
+      </details>
+
+      ${edit ? "" : `
+      <label class="check" style="margin-top:22px;display:flex">
+        <input type="checkbox" name="consent" id="f-consent">
+        <span>Ich stimme zu, dass Pipeline AI Solutions meine Angaben und die Freigaben der verbundenen Konten speichert, um in meinem Namen Beiträge zu veröffentlichen. Ich kann das jederzeit widerrufen. <a href="${esc(CONFIG.privacyUrl)}" target="_blank" rel="noopener">Datenschutzerklärung</a></span>
+      </label>
+      ${S.turnstileSiteKey ? `<div style="margin-top:12px"><div id="turnstile-widget"></div></div>` : ""}`}`;
+
     const introHtml = !edit ? `
       <div class="intro" id="intro-block" ${part !== 1 ? "hidden" : ""}>
         <p class="intro-trial">${S.trialDays} Tage kostenlos testen. Keine Kreditkarte nötig.</p>
       </div>` : "";
 
-    const partAHtml = `
-        <!-- Aufgabe 2 (18.09.2026): Firmenname+Website als zusammengehoerige Gruppe mit
-             Sektionslabel statt vier lose in einem Grid schwebender Felder; der Website-Button
-             sitzt jetzt direkt am Feld (eigene .field-group statt eigenstaendigem margin-top-
-             Absatz), eine Haarlinie trennt "Unternehmen" sichtbar von "Inhalt". -->
-        <p class="card-kicker">Unternehmen</p>
-        <div class="grid2">
-          <div class="field-group">
-            ${f("company", "Firmenname", "text", { ac: "organization", ph: "Testfirma GmbH" })}
-            <div class="field">
-              <label for="f-website">Website <span class="opt">(optional)</span></label>
-              <div class="field-with-action">
-                <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://www.testfirma.at" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
-                ${S.aiAvailable ? `<button type="button" class="btn" id="analyze-website">Vorschlag aus meiner Website holen</button>` : ""}
-              </div>
-              ${S.aiAvailable ? `<p class="hint" id="analyze-website-hint">Vorschlag zum Prüfen - übernommen wird nichts von selbst.</p>` : ""}
-            </div>
-          </div>
-          ${f("contactName", "Ihr Name", "text", { ac: "name", ph: "Max Mustermann" })}
-          ${f("email", "E-Mail", "email", { ac: "email", ph: "max.mustermann@testfirma.at" })}
-        </div>
-        <div id="website-suggestion" hidden></div>
-        <p class="card-kicker section-rule">Inhalt</p>
-        ${f("industry", "Branche", "text", { optional: true, ph: "z. B. Physiotherapie, Tischlerei, Steuerberatung" })}
-        <div class="field">
-          <label for="f-about">Worum soll es in den Beiträgen gehen?</label>
-          ${withDictate(`<textarea id="f-about" name="about" placeholder="z. B. Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Zielgruppe: Büroangestellte zwischen 35 und 60. Wir wollen Tipps geben und neue Patienten gewinnen.">${esc(c.about)}</textarea>`)}
-          <p class="hint">Stichworte reichen.${S.aiAvailable ? ` <button type="button" class="link" id="ai-improve">Mit KI verbessern</button>` : ""}</p>
-          <div id="ai-suggestion" hidden></div>
-        </div>
-        <div class="field" id="pillars-section">${renderPillarsSection()}</div>`;
-
-    const partBHtml = `
-        <div class="field">
-          <label for="f-tone">Tonalität</label>
-          <select id="f-tone" name="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${c.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-        </div>
-        <div class="grid2">
-          <div class="field">
-            <label for="f-accentColor">Akzentfarbe für Ihre Bilder <span class="opt">(optional)</span></label>
-            <div class="colorrow">
-              <input id="f-accentColor" name="accentColor" type="color" value="${esc(c.accentColor || "#0a0e1a")}">
-              ${wertAnzeigeHtml({ fuer: "f-accentColor", wert: c.accentColor, leerText: "Es wird die Standardfarbe verwendet", farbe: true })}
-            </div>
-            <div class="swatches" role="group" aria-label="Vorschläge">
-              ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${c.accentColor === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
-            </div>
-            <p class="hint">Leer = Standard-Design.${c.activeThemeId ? " <strong>Hinweis: Aktuell wird stattdessen Ihr aktives Thema unten verwendet.</strong>" : ""}</p>
-            ${gradientFieldsHtml(c)}
-          </div>
-          <div class="field">
-            <label for="f-watermarkText">Beschriftung im Bild <span class="opt">(optional)</span></label>
-            ${`<input id="f-watermarkText" name="watermarkText" type="text" value="${esc(c.watermarkText || "")}" placeholder="${esc(c.company || "z. B. Testfirma")}">`}
-            <p class="hint">Leer = Ihr Firmenname.</p>
-            <p class="hint">Beispiel:</p>
-            <div class="lp-square" id="lp-square" style="background:${esc(c.accentColor || "#0a0e1a")}">
-              <span class="lp-headline" id="lp-headline">Ihr Beitrag</span>
-              <span class="lp-watermark" id="lp-watermark">${esc(c.watermarkText || c.company || "Pipeline")}</span>
-            </div>
-          </div>
-        </div>
-        ${edit ? `<div class="field" id="themes-section">${themesSectionHtml(c)}</div>` : ""}
-        ${edit ? `<div class="field" id="logo-section">${logoSectionHtml(c)}</div>` : ""}
-        <fieldset class="field">
-          <legend>Tage für Instagram</legend>
-          <div class="daypicker" data-weekday-channel="instagram">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.instagramWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
-        </fieldset>
-        <fieldset class="field">
-          <legend>Tage für LinkedIn</legend>
-          <div class="daypicker" data-weekday-channel="linkedin">${WEEKDAYS.map((label, i) => `<label><input type="checkbox" value="${i + 1}" ${weekdaysFor(c.linkedinWeekdays, c.frequency).includes(i + 1) ? "checked" : ""}><span>${label}</span></label>`).join("")}</div>
-        </fieldset>
-        <div class="grid2">
-          <div class="field">
-            <label for="f-postTime">Um wie viel Uhr?</label>
-            <input id="f-postTime" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" step="900">
-          </div>
-          <div class="field">
-            <label for="f-pauseFrom">Pause/Urlaub von <span class="opt">(optional)</span></label>
-            <input id="f-pauseFrom" name="pauseFrom" type="date" value="${esc(c.pauseFrom || "")}">
-          </div>
-        </div>
-        <div class="field">
-          <label for="f-pauseUntil">Pause/Urlaub bis <span class="opt">(optional)</span></label>
-          <input id="f-pauseUntil" name="pauseUntil" type="date" value="${esc(c.pauseUntil || "")}">
-          
-        </div>
-        <div class="grid2">
-          <div class="field">
-            <label for="f-ctaPreference">Bevorzugter Aufruf am Ende des Beitrags</label>
-            <select id="f-ctaPreference" name="ctaPreference">${Object.entries(CTAS).map(([k, v]) => `<option value="${k}" ${(c.ctaPreference || "link_bio") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-          </div>
-          <div class="field">
-            <label for="f-avoidTopics">Was sollen wir vermeiden? <span class="opt">(optional)</span></label>
-            ${`<input id="f-avoidTopics" name="avoidTopics" type="text" value="${esc(c.avoidTopics || "")}" placeholder="z. B. Rabatte, Politik, Konkurrenz nennen">`}
-            <p class="hint">Wird berücksichtigt, nicht erzwungen.</p>
-          </div>
-        </div>
-        <div class="field">
-          <label for="f-bannedWords">Wörter, die NIE vorkommen dürfen <span class="opt">(optional, kommagetrennt)</span></label>
-          ${`<input id="f-bannedWords" name="bannedWords" type="text" value="${esc(c.bannedWords || "")}" placeholder="z. B. billig, Konkurrenzname, Rabatt">`}
-          <p class="hint"><strong>Wird automatisch blockiert, nicht nur vermieden:</strong> ein Beitrag mit einem dieser Wörter wird gar nicht erst veröffentlicht.</p>
-        </div>
-        <div class="field">
-          <label for="f-requiredElements">Muss in jedem Beitrag vorkommen <span class="opt">(optional, kommagetrennt)</span></label>
-          ${`<input id="f-requiredElements" name="requiredElements" type="text" value="${esc(c.requiredElements || "")}" placeholder="z. B. #IhrHashtag, @IhrHandle">`}
-          <p class="hint">Fehlt eines, wird nicht veröffentlicht.</p>
-        </div>
-        <div class="field">
-          <label for="f-customHashtags">Eigene Hashtags <span class="opt">(optional)</span></label>
-          <input id="f-customHashtags" name="customHashtags" type="text" value="${esc(c.customHashtags || "")}" placeholder="#tischlerei #handwerk #oberoesterreich">
-          <p class="hint">Werden zusätzlich zu den erzeugten Hashtags verwendet.</p>
-        </div>
-        <div class="field">
-          <label>Welche Kanäle und Formate sollen wir für Sie bespielen?</label>
-          <label class="check"><input type="checkbox" name="igFeedEnabled" ${c.igFeedEnabled !== false ? "checked" : ""}><span>Instagram Feed-Beiträge</span></label>
-          <label class="check"><input type="checkbox" name="igStoryEnabled" ${c.igStoryEnabled !== false ? "checked" : ""}><span>Instagram Storys</span></label>
-          <label class="check"><input type="checkbox" name="linkedinEnabled" ${c.linkedinEnabled !== false ? "checked" : ""}><span>LinkedIn-Beiträge</span></label>
-          <p class="hint">Ein abgeschalteter Kanal wird nie bespielt, auch wenn er verbunden ist.</p>
-        </div>
-        <label class="check"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Beiträge vor Veröffentlichung freigeben - bevor etwas online geht, prüfen Sie es im Dashboard und geben es frei.</span></label>
-        <p class="hint under-check">Ohne Ihre Freigabe wird nichts veröffentlicht. Wir bereiten Beiträge vor, Sie sehen sie unter „Vorschau“ und „Warten auf Ihre Freigabe“, und geben sie frei, sobald Sie zufrieden sind - danach wird in der Regel innerhalb weniger Minuten veröffentlicht.</p>
-        <label class="check"><input type="checkbox" name="notifyOnPublish" ${c.notifyOnPublish ? "checked" : ""}><span>Ich möchte eine E-Mail bekommen, wenn ein Beitrag veröffentlicht wird${c.approvalMode ? " (bzw. sobald ein neuer Beitrag auf meine Freigabe wartet)" : ""}.</span></label>
-        <p class="hint under-check">Optional, standardmäßig aus - Sie bekommen dann bei jeder tatsächlichen Veröffentlichung sofort eine kurze E-Mail.</p>
-        <label class="check"><input type="checkbox" name="notifyWeeklyReport" ${c.notifyWeeklyReport ? "checked" : ""}><span>Ich möchte einmal pro Woche einen Analytics-Bericht per E-Mail bekommen (Kennzahlen + kurze Einordnung).</span></label>
-        <p class="hint under-check">Optional, standardmäßig aus - unabhängig von der Benachrichtigung oben.</p>
-        <label class="check"><input type="checkbox" name="commentAutomationEnabled" ${c.commentAutomationEnabled ? "checked" : ""}><span>Instagram-Kommentare automatisch mit KI beantworten.</span></label>
-        <p class="hint under-check">Nur echte Fragen bekommen eine Antwort - Lob, neutrale Kommentare, Spam und Hass-Kommentare werden immer übersprungen, nie beantwortet. Standardmäßig aus.</p>
-        <div class="field">
-          <label>Wie soll mit den generierten Antworten umgegangen werden?</label>
-          <label class="check"><input type="radio" name="commentAutomationMode" value="approval" ${(c.commentAutomationMode || "approval") === "approval" ? "checked" : ""}><span>Erst zur Freigabe vorlegen - Sie sehen jede Antwort vorher und geben sie frei.</span></label>
-          <label class="check"><input type="radio" name="commentAutomationMode" value="auto" ${c.commentAutomationMode === "auto" ? "checked" : ""}><span>Automatisch abschicken - Antworten werden direkt nach der Generierung veröffentlicht.</span></label>
-          
-        </div>
-        <div class="grid2">
-          <div class="field">
-            <label for="f-hashtagPreference">Hashtags</label>
-            <select id="f-hashtagPreference" name="hashtagPreference">${Object.entries(HASHTAGS).map(([k, v]) => `<option value="${k}" ${(c.hashtagPreference || "wenige") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-          </div>
-          <div class="field">
-            <label for="f-language">Sprache der Beiträge</label>
-            <select id="f-language" name="language">${Object.entries(LANGUAGES).map(([k, v]) => `<option value="${k}" ${(c.language || "de") === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-          </div>
-        </div>
-        <label class="check"><input type="checkbox" name="emojisEnabled" ${c.emojisEnabled !== false ? "checked" : ""}><span>Emojis in Beiträgen verwenden</span></label>
-        ${edit ? "" : `
-        <label class="check"><input type="checkbox" name="consent" id="f-consent">
-          <span>Ich stimme zu, dass Pipeline AI Solutions meine Angaben und die Freigaben der verbundenen Konten speichert, um in meinem Namen Beiträge zu veröffentlichen. Ich kann das jederzeit widerrufen. <a href="${esc(CONFIG.privacyUrl)}" target="_blank" rel="noopener">Datenschutzerklärung</a></span>
-        </label>
-        ${S.turnstileSiteKey ? `<div class="field"><div id="turnstile-widget"></div></div>` : ""}`}`;
-
-    const actionsHtml = !twoPart
-      ? `<div class="actions" style="margin-top:${edit ? 32 : 0}px"><button class="btn" type="submit">${edit ? "Speichern und weiter" : `Weiter zu ${esc(S.providers[0]?.name || "den Kanälen")}`}</button></div>`
-      : formPartActionsHtml(part);
+    const h1 = part === 3
+      ? `Wie soll es <em>aussehen?</em>`
+      : edit ? "Ihr Unternehmen" : "Social Media, das von selbst läuft.";
+    const subtitle = edit ? "Ändern Sie hier, worüber wir für Sie posten." : OB_STEP_LEDE[part - 1];
 
     return `
-      ${introHtml}
-      ${bannerHtml()}
-      <h1>${edit ? "Ihr Unternehmen" : "Social Media, das von selbst läuft."}</h1>
-      ${!edit && twoPart ? `<p class="steplabel" id="steplabel">${formPartLabel(part)}</p>` : ""}
-      <p class="lede" id="lede">${edit ? "Ändern Sie hier, worüber wir für Sie posten." : formPartLede(part)}</p>
-      <form id="company" novalidate>
-        ${twoPart ? `<div id="formpart-a" ${part !== 1 ? "hidden" : ""}>${partAHtml}</div><div id="formpart-b" ${part !== 2 ? "hidden" : ""}>${partBHtml}</div>` : partAHtml + partBHtml}
-        ${edit ? "" : firstPostPreviewHtml()}
-        <div id="formpart-actions">${actionsHtml}</div>
-      </form>
+      <div class="ob">
+        ${onboardingMobileHeadHtml(part)}
+        <div class="ob-shell">
+          ${onboardingSidebarHtml(part)}
+          <div class="ob-content">
+            ${introHtml}
+            ${bannerHtml()}
+            <div class="ob-head">
+              <h1 class="ob-h1">${h1}</h1>
+              <p class="ob-subtitle" id="lede">${subtitle}</p>
+            </div>
+            <form id="company" novalidate>
+              <div class="ob-body">
+                <div class="ob-form-col">
+                  <div id="ob-step-1" ${part !== 1 ? "hidden" : ""}>${step1}</div>
+                  <div id="ob-step-2" ${part !== 2 ? "hidden" : ""}>${step2}</div>
+                  <div id="ob-step-3" ${part !== 3 ? "hidden" : ""}>${step3}</div>
+                  <div id="ob-step-4" ${part !== 4 ? "hidden" : ""}>${step4}</div>
+                </div>
+                <div class="ob-preview-col" id="ob-preview-col">${onboardingPreviewHtml(part, c)}</div>
+              </div>
+              <div class="ob-preview-strip">${onboardingPreviewStripHtml(c)}</div>
+              <div id="formpart-actions">${onboardingFooterHtml(part, null)}</div>
+            </form>
+          </div>
+        </div>
+      </div>
       ${!edit ? recoverAccessHtml() : ""}`;
   }
 
@@ -1604,23 +1925,27 @@
     });
   }
 
-  /** Switches between the two signup form pages without re-rendering (would wipe unsaved input in the other page). */
+  /** Wechselt zwischen den vier Onboarding-Schritten OHNE neu zu rendern (das wuerde
+   *  unveroeffentlichte Eingaben in den anderen Schritten verwerfen und den Turnstile-Platzhalter
+   *  ungueltig machen). Ersetzt die fruehere Zwei-Seiten-Variante (18.09.2026, Sidebar-Wizard). */
   function switchFormPart(n) {
+    if (n < 1 || n > 4) return;
     S.formPart = n;
     const intro = document.getElementById("intro-block");
     if (intro) intro.hidden = n !== 1;
-    const a = document.getElementById("formpart-a");
-    const b = document.getElementById("formpart-b");
-    if (a) a.hidden = n !== 1;
-    if (b) b.hidden = n !== 2;
-    const label = document.getElementById("steplabel");
-    if (label) label.textContent = formPartLabel(n);
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById(`ob-step-${i}`);
+      if (el) el.hidden = i !== n;
+    }
+    const edit = !!S.customer;
+    const h1 = document.querySelector(".ob-h1");
+    if (h1) h1.innerHTML = n === 3 ? `Wie soll es <em>aussehen?</em>` : edit ? "Ihr Unternehmen" : "Social Media, das von selbst läuft.";
     const lede = document.getElementById("lede");
-    if (lede) lede.textContent = formPartLede(n);
-    const actions = document.getElementById("formpart-actions");
-    if (actions) actions.innerHTML = formPartActionsHtml(n);
-    if (n === 2) renderTurnstileIfNeeded();
-    updateFirstPostPreview(); // Seite 2 blendet die Stil-Felder ein - die Vorschau gehoert dann dazu
+    if (lede) lede.textContent = edit ? "Ändern Sie hier, worüber wir für Sie posten." : OB_STEP_LEDE[n - 1];
+    // Konsent + Sicherheitspruefung leben jetzt auf Schritt 4 (vorher Schritt 2) - dort erst laden.
+    if (n === 4) renderTurnstileIfNeeded();
+    updateFirstPostPreview();
+    updateOnboardingChrome();
     window.scrollTo({ top: 0 });
     $("#stage")?.focus({ preventScroll: true });
   }
@@ -2954,14 +3279,19 @@
 
     if (S.step === "dashboard") { stage.innerHTML = dashboardHtml(); loadDashboardExtras(); }
     else if (S.step === "company") {
-      stage.innerHTML = rail + companyHtml();
+      // Onboarding-Neubau (18.09.2026): der Sidebar-Wizard zeigt den Fortschritt selbst (linke
+      // Spalte/mobile Kopfzeile) - die alte Rail-Kette braucht es fuer diesen Schritt nicht mehr
+      // (fuer "done" und die Provider-Schritte danach bleibt sie unveraendert).
+      stage.innerHTML = companyHtml();
       updateLivePreview();
       updateFirstPostPreview();
+      updateOnboardingChrome();
       // Hier und nur hier ist der Platzhalter garantiert schon im DOM - egal, ob das Formular
       // erstmalig, nach einem Seitenwechsel oder nach einer abgelehnten Anmeldung gerendert
       // wurde. Der Guard in renderTurnstileIfNeeded macht wiederholte Aufrufe folgenlos; nur auf
-      // Seite 2, weil der Platzhalter auf Seite 1 in einem versteckten Block liegt.
-      if (S.formPart === 2) renderTurnstileIfNeeded();
+      // Schritt 4, weil Konsent+Sicherheitspruefung dort leben (vorher Seite 2 der alten
+      // Zwei-Seiten-Variante).
+      if (S.formPart === 4) renderTurnstileIfNeeded();
     }
     else if (S.step === "settings") stage.innerHTML = settingsHtml();
     else if (S.step === "guide") stage.innerHTML = guideHtml();
@@ -3680,6 +4010,40 @@
 
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); closeHelpChat(); } });
 
+  // Onboarding-Neubau: Hashtag-Tag-Feld - Leertaste/Enter/Komma bestaetigen den bisher getippten
+  // Text als neuen Tag, Backspace bei leerem Feld entfernt den letzten. maxlength=10 Tags.
+  function commitHashtagInput(input, refocus) {
+    const raw = input.value;
+    const tag = normalizeHashtag(raw);
+    input.value = "";
+    if (!tag) return;
+    const list = customHashtagsList();
+    if (list.includes(tag) || list.length >= 10) return;
+    list.push(tag);
+    S.customHashtagsDraft = list.join(" ");
+    repaintHashtagsField();
+    updateFirstPostPreview();
+    if (refocus) document.getElementById("f-customHashtagsInput")?.focus();
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.target.id !== "f-customHashtagsInput") return;
+    if (e.key === "Enter" || e.key === " " || e.key === ",") {
+      e.preventDefault();
+      commitHashtagInput(e.target, true);
+    } else if (e.key === "Backspace" && !e.target.value) {
+      const list = customHashtagsList();
+      if (list.length) {
+        list.pop();
+        S.customHashtagsDraft = list.join(" ");
+        repaintHashtagsField();
+        updateFirstPostPreview();
+      }
+    }
+  });
+  document.addEventListener("focusout", (e) => {
+    if (e.target.id === "f-customHashtagsInput" && e.target.value.trim()) commitHashtagInput(e.target);
+  });
+
   document.addEventListener("submit", async (e) => {
     if (e.target.id !== "help-chat-form") return;
     e.preventDefault();
@@ -3780,6 +4144,33 @@
       return;
     }
 
+    // Onboarding-Neubau: der neue Schalter-Baustein ist ein echter <button aria-pressed>, der eine
+    // gekoppelte, versteckte Checkbox umschaltet (dieselbe, die FormData beim Absenden liest) -
+    // ausserdem ein "change" auf der Checkbox ausloesen, damit bestehende Listener (z. B.
+    // #f-gradientEnabled -> #gradient-options ein-/ausblenden) unveraendert weiterlaufen.
+    const switchBtn = e.target.closest("[data-switch-for]");
+    if (switchBtn) {
+      const cb = document.getElementById(switchBtn.dataset.switchFor);
+      if (cb) {
+        cb.checked = !cb.checked;
+        switchBtn.setAttribute("aria-pressed", String(cb.checked));
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return;
+    }
+    if (e.target.closest("#ob-custom-color-btn")) {
+      document.getElementById("f-accentColor")?.click();
+      return;
+    }
+    const hashtagRemove = e.target.closest("[data-hashtag-remove]");
+    if (hashtagRemove) {
+      const list = customHashtagsList();
+      list.splice(Number(hashtagRemove.dataset.hashtagRemove), 1);
+      S.customHashtagsDraft = list.join(" ");
+      repaintHashtagsField();
+      updateFirstPostPreview();
+      return;
+    }
     const swatch = e.target.closest("[data-swatch]");
     if (swatch) {
       const hex = swatch.dataset.swatch;
@@ -4014,6 +4405,14 @@
     if (e.target.closest("#pillar-add")) {
       syncPillarsDraftFromDom();
       if (S.pillarsDraft.length < 6) S.pillarsDraft.push({ title: "", description: "", weight: 1 });
+      repaintPillars();
+      return;
+    }
+    // Onboarding-Neubau: Chip-Ansicht fragt den Titel sofort ab (wie schon das bestehende
+    // prompt()-Muster beim Farbthema-Speichern), statt eine leere, editierbare Zeile anzulegen.
+    if (e.target.closest("#pillar-chip-add")) {
+      const title = (prompt("Name der Säule (z. B. „Projekte zeigen“):") || "").trim().slice(0, 60);
+      if (title && S.pillarsDraft.length < 6) S.pillarsDraft.push({ title, description: "", weight: 1 });
       repaintPillars();
       return;
     }

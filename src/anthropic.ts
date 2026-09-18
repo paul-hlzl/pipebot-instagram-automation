@@ -302,6 +302,10 @@ export async function generatePlannedPostContent(input: {
   pillarDescription?: string | null;
   bannedWords: string[];
   requiredElements: string[];
+  /** Eigene Hashtags (Panel-Feinschliff 18.09.2026) - kommen IMMER dazu, zusaetzlich zu dem, was
+   *  hashtagPreference an weiteren erzeugten Hashtags erlaubt. Bei ig_story ignoriert (Stories
+   *  haben keine sichtbare Caption, siehe isStory unten). */
+  customHashtags: string[];
   /** Recent caption texts (own posts) to match tone/emoji/hashtag style instead of guessing. */
   styleSamples: string[];
   /** Set only on the one retry after a hard-constraint violation - names what went wrong so the model avoids repeating it. */
@@ -315,6 +319,12 @@ export async function generatePlannedPostContent(input: {
   const isStory = input.channel === "ig_story";
   const languageName = input.language === "en" ? "English" : "Deutsch";
   const hashtagLine = isStory ? "Instagram Stories haben kein sichtbares Caption-Feld - caption bleibt ein leerer String." : HASHTAG_GUIDANCE[input.hashtagPreference] ?? HASHTAG_GUIDANCE.wenige;
+  // Eigene Hashtags sind eine harte Vorgabe (wie requiredElements), keine Anregung - deshalb
+  // eigener Satz statt nur in hashtagLine verwoben, und bewusst NICHT bei Stories (dort gibt es
+  // gar keine sichtbare Caption, in die Hashtags koennten - siehe hashtagLine oben).
+  const customHashtagsLine = !isStory && input.customHashtags.length
+    ? `Verwende IMMER genau diese Hashtags zusätzlich zu den oben beschriebenen erzeugten: ${input.customHashtags.join(" ")}. `
+    : "";
 
   const system =
     `Du schreibst einen einzelnen Social-Media-Beitrag (${input.channel === "linkedin" ? "LinkedIn" : "Instagram"}) für ein ` +
@@ -330,6 +340,7 @@ export async function generatePlannedPostContent(input: {
     `Schreibe vollständig auf ${languageName}. Tonalität: ${input.tone || "sachlich"}. ` +
     `Emojis: ${input.emojisEnabled ? "sparsam und passend einsetzen" : "keine Emojis verwenden"}. ` +
     `Hashtags: ${hashtagLine} ` +
+    customHashtagsLine +
     "Wenn Beispiele eigener früherer Beiträge angegeben sind, orientiere dich an deren Tonfall, Emoji-Nutzung und " +
     "Hashtag-Stil, statt zu raten. " +
     (input.bannedWords.length ? `Verwende NIEMALS eines dieser Wörter: ${input.bannedWords.join(", ")}. ` : "") +
@@ -877,6 +888,8 @@ export interface ReviewPostInput {
   bannedWords: string[];
   /** Pflicht-Elemente des Kunden - müssen im Beitrag vorkommen, sonst lehnt die Veröffentlichung ab. */
   requiredElements: string[];
+  /** Eigene Hashtags (Panel-Feinschliff 18.09.2026) - kommen immer dazu. */
+  customHashtags: string[];
 }
 
 export interface ReviewPostResult {
@@ -908,6 +921,9 @@ export async function generateReviewSocialPost(input: ReviewPostInput): Promise<
       : input.hashtagPreference === "viele"
         ? "8-12 passende Hashtags am Ende der Caption."
         : "Höchstens 3 passende Hashtags am Ende der Caption.";
+  const customHashtagsRule = input.customHashtags.length
+    ? ` Verwende IMMER genau diese Hashtags zusätzlich zu den oben beschriebenen erzeugten: ${input.customHashtags.join(" ")}.`
+    : "";
 
   const system =
     "Du machst aus einer echten Kundenbewertung einen Social-Media-Beitrag für ein Kleinunternehmen. " +
@@ -915,7 +931,7 @@ export async function generateReviewSocialPost(input: ReviewPostInput): Promise<
     `Sprache: ${languageName}. Tonfall: "${input.tone || "sachlich"}". ` +
     "headline: maximal 60 Zeichen, wird als Text ins Bild gesetzt - am besten ein kurzes, wörtliches Zitat aus der Bewertung oder dessen Kern. " +
     "caption: 2-4 Sätze, greift die Bewertung auf und bedankt sich; " +
-    `${hashtagRule} ${input.emojisEnabled ? "Emojis sparsam erlaubt." : "Keine Emojis."} ` +
+    `${hashtagRule}${customHashtagsRule} ${input.emojisEnabled ? "Emojis sparsam erlaubt." : "Keine Emojis."} ` +
     "HARTE REGELN: nichts dazuerfinden, was nicht in der Bewertung steht; die Aussage nicht verstärken oder ins Werbliche drehen; " +
     "keinen vollen Namen der bewertenden Person nennen (Vorname oder Initial nur, wenn er in der Bewertung selbst vorkommt); " +
     "keine personenbezogenen Details (Behandlung, Auftrag, Bestellung, Termin); keine Preise, keine Rabatte, keine Heils- oder Erfolgsversprechen; " +
@@ -984,6 +1000,8 @@ export interface VideoScriptInput {
   spokenCharBudget: number;
   bannedWords: string[];
   requiredElements: string[];
+  /** Eigene Hashtags (Panel-Feinschliff 18.09.2026) - kommen immer dazu. */
+  customHashtags: string[];
   styleSamples: string[];
   avoidNote?: string;
 }
@@ -1029,6 +1047,9 @@ export async function generateVideoScript(input: VideoScriptInput): Promise<Vide
       : input.hashtagPreference === "viele"
         ? "8-12 passende Hashtags am Ende der Caption."
         : "Höchstens 3 passende Hashtags am Ende der Caption.";
+  const customHashtagsRule = input.customHashtags.length
+    ? ` Verwende IMMER genau diese Hashtags zusätzlich zu den oben beschriebenen erzeugten: ${input.customHashtags.join(" ")}.`
+    : "";
 
   const system =
     "Du schreibst das Drehbuch für ein kurzes, vertontes Hochformat-Video (Instagram Reel) eines Kleinunternehmens. " +
@@ -1044,7 +1065,7 @@ export async function generateVideoScript(input: VideoScriptInput): Promise<Vide
     `HARTES LÄNGENBUDGET: Alle "spoken"-Sätze zusammen dürfen höchstens ${input.spokenCharBudget} Zeichen haben (inklusive Leerzeichen). ` +
     `Das ist keine Richtgröße, sondern die Sprechzeit, die in ${input.lengthSeconds} Sekunden Video passt. Lieber kürzer. ` +
     "Aufbau: hook macht neugierig oder benennt ein konkretes Problem; points liefern je eine eigenständige Kernaussage; cta fordert zu genau einer Handlung auf. " +
-    `"caption" ist der Beitragstext unter dem Video: 2-4 Sätze, eigenständig lesbar. ${hashtagRule} ${input.emojisEnabled ? "Emojis sparsam erlaubt." : "Keine Emojis."} ` +
+    `"caption" ist der Beitragstext unter dem Video: 2-4 Sätze, eigenständig lesbar. ${hashtagRule}${customHashtagsRule} ${input.emojisEnabled ? "Emojis sparsam erlaubt." : "Keine Emojis."} ` +
     (input.bannedWords.length
       ? ` Diese Wörter dürfen nirgends vorkommen (weder im Bild-Text noch gesprochen noch in der Caption): ${input.bannedWords.join(", ")}.`
       : "") +

@@ -38,6 +38,7 @@ import {
   savePendingApproval,
   scheduleInputFor,
   splitCommaList,
+  splitHashtagList,
 } from "./credentials.js";
 import { isVideoDue } from "./schedule.js";
 import { logUsageCost } from "./analytics.js";
@@ -146,6 +147,7 @@ export async function produceVideoPost(
     spokenCharBudget: spokenCharBudget(length, voice.charsPerSecond),
     bannedWords: splitCommaList(customer.banned_words),
     requiredElements: splitCommaList(customer.required_elements),
+    customHashtags: splitHashtagList(customer.custom_hashtags),
     styleSamples: styleSamples.samples.map((s) => s.caption).filter((c): c is string => Boolean(c)).slice(0, 5),
   };
 

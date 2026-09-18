@@ -754,6 +754,15 @@ export function splitCommaList(raw: string | null): string[] {
     .filter(Boolean);
 }
 
+/** Eigene Hashtags (Panel-Feinschliff 18.09.2026) sind im Feld leerzeichengetrennt (wie im
+ *  Tag-Eingabefeld im Panel), nicht kommagetrennt wie bannedWords/requiredElements. */
+export function splitHashtagList(raw: string | null): string[] {
+  return (raw ?? "")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+}
+
 /** Case-insensitive substring check against a customer's hard-blocked words. Returns the matched word, or null. */
 export function containsBannedWord(text: string, customerId: string): string | null {
   const row = db.prepare("SELECT banned_words FROM customers WHERE id = ?").get(customerId) as

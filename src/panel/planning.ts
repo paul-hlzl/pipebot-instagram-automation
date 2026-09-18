@@ -33,6 +33,7 @@ import {
   resolveImageBranding,
   scheduleInputFor,
   splitCommaList,
+  splitHashtagList,
   type ContentPillar,
   type PendingApproval,
   type PlannedPost,
@@ -120,6 +121,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
   const styleSamples = await getStyleSamples(row.id);
   const bannedWords = splitCommaList(row.banned_words);
   const requiredElements = splitCommaList(row.required_elements);
+  const customHashtags = splitHashtagList(row.custom_hashtags);
 
   const baseInput = {
     channel,
@@ -134,6 +136,7 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
     pillarDescription: pillar?.description ?? null,
     bannedWords,
     requiredElements,
+    customHashtags,
     styleSamples: styleSamples.samples.map((s) => s.caption).filter((c): c is string => Boolean(c)).slice(0, 5),
   };
 

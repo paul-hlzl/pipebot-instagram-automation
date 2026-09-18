@@ -143,4 +143,17 @@
 
   /* ---- Bewegung (Website: --ease) ---- */
   --ease-website: cubic-bezier(.22, 1, .36, 1);
+
+  /* ---- Onboarding-Neubau (18.09.2026): exakte Vorgabe, siehe Chat-Auftrag ----
+     Eigene Namen, damit nichts, was die bisherigen --ink-3/--stone/--line-strong
+     nutzt, sich mitaendert - dieser Block ist NUR fuer die neuen Onboarding-
+     Bausteine gedacht. */
+  --ink-2:   #2c2c2a;
+  --muted:   #4a4a46;
+  --muted-2: #6b6b66;
+  --faint:   #8a8a85;
+  --field:   #d8d8d4;
+
+  --r-field: 2px;
+  --r-card:  3px;
 }

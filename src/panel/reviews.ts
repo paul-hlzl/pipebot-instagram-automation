@@ -37,6 +37,7 @@ import {
   resolveImageBranding,
   savePendingApproval,
   splitCommaList,
+  splitHashtagList,
 } from "./credentials.js";
 import {
   getReview,
@@ -303,6 +304,7 @@ async function maybeCreateSocialPost(customer: CustomerRow, row: GoogleReviewRow
 
   const bannedWords = splitCommaList(customer.banned_words);
   const requiredElements = splitCommaList(customer.required_elements);
+  const customHashtags = splitHashtagList(customer.custom_hashtags);
   const content = await generateReviewSocialPost({
     reviewText: row.review_text,
     starRating: row.star_rating,
@@ -317,6 +319,7 @@ async function maybeCreateSocialPost(customer: CustomerRow, row: GoogleReviewRow
     channel: target.channel,
     bannedWords,
     requiredElements,
+    customHashtags,
   });
   logUsageCost(customer.id, "review-post", content.costUsd);
 
