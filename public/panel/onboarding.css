@@ -142,6 +142,16 @@
 }
 .ob-pillars-box .ob-section-head { margin-bottom: 0; }
 .ob-pillars-intro { font-size: 15px; line-height: 1.65; max-width: 54ch; color: var(--ink-2); margin: 0; }
+
+/* P3-Fix (18.09.2026): Saeulen-Kasten und Hashtag-Block klebten aneinander/am KI-Button.
+   Konkrete Nachbarschaft statt Pauschalregel, damit der 8px-Abstand Textarea->KI-Button
+   (siehe .ob-row-between) unberuehrt bleibt. */
+.ob-field-wrap + .ob-pillars-box { margin-top: 22px; }
+.ob-pillars-box + .ob-field-wrap { margin-top: 22px; }
+/* Untergrenze: kein Block-Abstand im Wizard-Formular unter 20px, ausser wo oben/unten
+   ein engerer Wert explizit vorgegeben ist (z. B. .ob-row-between mit 8px, das als Kind
+   von .ob-field-wrap von dieser Regel gar nicht erfasst wird). */
+#ob-step-1 > * + *, #ob-step-2 > * + *, #ob-step-3 > * + *, #ob-step-4 > * + * { margin-top: 20px; }
 .ob-pillars-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
 
 /* ---------- Farbfelder ---------- */
@@ -240,8 +250,15 @@
   .ob-preview-col { display: block; width: 292px; flex: 0 0 292px; position: sticky; top: 48px; }
 }
 
-.ob-grid2 { display: grid; grid-template-columns: 1fr; gap: 20px; }
+.ob-grid2 { display: grid; grid-template-columns: 1fr; column-gap: 20px; row-gap: 20px; align-items: start; }
 @media (min-width: 640px) { .ob-grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* P1-Fix (18.09.2026): Website wurde in einen ZUSAETZLICHEN <div>-Wrapper gesetzt (fuer den
+   aria-describedby-Hinweis), Firmenname/Ihr Name/E-Mail nicht - das gab dem Grid vier Zellen
+   unterschiedlicher eigener Innenstruktur. label+Feld jeder Zelle jetzt einheitlich auf
+   margin:0 gesetzt, damit alle vier exakt auf zwei Hoehen liegen, unabhaengig vom Wrapper. */
+.ob-grid2 > div { min-width: 0; }
+.ob-grid2 .ob-field-wrap { margin: 0; }
+.ob-mono { display: block; }
 
 .ob-hint { font-size: 13px; line-height: 1.5; color: var(--muted-2); margin-top: 22px; }
 .ob-row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
@@ -267,10 +284,14 @@
 .ob-preview-headline { font-family: var(--serif); font-size: 30px; color: #fff; margin: 0; line-height: 1.1; }
 .ob-preview-watermark { font-family: var(--mono); font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: #9a9a95; }
 .ob-preview-meta { padding: 4px 18px; }
-.ob-preview-meta-row { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 0; font-size: 13px; }
+.ob-preview-meta-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px 0; font-size: 13px; }
+.ob-preview-meta-row .ob-label { font-size: 13px; }
 .ob-preview-meta-row:not(:last-child) { border-bottom: 1px solid var(--rule-soft); }
-.ob-preview-meta-row .ob-label { color: var(--muted-2); }
-.ob-preview-meta-row .ob-value { font-weight: 500; }
+.ob-preview-meta-row .ob-label { color: var(--muted-2); flex: 0 0 auto; }
+.ob-preview-meta-row .ob-value {
+  font-weight: 500; text-align: right; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0;
+}
 
 .ob-open-card { margin-top: 14px; border: 1px solid var(--rule); border-radius: var(--r-card); padding: 16px 18px; background: var(--paper); }
 .ob-open-card .ob-mono { margin-bottom: 10px; }

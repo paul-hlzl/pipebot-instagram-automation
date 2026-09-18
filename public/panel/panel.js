@@ -27,7 +27,17 @@
   // Pre-fills the weekday picker from an explicit "1,3,5"-style value if the customer already
   // has one, otherwise derives it from the legacy `frequency` radio choice - so the old and new
   // controls are never shown/edited at the same time, only one replaces the other on load.
+  // P0.3-Fix (18.09.2026): onboardingPreviewHtml() ruft das hier mit dem ARRAY aus
+  // readDaypicker() auf (Live-Vorschau des Wochenrasters), alle anderen Aufrufer mit dem
+  // kommagetrennten DB-String (c.instagramWeekdays). ".split" auf einem Array warf bisher
+  // "explicit.split is not a function" und liess die Wochenraster-Vorschau bei JEDEM
+  // Render abstuerzen (Konsole), sodass sie effektiv nie aktualisierte - Teil von P0.1/P0.3.
   const weekdaysFor = (explicit, frequency) => {
+    // Array = Live-Ablesen der tatsaechlich angehakten Kaestchen (readDaypicker()): eine leere
+    // Auswahl ist hier ein echter Zustand ("keine Tage angehakt"), kein fehlender Wert - deshalb
+    // KEIN Rueckfall auf die Frequenz-Vorgabe, sonst zeigt die Vorschau Tage, die gar nicht
+    // angehakt sind.
+    if (Array.isArray(explicit)) return explicit.filter((n) => n >= 1 && n <= 7);
     if (explicit) return explicit.split(",").map(Number).filter((n) => n >= 1 && n <= 7);
     return FREQ_WEEKDAYS[frequency] || FREQ_WEEKDAYS.werktags;
   };
@@ -990,14 +1000,31 @@
    *  der Eingabe. Liest nur bereits gerenderte Feldwerte aus dem DOM (keine eigene Kopie des
    *  Zustands) - ruft dieselben kleinen Helfer wie die Kachel-Vorschau in den Einstellungen. */
   function onboardingPreviewHtml(part, c) {
-    if (part <= 2) {
+    // P0.2-Fix (18.09.2026): Schritt 3 ("Wie soll es aussehen?" - Farbe/Farbverlauf/Wasserzeichen)
+    // zeigte bisher schon das Wochenraster statt der Bildkarte, obwohl genau dort Akzentfarbe/
+    // Farbverlauf gewaehlt werden. Deshalb wirkte ein Farbklick "auf nichts" - die sichtbare
+    // Vorschau war die falsche. Das Wochenraster gehoert erst zu Schritt 4 (Kanaele & Freigabe).
+    if (part <= 3) {
       const company = fpVal('#company [name="company"]') || c.company || "";
       const watermark = fpVal("#f-watermarkText") || company || "Ihr Firmenname";
       const accent = document.getElementById("f-accentColor")?.value || c.accentColor || "#0a0e1a";
+      const gradientOn = fpChecked("gradientEnabled") ?? c.gradientEnabled;
+      const gradientColor2 = fpVal("#f-gradientColor2") || c.gradientColor2 || "#137A3F";
+      const gradientDir = GRADIENT_DIRECTIONS[fpVal("#f-gradientDirection") || c.gradientDirection || "diagonal"] ? (fpVal("#f-gradientDirection") || c.gradientDirection || "diagonal") : "diagonal";
+      const gradientCss = { diagonal: "135deg", horizontal: "90deg", vertical: "180deg" }[gradientDir] || "135deg";
+      const squareBg = gradientOn ? `linear-gradient(${gradientCss}, ${esc(accent)}, ${esc(gradientColor2)})` : esc(accent);
+      // P0.3-Fix (18.09.2026): "||" statt "??" ueberschrieb ein echtes Ausschalten - bei einem
+      // neuen Kunden ist c.igFeedEnabled=undefined, also c.igFeedEnabled!==false immer wahr,
+      // und "false || true" bleibt wahr, selbst wenn der Schalter gerade ausgeschaltet wurde.
+      // Gleiches Muster wie im Wochenraster weiter unten (dort schon korrekt mit "??").
       const channels = [];
-      if (fpChecked("igFeedEnabled") || c.igFeedEnabled !== false) channels.push("Instagram Feed");
-      if (fpChecked("igStoryEnabled") || c.igStoryEnabled !== false) channels.push("Instagram Story");
-      if (fpChecked("linkedinEnabled") || c.linkedinEnabled !== false) channels.push("LinkedIn");
+      if (fpChecked("igFeedEnabled") ?? c.igFeedEnabled !== false) channels.push("Instagram Feed");
+      if (fpChecked("igStoryEnabled") ?? c.igStoryEnabled !== false) channels.push("Instagram Story");
+      if (fpChecked("linkedinEnabled") ?? c.linkedinEnabled !== false) channels.push("LinkedIn");
+      // P2b-Fix: alle Kanaele ausgeschrieben sprengte die Zeile ("KanalInstagram Feed, Instagram
+      // Story, LinkedIn"). Jetzt: der Kanal, den die Vorschau gerade darstellt (der erste
+      // aktive), plus "+N weitere" als Zusatz.
+      const channelLabel = channels.length ? channels[0] + (channels.length > 1 ? ` +${channels.length - 1} weitere` : "") : "—";
       const tone = TONES[fpVal("#f-tone") || c.tone || "sachlich"] || "";
       const open = [];
       if (!(fpVal('#company [name="company"]') || c.company)) open.push("Firmenname fehlt");
@@ -1007,12 +1034,12 @@
       return `
         <div class="ob-mono" style="margin-bottom:22px">Vorschau</div>
         <div class="ob-preview-card">
-          <div class="ob-preview-square" style="background:${esc(accent)}">
+          <div class="ob-preview-square" id="ob-preview-square" style="background:${squareBg}">
             <p class="ob-preview-headline">Ihr Beitrag</p>
             <span class="ob-preview-watermark">${esc(watermark)}</span>
           </div>
           <div class="ob-preview-meta">
-            <div class="ob-preview-meta-row"><span class="ob-label">Kanal</span><span class="ob-value">${esc(channels.join(", ") || "—")}</span></div>
+            <div class="ob-preview-meta-row"><span class="ob-label">Kanal</span><span class="ob-value">${esc(channelLabel)}</span></div>
             <div class="ob-preview-meta-row"><span class="ob-label">Zeitpunkt</span><span class="ob-value">${esc(fpVal("#f-postTime") || c.postTime || "15:00")} Uhr</span></div>
             <div class="ob-preview-meta-row"><span class="ob-label">Ton</span><span class="ob-value">${esc(tone)}</span></div>
           </div>
@@ -1065,7 +1092,10 @@
    *  OHNE die Formularfelder selbst neu zu rendern (sonst Fokus-/Eingabeverlust). Haengt an den
    *  bestehenden input/change-Listenern fuer #company (siehe updateFirstPostPreview-Aufrufe). */
   function updateOnboardingChrome() {
-    if (S.customer) return; // Sidebar-Wizard existiert nur im Onboarding, nicht bearbeitend (edit=true)
+    // Nachtrag (18.09.2026, P0.1-Fix): der fruehere "if (S.customer) return" war falsch - der
+    // Sidebar-Wizard rendert auch mit edit=true (Kunde existiert schon, hat aber noch keine
+    // Kanaele verbunden), siehe companyHtml(). Die DOM-Praesenz der Sidebar ist die richtige,
+    // ausreichende Pruefung (settingsHtml() hat kein #ob-sidebar-steps).
     const part = S.formPart || 1;
     const sidebarSteps = document.getElementById("ob-sidebar-steps");
     if (!sidebarSteps) return; // altes/anderes Layout gerade sichtbar (z. B. settingsHtml)
@@ -1177,16 +1207,12 @@
     // ---------- Schritt 01: Unternehmen ----------
     const step1 = `
       <div class="ob-grid2">
-        <div>
-          ${obFieldHtml(c, "company", "Firmenname", "text", { ac: "organization", ph: "Testfirma GmbH" })}
-        </div>
-        <div>
-          <div class="ob-field-wrap">
-            <label class="ob-mono" for="f-website">Website <span class="ob-opt">optional</span></label>
-            <div class="ob-field-inline" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
-              <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://www.testfirma.at">
-              ${S.aiAvailable ? `<button type="button" class="ob-btn ob-btn-primary ob-btn-sm" id="analyze-website">Auslesen</button>` : ""}
-            </div>
+        ${obFieldHtml(c, "company", "Firmenname", "text", { ac: "organization", ph: "Testfirma GmbH" })}
+        <div class="ob-field-wrap">
+          <label class="ob-mono" for="f-website">Website <span class="ob-opt">optional</span></label>
+          <div class="ob-field-inline" aria-describedby="${S.aiAvailable ? "analyze-website-hint" : ""}">
+            <input id="f-website" name="website" type="url" value="${esc(c.website)}" autocomplete="url" placeholder="https://www.testfirma.at">
+            ${S.aiAvailable ? `<button type="button" class="ob-btn ob-btn-primary ob-btn-sm" id="analyze-website">Auslesen</button>` : ""}
           </div>
         </div>
         ${obFieldHtml(c, "contactName", "Ihr Name", "text", { ac: "name", ph: "Max Mustermann" })}
@@ -1234,6 +1260,7 @@
           <div class="ob-option-desc">Wirkt auf Bild-Hintergründe, Wasserzeichen-Fläche und Karussell-Slides.</div>
         </div>
         <button type="button" class="ob-switch" data-switch-for="f-gradientEnabled" aria-pressed="${c.gradientEnabled ? "true" : "false"}" aria-label="Farbverlauf statt einer Farbe"></button>
+        <input type="checkbox" id="f-gradientEnabled" name="gradientEnabled" ${c.gradientEnabled ? "checked" : ""} hidden>
       </div>
       <div id="gradient-options" ${c.gradientEnabled ? "" : "hidden"}>
         <div class="ob-grid2">
@@ -3629,6 +3656,18 @@
     if (progress.textContent !== text) progress.textContent = text;
   }
 
+  // P0.1-Fix (18.09.2026): die Onboarding-Vorschau (Seitenleiste/Fussleisten-Zaehler/rechte
+  // Spalte) haengt seit dem Sidebar-Umbau an updateOnboardingChrome() - die alten
+  // input/change-Listener hier riefen aber weiterhin nur updateFirstPostPreview() auf, das seit
+  // dem Umbau ein No-Op ist (#fp-media existiert in companyHtml() nicht mehr). Ohne diesen
+  // Aufruf aenderte sich die Vorschau nur beim Schrittwechsel, nie beim Tippen/Klicken -
+  // genau der gemeldete Fehler. ~150ms Debounce, wie verlangt, damit ein schnell getipptes Wort
+  // nicht bei jedem Zeichen neu rendert.
+  let obPreviewDebounce = null;
+  function scheduleOnboardingPreviewUpdate() {
+    clearTimeout(obPreviewDebounce);
+    obPreviewDebounce = setTimeout(updateOnboardingChrome, 150);
+  }
   document.addEventListener("input", (e) => {
     if (e.target.id === "f-accentColor" || e.target.id === "f-watermarkText" || e.target.name === "company" ||
         e.target.id === "f-gradientColor2" || e.target.id === "f-gradientDirection" || e.target.id === "f-fontChoice") {
@@ -3637,8 +3676,16 @@
     // Die Vorschau "Ihr erster Beitrag" haengt an fast allen Briefing-Feldern - ein Aufruf fuer
     // alle ist billiger und vollstaendiger als eine Liste von IDs, die beim naechsten neuen Feld
     // wieder vergessen wird. Sie liest nur DOM-Werte, kein Netz.
-    if (e.target.closest && e.target.closest("#company")) updateFirstPostPreview();
-    if (e.target.id === "f-accentColor") { aktualisiereWertAnzeige("f-accentColor"); updateGradientSuggestions(); }
+    if (e.target.closest && e.target.closest("#company")) { updateFirstPostPreview(); scheduleOnboardingPreviewUpdate(); }
+    if (e.target.id === "f-accentColor") {
+      aktualisiereWertAnzeige("f-accentColor");
+      updateGradientSuggestions();
+      // P0.2: "Eigene Farbe" (nativer Picker) soll denselben Auswahl-Rahmen setzen wie ein
+      // Swatch-Klick - hier greift keiner der Swatch-Buttons, also aria-pressed von Hand
+      // auf den passenden (oder gar keinen) Swatch abgleichen.
+      const hex = e.target.value.toLowerCase();
+      document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.swatch.toLowerCase() === hex)));
+    }
     if (e.target.id === "f-gradientColor2") aktualisiereWertAnzeige("f-gradientColor2");
     if (e.target.id === "f-pillar-keywords") {
       S.pillarAiKeywords = e.target.value;
@@ -3660,8 +3707,9 @@
       updateFirstPostPreview();
     }
     // Auswahlfelder, Haken und Wochentage loesen kein "input" aus, veraendern die Vorschau aber
-    // genauso (Kanal, Uhrzeit, Hashtags, Emojis, Sprache, Ton).
-    if (e.target.closest && e.target.closest("#company")) updateFirstPostPreview();
+    // genauso (Kanal, Uhrzeit, Hashtags, Emojis, Sprache, Ton). Kein Debounce noetig - "change"
+    // feuert nicht bei jedem Tastendruck, sondern erst wenn der Wert feststeht.
+    if (e.target.closest && e.target.closest("#company")) { updateFirstPostPreview(); updateOnboardingChrome(); }
     // Stimmen-Beschreibung zur Auswahl (aus v22)
     if (e.target.id === "f-videoVoice") {
       const desc = document.getElementById("voice-desc");
@@ -4180,6 +4228,10 @@
       document.querySelectorAll("[data-swatch]").forEach((b) => b.setAttribute("aria-pressed", String(b === swatch)));
       updateGradientSuggestions();
       updateLivePreview();
+      // P0.2-Fix: picker.value = hex oben ist eine SKRIPT-Zuweisung, kein echtes Tippen/Klicken
+      // im Feld - dafuer feuert der Browser kein "input"/"change", die generischen Listener
+      // (die die Vorschau sonst aktualisieren) greifen also nie. Deshalb hier explizit.
+      updateOnboardingChrome();
       return;
     }
     const gradientSwatch = e.target.closest("[data-gradient-swatch]");
