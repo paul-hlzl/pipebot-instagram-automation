@@ -49,7 +49,7 @@
     screen: "konto", gerendert: null, providers: [], authProviders: [], aiAvailable: false, turnstileSiteKey: null, sandbox: false,
     customer: null, connections: [], skipped: new Set(),
     status: null, approvals: [], verlauf: null,
-    notice: null, editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
+    notice: null, grenze: null, editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
     beschreibung: "", website: "", leerlauf: 0,
   };
   const angemeldet = () => Boolean(S.customer);
@@ -155,6 +155,7 @@
     S.gerendert = S.screen;
     stage.innerHTML = `<div class="screen${wechsel ? " enter" : ""}">${html ? html() : ""}</div>`;
     kopfzeile();
+    testleiste();
     if (["website", "beschreibung"].includes(S.screen) && S.turnstileSiteKey && S.customer && !S.customer.authProvider) renderTurnstile();
     if (["arbeitet", "ergebnis", "dashboard"].includes(S.screen)) pollStarten(); else pollStoppen();
     if (S.screen === "dashboard") dashboardNachladen();
@@ -173,12 +174,44 @@
       : `<button type="button" class="btn secondary sm" data-go="einstellungen">Einstellungen</button>`;
   }
 
+  /** Zeigt die Testlauf-Leiste, sobald die Sitzung einem Testkunden gehoert. */
+  function testleiste() {
+    const bar = $("#testleiste");
+    if (!bar) return;
+    bar.hidden = !S.customer?.isTest;
+  }
+
+  async function testNeu() {
+    const btn = $("#test-neu");
+    beschaeftigt(btn, true, "Setzt zurück …");
+    try {
+      const r = await api("POST", "/api/start/test/reset");
+      S.status = null; S.approvals = []; S.verlauf = null; S.notice = null; S.grenze = null;
+      S.website = ""; S.beschreibung = ""; S.poll = null;
+      uebernehmen(r);
+      go("website");
+      toast("Frischer Testlauf. Alles von vorne.");
+    } catch (err) {
+      toast(err.message, "bad");
+    } finally {
+      beschaeftigt(btn, false);
+    }
+  }
+
+  async function testEnde() {
+    try {
+      await api("POST", "/api/start/test/end");
+    } catch { /* egal - danach wird ohnehin neu geladen */ }
+    location.href = MOUNT + "/start/";
+  }
+
   function go(screen, opts = {}) {
     S.screen = screen;
     S.editing = null;
     if (["dashboard", "einstellungen"].includes(screen)) history.replaceState(null, "", `#${screen}`);
     else if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     if (!opts.keepNotice) S.notice = null;
+    if (!opts.keepGrenze) S.grenze = null;
     render();
   }
 
@@ -289,6 +322,22 @@
       </section>`;
   }
 
+  /**
+   * Eine erreichte Tagesgrenze ist KEIN Fehler: nichts ist kaputt, es ist nur gerade nichts
+   * frei. Deshalb ruhige graue Karte statt roter Feldmeldung, kein aria-invalid am Feld, und
+   * ein Knopf, der wirklich irgendwohin fuehrt. Der Text samt Uhrzeit kommt vom Server.
+   */
+  function grenzeHtml() {
+    const g = S.grenze;
+    if (!g) return "";
+    const wege = {
+      domain: { label: "Anmelden", ziel: "anmelden" },
+      account: { label: "Zu deiner Woche", ziel: "ergebnis" },
+    };
+    const weg = g.reason === "account" && !(S.status?.posts || []).length ? null : wege[g.reason];
+    return `<div class="notice ruhig" role="status">${esc(g.text)}${weg ? `<span><button type="button" class="btn secondary sm" data-go="${weg.ziel}" style="justify-self:start">${esc(weg.label)}</button></span>` : ""}</div>`;
+  }
+
   /* ================= Bildschirm 2: die eine Frage ================= */
   function websiteHtml() {
     return `
@@ -301,6 +350,7 @@
             <input class="input" id="website" name="website" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="deine-firma.at" value="${esc(S.website)}" required autofocus>
             <p class="error" id="err-website" aria-live="assertive"></p>
           </div>
+          ${grenzeHtml()}
           <div id="turnstile-slot"></div>
           <div class="actions"><button class="btn lg" type="submit" id="btn-vorschau">Vorschau erstellen</button></div>
           <p class="hint">Nichts wird veröffentlicht, bevor du es freigibst.</p>
@@ -321,6 +371,7 @@
             <button type="button" class="btn secondary sm ki-knopf" id="ki-verbessern">Mit KI verbessern</button>
             <p class="error" id="err-description" aria-live="assertive"></p>
           </div>
+          ${grenzeHtml()}
           <div id="turnstile-slot"></div>
           <div class="actions"><button class="btn lg" type="submit" id="btn-vorschau">Vorschau erstellen</button></div>
           <p class="hint">Nichts wird veröffentlicht, bevor du es freigibst.</p>
@@ -838,6 +889,7 @@
 
   async function vorschauAbsenden(form, art) {
     const btn = $("#btn-vorschau", form);
+    S.grenze = null;
     const body = {};
     if (art === "website") {
       const website = form.website.value.trim();
@@ -867,7 +919,8 @@
     } catch (err) {
       beschaeftigt(btn, false);
       if (err.data?.ready) { go("ergebnis"); return; }
-      feldFehler(art === "website" ? "website" : "description", err.message);
+      if (err.data?.limit) { S.grenze = { text: err.message, reason: err.data.reason }; render(); }
+      else feldFehler(art === "website" ? "website" : "description", err.message);
       if (window.turnstile && S.turnstileWidget != null) { try { window.turnstile.reset(S.turnstileWidget); } catch { /* egal */ } }
     }
   }
@@ -1132,6 +1185,8 @@
       go(ziel);
       return;
     }
+    if (t.closest("#test-neu")) { testNeu(); return; }
+    if (t.closest("#test-ende")) { testEnde(); return; }
     if (t.closest("#ki-verbessern")) { kiVerbessern(); return; }
     if (t.closest("[data-more]")) { const post = t.closest(".post"); post.classList.toggle("is-open"); t.closest("[data-more]").textContent = post.classList.contains("is-open") ? "weniger" : "mehr"; return; }
     const stift = t.closest("[data-edit]");

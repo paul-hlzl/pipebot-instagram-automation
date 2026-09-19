@@ -61,6 +61,17 @@
 <a class="skip-link" href="#stage">Zum Inhalt springen</a>
 <div id="sandbox-banner" class="sandbox-banner" hidden role="status">Testversion - keine echten Kunden, keine echten Instagram-/LinkedIn-Verbindungen. E-Mails werden hier nicht verschickt.</div>
 
+<!-- Testlauf-Leiste: nur sichtbar, wenn die laufende Sitzung ein Testkunde ist
+     (publicState.customer.isTest). Bewusst schmal und grau - sie soll bei einer Vorfuehrung
+     nicht ins Bild springen, aber jederzeit erreichbar sein. -->
+<div id="testleiste" class="testleiste" hidden role="status">
+  <span class="testleiste-text">Testlauf<span class="testleiste-zusatz"> &middot; zaehlt nicht als Kunde, keine Limits</span></span>
+  <span class="testleiste-knoepfe">
+    <button type="button" class="link" id="test-neu">Neu starten</button>
+    <button type="button" class="link" id="test-ende">Beenden</button>
+  </span>
+</div>
+
 <!-- Marke: auf JEDEM Bildschirm links, gleiche Position, nie zentriert, nie gekuerzt.
      Rechts steht ab dem Dashboard genau ein Zugang zum Konto - sonst nichts. -->
 <header class="top" id="top">

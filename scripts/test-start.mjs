@@ -84,7 +84,10 @@ try {
     ok("GET /start/ liefert die neue Oberflaeche", a.res.status === 200 && a.text.includes("start.js"), String(a.res.status));
     ok("Kopfzeile traegt Produktname und Zusatz", a.text.includes("Pipeflow") && a.text.includes("powered by Pipeline AI Solutions"));
     ok("GET /start (ohne Slash) ebenfalls", (await call("GET", "/start")).res.status === 200);
-    ok("start.css wird ausgeliefert (dunkle Fassung)", (await call("GET", "/start/start.css")).text.includes("--grund:   #0d0e11"));
+    // Weissmodus auf Ansage vom 19.09.2026; dazu die beiden Lichtkegel als Hintergrundverlauf.
+    const css = (await call("GET", "/start/start.css")).text;
+    ok("start.css wird ausgeliefert (heller Grund)", css.includes("--grund:       #faf9f7"));
+    ok("Hintergrundverlauf ist drin und speisbar aus Markenfarben", css.includes("--licht-1") && css.includes("radial-gradient"));
     ok("Klassisches Panel ohne Session unveraendert erreichbar", (await call("GET", "/")).text.includes("panel.js"));
   }
 
@@ -92,8 +95,9 @@ try {
   {
     const cfg = await call("GET", "/api/start/config");
     const ids = (cfg.json.authProviders || []).map((p) => p.id);
-    ok("Drei Anmeldewege angeboten: Google, Microsoft, Apple", ids.join(",") === "google,microsoft,apple", ids.join(","));
-    ok("Ohne Zugangsdaten sind sie ehrlich als nicht verfuegbar gekennzeichnet", (cfg.json.authProviders || []).every((p) => p.available === false && p.note));
+    // Apple ist auf Ansage vom 19.09.2026 ganz entfernt (hiddenUntilConfigured), nicht ausgegraut.
+    ok("Google und Microsoft werden angeboten, Apple gar nicht", ids.join(",") === "google,microsoft", ids.join(","));
+    ok("Jeder angebotene Weg ist entweder scharf oder ehrlich beschriftet", (cfg.json.authProviders || []).every((p) => p.available === true || Boolean(p.note)));
     const bad = await call("POST", "/api/start/email", { body: { email: "kein-mail" } });
     ok("Ungueltige E-Mail -> 400 mit Feldfehler", bad.res.status === 400 && bad.json.fields?.email);
     const bekannt = await call("POST", "/api/start/email", { body: { email: KNOWN_EMAIL } });
@@ -124,10 +128,17 @@ try {
     seedPreview("203.0.113.9", "a.example"); seedPreview("203.0.113.9", "b.example"); seedPreview("203.0.113.9", "c.example");
     const ip = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "d.example" }, headers: { "x-forwarded-for": "203.0.113.9" } });
     ok("3 Vorschauen von derselben IP in 24 h -> 429 (Grund ip)", ip.res.status === 429 && ip.json.reason === "ip", ip.text.slice(0, 90));
+    // Eine erreichte Grenze soll die Oberflaeche ruhig anzeigen koennen, nicht rot: dafuer
+    // braucht sie `limit` als Unterscheidung und `retryAt` fuer die echte Uhrzeit.
+    ok("Grenze ist als Grenze gekennzeichnet, nicht als Fehler", ip.json.limit === true);
+    ok("Grenze nennt den Zeitpunkt, ab dem wieder etwas frei ist", typeof ip.json.retryAt === "string" && Date.parse(ip.json.retryAt) > Date.now());
+    ok("Text nennt eine echte Uhrzeit statt \"morgen\"", /\b\d{1,2}:\d{2} Uhr\b/.test(ip.json.error || ""));
+    ok("Text sagt nicht mehr \"von deinem Anschluss\"", !/Anschluss/i.test(ip.json.error || ""));
 
     seedPreview("203.0.113.50", "quota-test.example"); seedPreview("203.0.113.51", "quota-test.example");
     const dom = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "https://www.quota-test.example/" }, headers: { "x-forwarded-for": "203.0.113.77" } });
     ok("2 Vorschauen fuer dieselbe Domain -> 429 (Grund domain), Domain normalisiert", dom.res.status === 429 && dom.json.reason === "domain");
+    ok("Domain-Grenze bietet den Anmeldeweg an", /Anmelden/.test(dom.json.error || "") && dom.json.limit === true);
     unseed();
 
     seedPreview("203.0.113.60", "acc1.example", 60_000, quotaId); seedPreview("203.0.113.60", "acc2.example", 60_000, quotaId); seedPreview("203.0.113.60", "acc3.example", 60_000, quotaId);
@@ -143,6 +154,8 @@ try {
     for (let i = 0; i < 40; i++) seedPreview(`198.51.100.${i}`, `g${i}.example`);
     const glob = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "h.example" }, headers: { "x-forwarded-for": "203.0.113.200" } });
     ok("40 Vorschauen weltweit am Tag -> 429 (Grund global)", glob.res.status === 429 && glob.json.reason === "global");
+    // Der alte Text versprach, eine E-Mail-Bestaetigung hebe die globale Grenze auf. Tat sie nie.
+    ok("Globale Grenze verspricht nichts, was sie nicht haelt", !/bestätige deine E-Mail/i.test(glob.json.error || "") && /liegt an uns/.test(glob.json.error || ""));
     unseed();
   }
 

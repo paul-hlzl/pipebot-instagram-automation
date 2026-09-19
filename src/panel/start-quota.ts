@@ -59,32 +59,47 @@ export interface QuotaCounts {
   global: number;
 }
 
-export type QuotaDecision = { ok: true } | { ok: false; reason: "ip" | "domain" | "global"; message: string };
+export type QuotaReason = "account" | "ip" | "domain" | "global";
+export type QuotaDecision = { ok: true } | { ok: false; reason: QuotaReason; message: string };
+
+/**
+ * Die Texte sind bewusst keine Fehlermeldungen: es ist nichts kaputt, es ist nur gerade nichts
+ * frei. Deshalb keine Schuldzuweisung, keine Aufforderung "versuch es morgen" ohne Uhrzeit, und
+ * in jedem Fall ein Weg, der wirklich weiterfuehrt. Die Uhrzeit haengt `zeitSatz()` an - sie
+ * kommt aus dem aeltesten gezaehlten Eintrag, nicht aus "morgen frueh": der Zaehler laeuft
+ * rollierend ueber 24 Stunden.
+ */
+const TEXTE: Record<QuotaReason, string> = {
+  global: "Heute sind alle Vorschauen vergeben, die wir pro Tag einplanen. Das liegt an uns, nicht an dir. Dein Konto bleibt bestehen, du musst nichts noch einmal eingeben.",
+  ip: "Aus deinem Netzwerk sind heute schon mehrere Vorschauen entstanden. Wenn ihr zu mehreren im selben WLAN sitzt, zählt das zusammen. Eine Website, die heute schon einmal gelesen wurde, geht trotzdem sofort durch.",
+  domain: "Für diese Website sind heute schon Vorschauen entstanden. War eine davon von dir, kommst du über „Anmelden“ direkt zu ihr.",
+  account: "Für dieses Konto sind heute schon mehrere Vorschauen entstanden. Deine bisherige Woche bleibt bestehen.",
+};
+
+export function quotaText(reason: QuotaReason): string {
+  return TEXTE[reason];
+}
 
 /** Reine Entscheidung - keine Seiteneffekte, direkt testbar. */
 export function decidePreviewQuota(counts: QuotaCounts, limits: PreviewLimits = previewLimits()): QuotaDecision {
-  if (counts.global >= limits.globalPerDay) {
-    return {
-      ok: false,
-      reason: "global",
-      message: "Heute sind alle Vorschau-Plätze vergeben. Bitte versuche es morgen noch einmal - oder bestätige deine E-Mail-Adresse, dann geht es sofort weiter.",
-    };
-  }
-  if (counts.ip >= limits.perIpPerDay) {
-    return {
-      ok: false,
-      reason: "ip",
-      message: "Von deinem Anschluss wurden heute schon mehrere Vorschauen erstellt. Bitte versuche es morgen noch einmal oder melde dich mit deinem bestehenden Konto an.",
-    };
-  }
-  if (counts.domain >= limits.perDomainPerDay) {
-    return {
-      ok: false,
-      reason: "domain",
-      message: "Für diese Website wurde heute schon eine Vorschau erstellt. Melde dich mit der E-Mail-Adresse an, die du dabei verwendet hast.",
-    };
-  }
+  if (counts.global >= limits.globalPerDay) return { ok: false, reason: "global", message: TEXTE.global };
+  if (counts.ip >= limits.perIpPerDay) return { ok: false, reason: "ip", message: TEXTE.ip };
+  if (counts.domain >= limits.perDomainPerDay) return { ok: false, reason: "domain", message: TEXTE.domain };
   return { ok: true };
+}
+
+/**
+ * Ein Satz mit der echten Uhrzeit, ab der wieder ein Platz frei wird. Wien, weil das Produkt
+ * oesterreichisch ist und der Server in UTC laeuft. Ohne Zeitpunkt (sollte nicht vorkommen)
+ * bleibt der Satz weg, statt "morgen" zu behaupten.
+ */
+export function zeitSatz(retryAt: string | null, now: number = Date.now()): string {
+  if (!retryAt) return "";
+  const ziel = Date.parse(retryAt);
+  if (!Number.isFinite(ziel) || ziel <= now) return "";
+  const uhr = new Intl.DateTimeFormat("de-AT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" }).format(ziel);
+  const tag = (ms: number) => new Intl.DateTimeFormat("de-AT", { day: "numeric", month: "numeric", timeZone: "Europe/Vienna" }).format(ms);
+  return tag(ziel) === tag(now) ? `Ab ${uhr} Uhr ist wieder eine frei.` : `Morgen ab ${uhr} Uhr ist wieder eine frei.`;
 }
 
 /** "www.Hoelzl-Physio.at/" -> "hoelzl-physio.at". Leer, wenn keine Website (Freitext-Weg). */
@@ -110,6 +125,28 @@ export function countPreviews(ip: string, domain: string, now: number = Date.now
     domain: domain ? count("SELECT COUNT(*) AS n FROM start_previews WHERE domain = ? AND created_at > ?", domain, since) : 0,
     global: count("SELECT COUNT(*) AS n FROM start_previews WHERE created_at > ?", since),
   };
+}
+
+/**
+ * Wann wird der naechste Platz frei? Der aelteste gezaehlte Eintrag faellt nach 24 Stunden aus
+ * dem Fenster - genau dann ist wieder einer frei. Gibt null zurueck, wenn nichts gezaehlt wurde.
+ */
+export function naechsterPlatz(reason: QuotaReason, schluessel: { ip?: string; domain?: string; customerId?: string }, now: number = Date.now()): string | null {
+  const since = new Date(now - DAY_MS).toISOString();
+  const frage = (sql: string, ...args: unknown[]) =>
+    (db.prepare(sql).get(...args) as { t: string | null } | undefined)?.t ?? null;
+  let aeltester: string | null = null;
+  if (reason === "account" && schluessel.customerId) {
+    aeltester = frage("SELECT MIN(created_at) AS t FROM start_previews WHERE customer_id = ? AND created_at > ?", schluessel.customerId, since);
+  } else if (reason === "ip" && schluessel.ip) {
+    aeltester = frage("SELECT MIN(created_at) AS t FROM start_previews WHERE ip = ? AND created_at > ?", schluessel.ip, since);
+  } else if (reason === "domain" && schluessel.domain) {
+    aeltester = frage("SELECT MIN(created_at) AS t FROM start_previews WHERE domain = ? AND created_at > ?", schluessel.domain, since);
+  } else if (reason === "global") {
+    aeltester = frage("SELECT MIN(created_at) AS t FROM start_previews WHERE created_at > ?", since);
+  }
+  const ms = aeltester ? Date.parse(aeltester) : NaN;
+  return Number.isFinite(ms) ? new Date(ms + DAY_MS).toISOString() : null;
 }
 
 /** Erst NACH einem tatsaechlich gestarteten Generierungslauf aufrufen (wie bei analyze-website:

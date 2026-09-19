@@ -30,7 +30,8 @@ import { viennaDateStr } from "./schedule.js";
 import { turnstileConfigured, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { loginLinkEmail, verificationEmail } from "./emails.js";
-import { countAdjustsForCustomer, countPreviews, decidePreviewQuota, normalizeDomain, previewLimits, recordPreview } from "./start-quota.js";
+import { istTestkunde } from "./start-testmode.js";
+import { countAdjustsForCustomer, countPreviews, decidePreviewQuota, naechsterPlatz, normalizeDomain, previewLimits, quotaText, recordPreview, zeitSatz, type QuotaReason } from "./start-quota.js";
 import { getStartJob, isJobRunning, runAdjustJob, runPlanWeekJob, runPreviewJob, runRecolorJob } from "./start-jobs.js";
 import { PLANNING_LOOKAHEAD_DAYS } from "./planning.js";
 import { AuthNotConfiguredError, authProvidersPublic, getAuthProvider } from "./auth-providers.js";
@@ -232,7 +233,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
         return;
       }
       if (ctx.rateLimited(`start-signup:${ctx.clientIp(req)}`, 5, 24 * 3_600_000)) {
-        res.status(429).json({ error: "Von deinem Anschluss wurden heute schon mehrere Konten angelegt. Bitte versuche es morgen noch einmal." });
+        res.status(429).json({ error: "Aus deinem Netzwerk wurden heute schon mehrere Konten angelegt. Wenn ihr zu mehreren im selben WLAN sitzt, zählt das zusammen. Morgen geht es wieder." });
         return;
       }
       const kunde = createEasyCustomer({ email, emailVerified: false, trialDays: ctx.trialDays() });
@@ -254,7 +255,11 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
         return;
       }
       const ip = ctx.clientIp(req);
-      if (ctx.rateLimited(`start-preview:${ip}`, 10, 3_600_000)) {
+      // Ein Testlauf der Sandbox laeuft an allen Deckeln vorbei: Stundenlimit, Turnstile und
+      // die vier Tagesgrenzen. Er kann keine echten Kunden verdraengen, weil er in keiner
+      // Liste und keiner Abrechnung auftaucht (start-testmode.ts).
+      const testlauf = istTestkunde(c);
+      if (!testlauf && ctx.rateLimited(`start-preview:${ip}`, 10, 3_600_000)) {
         res.status(429).json({ error: "Zu viele Versuche. Bitte in einer Stunde noch einmal." });
         return;
       }
@@ -271,7 +276,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
       // Turnstile: unsichtbar, direkt vor dem einzigen kostenpflichtigen Schritt. Nach einer
       // Anmeldung ueber Google/Microsoft ueberfluessig (dort hat der Anbieter schon geprueft,
       // dass ein Mensch dahintersteht), deshalb nur fuer Konten aus dem E-Mail-Rueckfallweg.
-      if (!c.auth_provider && turnstileConfigured()) {
+      if (!testlauf && !c.auth_provider && turnstileConfigured()) {
         const ok = await verifyTurnstileToken(str(req.body?.["cf-turnstile-response"], 3000), ip, ctx.hostOf(req));
         if (!ok) {
           res.status(400).json({ error: "Sicherheitsprüfung fehlgeschlagen. Bitte lade die Seite neu und versuche es noch einmal." });
@@ -292,16 +297,24 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
       // Konto-Deckel (Abschnitt 8): mehrere Vorschauen pro Konto und Tag sind der teuerste Weg,
       // den ein angemeldeter Nutzer gehen kann.
       const heuteSchon = db.prepare("SELECT COUNT(*) AS n FROM start_previews WHERE customer_id = ? AND created_at > ?").get(c.id, new Date(Date.now() - 86_400_000).toISOString()) as { n: number };
-      if (heuteSchon.n >= limits.perAccountPerDay) {
-        res.status(429).json({ error: `Mehr als ${limits.perAccountPerDay} Vorschauen pro Tag sind für ein Konto nicht vorgesehen. Bitte morgen noch einmal.`, reason: "account" });
+      // Eine Grenze ist kein Fehler: gleicher Aufbau fuer alle vier Faelle, mit der Uhrzeit,
+      // ab der wieder ein Platz frei wird, und `limit: true` - daran erkennt die Oberflaeche,
+      // dass sie das ruhig und nicht rot anzeigen soll.
+      const gesperrt = (reason: QuotaReason) => {
+        const retryAt = naechsterPlatz(reason, { ip, domain, customerId: c.id });
+        const zeit = zeitSatz(retryAt);
+        res.status(429).json({ error: [quotaText(reason), zeit].filter(Boolean).join(" "), reason, limit: true, retryAt });
+      };
+      if (!testlauf && heuteSchon.n >= limits.perAccountPerDay) {
+        gesperrt("account");
         return;
       }
       // Eine bereits analysierte Domain kostet keine Analyse mehr - dann greift der Deckel nicht.
       const ausCache = Boolean(cacheLesen(domain));
-      if (!ausCache) {
+      if (!testlauf && !ausCache) {
         const entscheidung = decidePreviewQuota(countPreviews(ip, domain));
         if (!entscheidung.ok) {
-          res.status(429).json({ error: entscheidung.message, reason: entscheidung.reason });
+          gesperrt(entscheidung.reason);
           return;
         }
       }

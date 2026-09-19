@@ -69,6 +69,7 @@ import { suggestGradientPartners } from "../gradient.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 import { registerStartRoutes } from "./start-routes.js";
+import { registerTestmodeRoutes, testmodusMoeglich } from "./start-testmode.js";
 import { runBackfillJob } from "./start-jobs.js";
 import { featuresForTier, normalizeTier } from "./tiers.js";
 import { reorderPlannedPosts } from "./credentials.js";
@@ -164,13 +165,19 @@ function startSession(res: Response, customerId: string, req: Request = res.req 
   res.setHeader("Set-Cookie", `${COOKIE}=${token}; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`);
 }
 
+function endSession(res: Response, req: Request = res.req as Request): void {
+  const token = readCookie(req, COOKIE);
+  if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
+  res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+}
+
 function currentCustomer(req: Request): CustomerRow | undefined {
   const token = readCookie(req, COOKIE);
   if (!token) return undefined;
   return db
     .prepare(
       `SELECT c.* FROM sessions s JOIN customers c ON c.id = s.customer_id
-       WHERE s.token_hash = ? AND s.expires_at > ? AND c.status = 'active'`,
+       WHERE s.token_hash = ? AND s.expires_at > ? AND c.status IN ('active', 'test')`,
     )
     .get(sha256(token), nowIso()) as CustomerRow | undefined;
 }
@@ -506,6 +513,8 @@ function publicState(c: CustomerRow) {
       // Easy Onboarding: welche Oberflaeche dieser Kunde sieht und welche Funktionen seine
       // Preisstufe freischaltet (tiers.ts). Bestehende Kunden: 'classic' / basic, keine Wirkung.
       uiMode: c.ui_mode === "easy" ? "easy" : "classic",
+      // Testlauf der Sandbox (start-testmode.ts): die Oberflaeche zeigt daraufhin die Testleiste.
+      isTest: (c as { status?: string }).status === "test",
       // Easy Onboarding: ueber welchen Weg das Konto entstanden ist. Steuert im neuen Panel, ob
       // der E-Mail-Bestaetigungs-Hinweis ueberhaupt in Frage kommt (Auftrag Abschnitt 5).
       authProvider: c.auth_provider ?? null,
@@ -760,6 +769,7 @@ export function createPanelRouter(): Router {
       // Dauerhafte Staging-Testadresse (/panel/sandbox) - steuert nur den Testversion-Banner und
       // die Demo-Hinweistexte im Frontend, nie in Produktion gesetzt.
       sandbox: process.env.PANEL_SANDBOX === "true",
+      testmodeAvailable: testmodusMoeglich(),
     });
   });
 
@@ -1061,6 +1071,9 @@ export function createPanelRouter(): Router {
   });
 
   registerStartRoutes(router, { currentCustomer, startSession, publicState, clientIp, mountFor, baseUrlFor, hostOf, rateLimited, trialDays });
+  // Nur wirksam, wenn PANEL_SANDBOX=true UND PANEL_TEST_KEY gesetzt sind - sonst faellt der
+  // Einstieg auf 404 durch (siehe start-testmode.ts).
+  registerTestmodeRoutes(router, { currentCustomer, startSession, endSession, publicState, clientIp, mountFor, rateLimited, trialDays });
 
   router.post("/api/signup", safe(async (req, res) => {
     if (rateLimited(`signup:${clientIp(req)}`, 5, 3_600_000)) {
@@ -1368,9 +1381,7 @@ export function createPanelRouter(): Router {
   });
 
   router.post("/api/logout", (req, res) => {
-    const token = readCookie(req, COOKIE);
-    if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    endSession(res, req);
     res.json({ ok: true });
   });
 

@@ -373,6 +373,8 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .dash-kopf { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .notice { margin-top: 18px; border: 1px solid var(--linie); border-left: 3px solid var(--text-2); border-radius: 12px; padding: 13px 15px; font-size: var(--t-small); display: grid; gap: 6px; background: #fff; }
 .notice.bad { border-left-color: var(--schlecht); }
+/* Erreichte Tagesgrenze: kein Fehler, also weder rot noch weiss wie eine Karte - ruhiges Grau. */
+.notice.ruhig { background: var(--wash); border-left-color: var(--text-2); }
 .notice.ok { border-left-color: var(--gut); }
 .notice .link { padding: 2px 0; min-height: var(--tap); font-size: 14px; }
 .abschnitt { margin-top: 34px; }
@@ -398,3 +400,18 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 
 .mitte { text-align: center; padding-top: 10vh; }
 .mitte .actions { align-items: center; }
+
+/* ---- Testlauf-Leiste (nur Sandbox, nur bei status='test') --------------------------------
+   Schmal, grau, oben angeheftet. Kein Rot, keine Warnfarbe: es ist kein Fehlerzustand,
+   sondern ein Betriebsmodus. Die Tippziele bleiben bei 44 px. */
+.testleiste {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; justify-content: space-between;
+  padding: 6px 16px; background: var(--wash); border-bottom: 1px solid var(--linie);
+  font-size: var(--t-small); color: var(--text-2);
+}
+.testleiste[hidden] { display: none; }
+.testleiste-text { font-weight: 500; color: var(--text); }
+.testleiste-knoepfe { display: flex; gap: 6px; }
+.testleiste .link { min-height: var(--tap); padding: 0 8px; font-size: 14px; }
+@media (max-width: 420px) { .testleiste-zusatz { display: none; } }

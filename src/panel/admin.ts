@@ -221,7 +221,9 @@ export function createAdminRouter(panelPublicDir?: string): Router {
   router.get(
     "/api/overview",
     safe((_req, res) => {
-      const rows = db.prepare("SELECT * FROM customers ORDER BY created_at DESC").all() as CustomerRow[];
+      // Testlaeufe der Sandbox (status = 'test') gehoeren in keine Kundenliste und in keine
+      // Kennzahl - siehe start-testmode.ts.
+      const rows = db.prepare("SELECT * FROM customers WHERE status != 'test' ORDER BY created_at DESC").all() as CustomerRow[];
       const customers = rows.map(customerAdminView);
       const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
       const postsLast7d = (
