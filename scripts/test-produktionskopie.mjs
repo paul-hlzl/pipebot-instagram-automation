@@ -65,7 +65,12 @@ try {
     for (const c of nachher[t]) if (!spalten.includes(c)) dazu.push(`${t}.${c}`);
   }
   ok("Keine Tabelle und keine Spalte ist verschwunden", entfernt === 0, `${entfernt} entfernt`);
-  ok("Nur Ergaenzungen", dazu.length > 0, dazu.join(", "));
+  // Vor dem Deploy kamen die Spalten hier erst beim Start dazu; seit dem Deploy (19.09.2026)
+  // stehen sie schon in der Kopie. Beides ist richtig - falsch waere nur, wenn eine der neuen
+  // Spalten fehlt oder etwas verschwindet.
+  const NEUE_SPALTEN = [["planned_posts", "origin"], ["planned_posts", "image_source"], ["pending_approvals", "origin"]];
+  const fehlend = NEUE_SPALTEN.filter(([t, c]) => !(nachher[t] ?? []).includes(c)).map(([t, c]) => `${t}.${c}`);
+  ok("Alle neuen Spalten sind da, nichts ersetzt", fehlend.length === 0, fehlend.length ? `fehlt: ${fehlend.join(", ")}` : `beim Start ergaenzt: ${dazu.join(", ") || "nichts mehr noetig"}`);
   ok(`Alle ${kundenVorher.k} Kunden sind weiterhin da, keiner ist 'test'`, db.prepare("SELECT COUNT(*) n FROM customers").get().n === kundenVorher.k && db.prepare("SELECT COUNT(*) n FROM customers WHERE status='test'").get().n === 0);
   ok(`Alle ${kundenVorher.p} geplanten Beitraege unveraendert vorhanden, alle als Pipeflow-Arbeit (origin auto)`, db.prepare("SELECT COUNT(*) n FROM planned_posts").get().n === kundenVorher.p && db.prepare("SELECT COUNT(*) n FROM planned_posts WHERE origin='auto'").get().n === kundenVorher.p);
 
