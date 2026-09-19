@@ -190,7 +190,12 @@
                </div>`).join("")}
         </div>
         <div class="auth-trenner">oder</div>
-        <div class="actions" style="margin-top:14px"><button type="button" class="btn secondary lg" data-go="email">Mit E-Mail fortfahren</button></div>
+        <div class="auth-liste">
+          <!-- Bewusst dieselbe Geometrie wie die Anbieter-Knoepfe: drei gleich breite Knoepfe
+               ergeben eine Spalte. Dass der E-Mail-Weg der zweite Weg ist, sagt die Position
+               unter dem Trenner und die ruhigere Gestaltung - nicht eine andere Breite. -->
+          <button type="button" class="auth-btn mail-weg" data-go="email">Mit E-Mail fortfahren</button>
+        </div>
         <p class="hint">Mit dem Fortfahren stimmst du zu, dass Pipeline AI Solutions deine Angaben speichert, um Beiträge für dich vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
       </section>`;
   }

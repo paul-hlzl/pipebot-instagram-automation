@@ -196,10 +196,14 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .auth-btn.kommt-noch { cursor: default; color: var(--text-2); }
 .auth-btn.kommt-noch:hover { border-color: var(--linie); background: var(--flaeche); }
 .auth-btn .bald { margin-left: auto; font-size: var(--t-micro); color: var(--text-2); font-weight: 400; white-space: nowrap; }
+/* Der E-Mail-Weg: gleiche Breite und Hoehe wie die Anbieter-Knoepfe, aber ohne Fuellung und in
+   der Sekundaerfarbe - sekundaer wird ueber Gestaltung gesagt, nicht ueber eine andere Breite. */
+.auth-btn.mail-weg { background: transparent; color: var(--text-2); font-weight: 400; }
+.auth-btn.mail-weg:hover { background: var(--wash); color: var(--text); border-color: var(--text-2); }
 .auth-eintrag { display: grid; gap: 6px; }
 .auth-notiz { font-size: var(--t-small); color: var(--text-2); padding: 0 4px; line-height: 1.45; }
 .auth-btn[disabled] { cursor: default; }
-.auth-trenner { margin: 22px 0 0; display: flex; align-items: center; gap: 14px; color: var(--text-2); font-size: var(--t-small); }
+.auth-trenner { margin: 22px 0 14px; display: flex; align-items: center; gap: 14px; color: var(--text-2); font-size: var(--t-small); }
 .auth-trenner::before, .auth-trenner::after { content: ""; height: 1px; background: var(--linie); flex: 1; }
 
 /* --- Karte „Weiter als …" --- */
