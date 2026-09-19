@@ -196,6 +196,19 @@ AUTH_MICROSOFT_CLIENT_ID=...     AUTH_MICROSOFT_CLIENT_SECRET=...
 Weiterleitungsadresse fuer die Sandbox:
 `https://mcp.pipebot.at/panel/sandbox/auth/<anbieter>/callback`.
 
+**Wo die Zugangsdaten liegen (Stand 19.09.2026):** in `/root/staging.ecosystem.json`, Abschnitt
+`env`, Rechte 600, ausserhalb des Git-Repos. **Nicht** in `/root/mcp-sandbox/.env` - das ist ein
+Symlink auf die gemeinsame Produktions-`.env` (`/root/mcp-server/.env`), dort wuerde ein
+Sandbox-Eintrag den Produktionsprozess miterreichen. pm2-Umgebung schlaegt dotenv, der
+Sandbox-Prozess liest die Werte also von dort. Achtung: `pm2 save` schreibt sie zusaetzlich nach
+`/root/.pm2/dump.pm2` - diese Datei war 644 und ist jetzt 600.
+
+Microsoft ist seit 19.09.2026 eingetragen (`AUTH_MICROSOFT_CLIENT_ID`,
+`AUTH_MICROSOFT_CLIENT_SECRET`), **`AUTH_MICROSOFT_TENANT` bewusst NICHT** - ohne die Variable
+nimmt `auth-providers.ts` den `common`-Endpunkt, und nur damit koennen sich fremde Mandanten und
+persoenliche Microsoft-Konten anmelden. Redirect-URI in Entra:
+`https://mcp.pipebot.at/panel/sandbox/auth/microsoft/callback`.
+
 Zum Testen ohne echte Zugangsdaten lassen sich die Anbieter-Endpunkte umlenken
 (`AUTH_GOOGLE_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`) - genau das macht
 `npm run test:auth` mit einem eigenen Attrappen-Anbieter auf Port 3113.

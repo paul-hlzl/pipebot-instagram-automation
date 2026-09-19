@@ -47,6 +47,20 @@ export interface AuthProvider {
 
 const env = (name: string): string => process.env[name]?.trim() ?? "";
 
+/**
+ * Wird geworfen, wenn der Anbieter unsere EIGENEN Zugangsdaten ablehnt (falsches oder
+ * abgelaufenes Client-Secret). Das ist kein Fehler des Nutzers und keine vorübergehende
+ * Stoerung - es muss jemand die Zugangsdaten richtigstellen. Deshalb ein eigener Typ: der
+ * Callback zeigt dann "noch nicht eingerichtet" statt "versuch es noch einmal", was den
+ * Nutzer sonst endlos im Kreis schickt.
+ *
+ * Anlass (19.09.2026): In Entra heisst das Feld, das man sieht, "Geheime Client-ID"; der
+ * Wert, den man braucht, steht in der Spalte "Wert" und ist nur direkt nach dem Anlegen
+ * sichtbar. Die Verwechslung ist der haeufigste Einrichtungsfehler ueberhaupt, Microsoft
+ * schreibt sie sogar in den Fehlertext (AADSTS7000215).
+ */
+export class AuthNotConfiguredError extends ToolError {}
+
 async function postForm<T>(url: string, body: Record<string, string>, timeoutMs = 10_000): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
@@ -55,9 +69,13 @@ async function postForm<T>(url: string, body: Record<string, string>, timeoutMs 
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
-    // Der Fehlertext des Anbieters enthaelt im Zweifel unseren Client-Namen, nie das Secret -
+    // Der Fehlertext des Anbieters nennt im Zweifel unseren Client-Namen, nie das Secret -
     // trotzdem nur geloggt, nie an den Browser weitergereicht.
-    console.error(`[auth] Token-Tausch fehlgeschlagen (${url}): HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+    const text = (await res.text()).slice(0, 500);
+    console.error(`[auth] Token-Tausch fehlgeschlagen (${url}): HTTP ${res.status} ${text}`);
+    if (/invalid_client|AADSTS7000215|AADSTS7000222|unauthorized_client/.test(text)) {
+      throw new AuthNotConfiguredError("Dieser Anmeldeweg ist noch nicht fertig eingerichtet.");
+    }
     throw new ToolError("Die Anmeldung hat nicht geklappt. Bitte versuche es noch einmal.");
   }
   return (await res.json()) as T;

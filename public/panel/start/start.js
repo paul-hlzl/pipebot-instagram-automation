@@ -36,7 +36,7 @@
     state: () => "Die Sitzung ist abgelaufen. Bitte versuche es noch einmal.",
     personal_account: (p) => `${p} verlangt ein Business- oder Creator-Konto. Bitte stelle dein Konto um und versuche es erneut.`,
     missing_permission: (p) => `Bei ${p} fehlt eine Berechtigung. Bitte verbinde erneut und erlaube alle Punkte.`,
-    not_configured: (p) => `${p} ist auf diesem Server nicht eingerichtet.`,
+    not_configured: (p) => `Die Anmeldung mit ${p || "diesem Anbieter"} ist noch nicht fertig eingerichtet. Nimm so lange den E-Mail-Weg.`,
     session: () => "Bitte melde dich zuerst an.",
     verify: () => "Dieser Bestätigungslink ist ungültig oder wurde schon verwendet.",
     login: () => "Dieser Anmeldelink ist ungültig oder abgelaufen. Gib deine E-Mail-Adresse ein, wir schicken dir einen neuen.",

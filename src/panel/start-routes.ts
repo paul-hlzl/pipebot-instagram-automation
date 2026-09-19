@@ -33,7 +33,7 @@ import { loginLinkEmail, verificationEmail } from "./emails.js";
 import { countAdjustsForCustomer, countPreviews, decidePreviewQuota, normalizeDomain, previewLimits, recordPreview } from "./start-quota.js";
 import { getStartJob, isJobRunning, runAdjustJob, runPlanWeekJob, runPreviewJob, runRecolorJob } from "./start-jobs.js";
 import { PLANNING_LOOKAHEAD_DAYS } from "./planning.js";
-import { authProvidersPublic, getAuthProvider } from "./auth-providers.js";
+import { AuthNotConfiguredError, authProvidersPublic, getAuthProvider } from "./auth-providers.js";
 
 export interface StartContext {
   currentCustomer(req: Request): CustomerRow | undefined;
@@ -151,7 +151,9 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
         identitaet = await provider.exchangeCode(code, redirectUri(req, provider.id));
       } catch (err) {
         console.error(`[auth] ${provider.id}: Anmeldung fehlgeschlagen:`, err instanceof Error ? err.message : err);
-        return zurueckZumStart(res, req, { autherror: "failed", provider: provider.id });
+        // Liegt es an unseren eigenen Zugangsdaten, hilft "noch einmal versuchen" nichts.
+        const grund = err instanceof AuthNotConfiguredError ? "not_configured" : "failed";
+        return zurueckZumStart(res, req, { autherror: grund, provider: provider.id });
       }
 
       // Wiedererkennen in drei Stufen: bekanntes Anbieterkonto -> bekannte E-Mail-Adresse -> neu.

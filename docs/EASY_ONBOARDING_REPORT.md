@@ -14,9 +14,15 @@ echtem Chromium bei 360 und 1440 px: `docs/easy-onboarding/shots/`. Farbproben:
 
 ## 1. Anmeldung über Google, Microsoft, Apple - Stand und Aufwand
 
-**Was fehlt und nur du anlegen kannst:** Es sind keinerlei Zugangsdaten hinterlegt
-(`AUTH_GOOGLE_CLIENT_ID` und alle weiteren sind leer). Der Auftrag sagt ausdrücklich, dass du
-die Anbieter-Apps anlegst, nicht ich - deshalb ist der Login **gebaut, aber nicht scharf**.
+**Stand 19.09.2026, 11:05 Uhr:** Microsoft ist eingetragen und der Knopf ist live geschaltet -
+aber der gelieferte Clientschlüssel ist die **Geheimnis-ID**, nicht der **Wert**, und wird von
+Microsoft abgelehnt (AADSTS7000215, zweimal gegengeprüft: einmal mit dem eingetragenen Wert,
+einmal mit einem absichtlich falschen - beide Male dieselbe Ablehnung). Bis der richtige Wert da
+ist, bricht die Anmeldung im letzten Schritt ab und zeigt „Die Anmeldung mit Microsoft ist noch
+nicht fertig eingerichtet." Google und Apple sind unverändert ohne Zugangsdaten.
+
+**Was fehlt und nur du anlegen kannst:** die Anbieter-Apps selbst und ihre Schlüssel. Der
+Auftrag sagt ausdrücklich, dass du sie anlegst, nicht ich.
 
 **Gebaut ist er vollständig**, nicht als Attrappe: `src/panel/auth-providers.ts` und die Routen
 `/auth/:provider` und `/auth/:provider/callback` sprechen echtes OpenID Connect im
@@ -38,16 +44,27 @@ exakt so verhält wie die Attrappe. Das zeigt erst der erste echte Anmeldeversuc
 | **Microsoft** | Microsoft Entra, „App-Registrierung" | ca. 10 Minuten | keine | ca. 15 Minuten |
 | **Apple** | Apple Developer Program nötig | ca. 1 Stunde plus Wartezeit auf die Freischaltung | **99 USD im Jahr** | ca. 3 Stunden (siehe unten) |
 
-Einzutragende Weiterleitungsadressen (beide, Sandbox und später Produktion):
+Einzutragende Weiterleitungsadressen (beide, Sandbox und später Produktion; für Microsoft
+bereits verbindlich, zeichengenau aus der laufenden Sandbox ausgelesen):
 
 ```
+https://mcp.pipebot.at/panel/sandbox/auth/microsoft/callback
 https://mcp.pipebot.at/panel/sandbox/auth/google/callback
+https://app.pipeflow.at/auth/microsoft/callback
 https://app.pipeflow.at/auth/google/callback
 ```
 
-(für Microsoft dasselbe mit `/auth/microsoft/callback`). Was du mir dann gibst: Client-ID und
-Client-Secret. Ich trage sie als `AUTH_GOOGLE_CLIENT_ID` und `AUTH_GOOGLE_CLIENT_SECRET` in die
-Sandbox-Umgebung ein - **nicht** in die Produktions-`.env`, das wäre ein eigener Auftrag.
+(Die Produktionsadressen erst eintragen, wenn der Flow wirklich dorthin geht.) Was du mir gibst:
+Client-ID und Client-**Secret-Wert**. Ich trage sie als `AUTH_<ANBIETER>_CLIENT_ID` und
+`AUTH_<ANBIETER>_CLIENT_SECRET` in `/root/staging.ecosystem.json` ein (Rechte 600, außerhalb des
+Repos) - **nicht** in `/root/mcp-sandbox/.env`, denn das ist ein Symlink auf die gemeinsame
+Produktions-`.env`, und ein Eintrag dort würde beim nächsten Neustart auch den
+Produktionsprozess erreichen.
+
+**Mandant:** `AUTH_MICROSOFT_TENANT` wird bewusst **nicht** gesetzt, damit der Code den
+`common`-Endpunkt nimmt. Mit der Verzeichnis-ID könnte sich nur dein eigener Mandant anmelden.
+Live gegengeprüft: die Weiterleitung geht an
+`https://login.microsoftonline.com/common/oauth2/v2.0/authorize`.
 
 **Warum Apple mehr ist als 99 Dollar:** Apple verlangt statt eines festen Client-Secrets ein
 selbst signiertes JWT (ES256) aus einem privaten Schlüssel, das **höchstens sechs Monate** gilt
