@@ -773,9 +773,15 @@ export function createPanelRouter(): Router {
   // den neuen Flow gekommen ist (ui_mode = 'easy'), landet auch bei "/" dort - bestehende Kunden
   // (ui_mode NULL) sehen unveraendert das klassische Panel. ?classic=1 erreicht es immer, auch
   // fuer Easy-Kunden (Verlauf, Farbthemen, Wochentagsplanung bleiben dort erreichbar).
+  // Seit 19.09.2026 liegt auf der Wurzel die neue Oberflaeche - fuer jeden, auch fuer den, der
+  // noch gar kein Konto hat. Vorher kam hier das klassische Panel und das Easy Onboarding war
+  // nur unter /start/ zu finden; wer app.pipeflow.at aufrief, sah die alte Welt.
+  // Das klassische Panel ist nicht weg, nur nicht mehr der Empfang: es steht weiter unter
+  // ?classic=1 (und ein Kunde, der ausdruecklich auf ui_mode 'classic' steht, landet dort).
   router.get("/", (req, res) => {
     const c = currentCustomer(req);
-    if (c && c.ui_mode === "easy" && req.query.classic === undefined) {
+    const klassischGewuenscht = req.query.classic !== undefined || c?.ui_mode === "classic";
+    if (!klassischGewuenscht) {
       res.redirect(302, `${mountFor(req)}/start/${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`);
       return;
     }
