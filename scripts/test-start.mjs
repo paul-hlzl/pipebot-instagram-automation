@@ -88,7 +88,11 @@ try {
     const css = (await call("GET", "/start/start.css")).text;
     ok("start.css wird ausgeliefert (heller Grund)", css.includes("--grund:       #faf9f7"));
     ok("Hintergrundverlauf ist drin und speisbar aus Markenfarben", css.includes("--licht-1") && css.includes("radial-gradient"));
-    ok("Klassisches Panel ohne Session unveraendert erreichbar", (await call("GET", "/")).text.includes("panel.js"));
+    // Seit 19.09.2026: auf der Wurzel steht die neue Oberflaeche, das klassische Panel ist
+    // nicht weg, sondern liegt unter ?classic=1.
+    const wurzel = await call("GET", "/");
+    ok("Wurzel fuehrt ohne Session zur neuen Oberflaeche", wurzel.res.status === 302 && (wurzel.res.headers.get("location") ?? "").endsWith("/start/"), `${wurzel.res.status} ${wurzel.res.headers.get("location") ?? ""}`);
+    ok("Klassisches Panel weiterhin erreichbar (?classic=1)", (await call("GET", "/?classic=1")).text.includes("panel.js"));
   }
 
   console.log("\nBildschirm 1 - Konto:");
