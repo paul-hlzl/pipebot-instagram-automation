@@ -512,3 +512,24 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
   .marke-kunde { margin-left: 10px; padding-left: 10px; }
   .marke-kunde img { height: 26px; max-width: 104px; }
 }
+
+/* ---- Ladebildschirm: echte Zwischenergebnisse statt Schrittliste ------------------------
+   Kein Kasten, kein Rahmen, keine Haekchen. Was schon da ist, steht in voller Schrift; was
+   noch kommt, ist gar nicht da. Der Kunde liest seine Marke entstehen, nicht einen Fortschritt. */
+.lade-liste { margin-top: 26px; display: grid; gap: 20px; }
+.lade-zeile { display: grid; gap: 4px; animation: lade-auf .45s var(--kurve) both; }
+.lade-was { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); font-weight: 600; }
+.lade-wert { font-size: 17px; line-height: 1.35; }
+.lade-zeile.ist-dran .lade-wert { color: var(--text-2); }
+.lade-farben { display: flex; align-items: center; gap: 8px; }
+.lade-punkt { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(13,13,13,.08); }
+.lade-hex { font-size: 14px; color: var(--text-2); letter-spacing: .02em; }
+/* Die Themen sind Fliesstext, keine Pillen: Pillen waeren wieder Kaesten. Bewusst KEIN
+   Flexbox mit Trennzeichen per ::before - beim Umbruch rutschte der Punkt an den Zeilenanfang
+   und die Liste sah aus wie Aufzaehlungspunkte. */
+.lade-themen { display: block; font-size: 15px; line-height: 1.5; }
+.lade-trenner { color: var(--text-2); }
+.lade-kopfzeilen { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.lade-kopfzeilen li { font-size: 16px; line-height: 1.3; animation: lade-auf .4s var(--kurve) both; }
+@keyframes lade-auf { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lade-zeile, .lade-kopfzeilen li { animation: none; } }

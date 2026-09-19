@@ -504,32 +504,77 @@
     return Math.min(st.summary?.limits?.imagesUnverified ?? 3, gesamt);
   }
 
+  /**
+   * Der Ladebildschirm zeigt, was gerade fuer DIESEN Kunden entsteht (Ansage vom 19.09.2026).
+   *
+   * Vorher standen hier fuenf generische Schritte mit Haekchen - dieselben fuer jeden Kunden,
+   * egal welche Website. Jetzt erscheinen die echten Zwischenergebnisse in der Reihenfolge, in
+   * der sie entstehen: die gelesene Adresse, die erkannten Farben als Farbflecken, die
+   * gefundenen Themen als Woerter, und zuletzt die Ueberschriften der Beitraege, eine nach der
+   * anderen. Wer sieht, dass gerade seine Marke entsteht, wartet anders als vor einem Balken.
+   *
+   * Minimalistisch heisst hier: keine Kaesten, keine Rahmen, keine Erklaersaetze. Nur
+   * Schriftgroessen, Abstaende und die Farben des Kunden.
+   */
   function arbeitetHtml() {
     const st = S.status;
     const job = st?.job || { phase: "reading", done: 0, total: 0 };
     const laeuft = !["done", "error", "idle"].includes(job.phase);
     const gefunden = job.found;
-    const nachLesen = Boolean(gefunden) || ["colors", "writing", "images", "done"].includes(job.phase);
-    const textFertig = !laeuft || (job.total > 0 && job.done >= job.total);
-    const bildZiel = erwarteteBilder();
-    const bildFertig = st?.imagesDone || 0;
-    const bilderFertig = !laeuft && (bildFertig >= bildZiel || bildZiel === 0);
-    const langsam = Date.now() - S.arbeitSeit > 7000;
-    const schritt = (zustand, titel, unter) => `<li class="step is-${zustand}"><span class="step-mark" aria-hidden="true">${zustand === "done" ? "✓" : ""}</span><span class="step-text"><span>${titel}</span>${unter ? `<span class="step-sub">${unter}</span>` : ""}</span></li>`;
-    const farbPunkte = gefunden?.colors
-      ? `<span class="step-farben"><span class="step-farbe" style="background:${esc(gefunden.colors.accentColor)}"></span><span class="step-farbe" style="background:${esc(gefunden.colors.gradientColor2)}"></span>${esc(gefunden.colors.accentColor)}</span>`
-      : nachLesen ? "Keine eigenen Farben gefunden - wir nehmen unsere Standardfarben." : "";
+    const domain = S.website ? S.website.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "";
+    const posts = (st?.posts || []).filter((p) => p.status !== "rejected");
+    const kopf = domain ? `Wir lesen ${esc(domain)}` : "Wir lesen deine Angaben";
+
+    // Eine ehrliche Restzeit statt eines Balkens: sie stammt aus den gemessenen Abschnitten
+    // und wird nie kleiner als "gleich fertig".
+    const sek = Math.round((Date.now() - S.arbeitSeit) / 1000);
+    const rest = Math.max(0, 27 - sek);
+    const zeit = S.vorladen ? "Bilder werden geladen." : rest > 3 ? `Noch etwa ${rest} Sekunden.` : "Gleich fertig.";
+
+    const zeilen = [];
+
+    // 1. Was gelesen wird - steht sofort da, damit die ersten Sekunden nicht leer sind.
+    zeilen.push(`<div class="lade-zeile${gefunden ? " ist-fertig" : " ist-dran"}">
+      <span class="lade-was">${gefunden?.cached ? "Schon gelesen" : "Startseite und Unterseiten"}</span>
+      <span class="lade-wert">${gefunden ? esc(gefunden.company || domain) : esc(domain || "deine Angaben")}</span>
+    </div>`);
+
+    // 2. Die Farben, als Farbe - nicht als Wort "Farben übernommen".
+    if (gefunden) {
+      zeilen.push(gefunden.colors
+        ? `<div class="lade-zeile ist-fertig">
+             <span class="lade-was">Deine Farben</span>
+             <span class="lade-wert lade-farben">
+               <span class="lade-punkt" style="background:${esc(gefunden.colors.accentColor)}"></span>
+               <span class="lade-punkt" style="background:${esc(gefunden.colors.gradientColor2)}"></span>
+               <span class="lade-hex">${esc(gefunden.colors.accentColor)}</span>
+             </span>
+           </div>`
+        : `<div class="lade-zeile ist-fertig"><span class="lade-was">Farben</span><span class="lade-wert muted">keine eigenen gefunden</span></div>`);
+    }
+
+    // 3. Die Themen, ausgeschrieben. Das ist der Moment, in dem es persoenlich wird.
+    if (gefunden?.pillars?.length) {
+      zeilen.push(`<div class="lade-zeile ist-fertig">
+        <span class="lade-was">${gefunden.pillars.length} Themen</span>
+        <span class="lade-wert lade-themen">${gefunden.pillars.map((t) => `<span class="lade-thema">${esc(t)}</span>`).join('<span class="lade-trenner"> · </span>')}</span>
+      </div>`);
+    }
+
+    // 4. Die Beitraege, wie sie geschrieben werden - jede Ueberschrift, sobald sie da ist.
+    if (posts.length || (gefunden && job.total)) {
+      const liste = posts.slice(-6).map((p) => `<li>${esc(p.headline || "")}</li>`).join("");
+      zeilen.push(`<div class="lade-zeile${!laeuft ? " ist-fertig" : " ist-dran"}">
+        <span class="lade-was">Beiträge${job.total ? ` ${Math.min(posts.length, job.total)} von ${job.total}` : ""}</span>
+        <span class="lade-wert"><ul class="lade-kopfzeilen">${liste}</ul></span>
+      </div>`);
+    }
+
     return `
-      <section>
-        <h1>${S.website ? `Wir lesen ${esc(S.website.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))}` : "Wir lesen deine Angaben"}</h1>
-        <p class="lede">Das dauert meistens unter einer Minute.</p>
-        <ol class="steps" aria-label="Fortschritt">
-          ${schritt(nachLesen ? "done" : "active", S.website ? "Website gelesen" : "Beschreibung gelesen", !nachLesen && langsam ? "dauert gerade etwas länger …" : gefunden?.cached ? "aus dem Zwischenspeicher" : "")}
-          ${schritt(nachLesen ? "done" : "open", "Themen erkannt", gefunden?.pillars?.length ? esc(gefunden.pillars.join(", ")) : "")}
-          ${schritt(nachLesen ? "done" : "open", "Farben übernommen", farbPunkte)}
-          ${schritt(textFertig && nachLesen ? "done" : nachLesen ? "active" : "open", "Beiträge entworfen", job.total ? `${job.done} von ${job.total}${!textFertig && langsam ? " · dauert gerade etwas länger …" : ""}` : "")}
-          ${schritt(bilderFertig && !S.vorladen ? "done" : (st?.posts?.length ? "active" : "open"), "Bilder erstellt", S.vorladen ? "werden geladen …" : bildZiel ? `${Math.min(bildFertig, bildZiel)} von ${bildZiel}` : "")}
-        </ol>
+      <section class="lade">
+        <h1>${kopf}</h1>
+        <p class="lede">${zeit}</p>
+        <div class="lade-liste" aria-live="polite">${zeilen.join("")}</div>
       </section>`;
   }
 

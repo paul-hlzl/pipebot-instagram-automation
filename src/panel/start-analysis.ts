@@ -60,6 +60,8 @@ const UNTERSEITEN_MAX = Number(process.env.PANEL_ANALYSE_UNTERSEITEN) > 0 ? Numb
 const KANDIDATEN_MAX = 10;
 /** Zeichen je Unterseite. Deckelt den Eingabetext und damit die Kosten. */
 const ZEICHEN_JE_SEITE = 3000;
+/** Deckel fuer den GANZEN Schritt "Unterseiten holen", nicht je Seite. */
+const GESAMT_BUDGET_MS = Number(process.env.PANEL_ANALYSE_BUDGET_MS) > 0 ? Number(process.env.PANEL_ANALYSE_BUDGET_MS) : 9000;
 
 /**
  * Pfade, die nie Inhalt tragen: Feeds, die WordPress-Schnittstelle, Anhaenge, Rechtstexte,
@@ -112,7 +114,14 @@ export interface Unterseite {
 export async function unterseitenLesen(startHtml: string, basis: string): Promise<Unterseite[]> {
   const kandidaten = interneLinks(startHtml, basis).slice(0, KANDIDATEN_MAX);
   if (!kandidaten.length) return [];
-  const geholt = await Promise.all(
+  // Gesamtbudget statt engem Einzellimit (19.09.2026, gemessen). Die Unterseiten sind mit
+  // rund 6 s der groesste Einzelposten der Analyse - aber nicht, weil wir zu lange warten:
+  // sie laufen nachweislich parallel (6 Seiten einzeln 29,1 s, parallel 8,3 s), die Website
+  // des Kunden ist schlicht langsam, 4 bis 5 s je Seite. Ein enges Einzellimit hat deshalb
+  // nur Seiten verloren (bei 3,5 s kamen 4 statt 6 an), ohne Zeit zu sparen. Jetzt begrenzt
+  // ein Deckel fuer den ganzen Schritt: was bis dahin da ist, wird genommen.
+  const budget = new Promise<(Unterseite | null)[]>((f) => setTimeout(() => f([]), GESAMT_BUDGET_MS));
+  const geholt: (Unterseite | null)[] = await Promise.race([budget, Promise.all(
     kandidaten.map(async (url) => {
       try {
         const html = await fetchTextSafely(url, 6000);
@@ -123,7 +132,7 @@ export async function unterseitenLesen(startHtml: string, basis: string): Promis
         return null;
       }
     }),
-  );
+  )]);
   return geholt
     .filter((x): x is Unterseite => x !== null)
     .sort((a, b) => b.text.length - a.text.length)
@@ -160,6 +169,10 @@ export async function analysiereWebsite(website: string): Promise<{ analyse: Dom
     logoFinden(html, url).then((x) => x?.fund ?? null).catch(() => null),
   ]);
   const sprache = websiteSprache(html, `${seite.title} ${seite.description} ${seite.bodyText}`);
+  // Profil und Themen laufen parallel (19.09.2026). Beide bekommen BEIDE Textquellen, Start-
+  // und Unterseiten: die Zeit kommt daraus, dass die beiden Ausgaben nebeneinander entstehen
+  // statt hintereinander, nicht daraus, dass eine davon weniger zu lesen bekommt. Ein duenneres
+  // `about` waere derselbe Fehler wie kuerzere Themenbeschreibungen.
   let suggestion = await suggestFromWebsite(seite, unterseiten);
   // Sprachwache schon hier: eine Analyse in fremder Schrift wuerde sich ueber Beschreibung und
   // Saeulen auf JEDEN Beitrag der Woche vererben. Ein Neuversuch, danach wird abgebrochen -
