@@ -20,6 +20,9 @@ export interface StartJob {
   kind: "preview" | "adjust" | "replan" | "backfill" | "recolor";
   /** Was die Analyse erkannt hat - fuellt Bildschirm 3, bevor der erste Beitrag fertig ist. */
   found?: { company: string; pillars: string[]; colors: { accentColor: string; gradientColor2: string } | null; cached: boolean };
+  /** Fortschritt beim Lesen der Unterseiten (19.09.2026). Das sind die Sekunden, in denen
+   *  sonst nichts passiert - jetzt steht der zuletzt gelesene Pfad auf dem Bildschirm. */
+  liest?: { pfad: string; fertig: number; gesamt: number };
   phase: JobPhase;
   total: number;
   done: number;
@@ -74,7 +77,10 @@ export function runPreviewJob(customerId: string, opts: { website: string | null
     let analyse: DomainAnalysis;
     let ausCache = false;
     if (opts.website) {
-      const ergebnis = await analysiereWebsite(opts.website);
+      const ergebnis = await analysiereWebsite(opts.website, {
+        onStart: (anzahl) => { job.liest = { pfad: "", fertig: 0, gesamt: anzahl }; },
+        onSeite: (pfad, fertig, gesamt) => { job.liest = { pfad, fertig, gesamt }; },
+      });
       analyse = ergebnis.analyse;
       ausCache = ergebnis.ausCache;
     } else {

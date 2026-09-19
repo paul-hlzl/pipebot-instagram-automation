@@ -533,10 +533,17 @@
 
     const zeilen = [];
 
-    // 1. Was gelesen wird - steht sofort da, damit die ersten Sekunden nicht leer sind.
+    // 1. Was gelesen wird. Waehrend die Unterseiten geholt werden - die neun Sekunden ohne
+    // sichtbare Bewegung - laeuft hier der Zaehler und der zuletzt gelesene Pfad mit.
+    const liest = job.liest;
+    const lesewert = gefunden
+      ? esc(gefunden.company || domain)
+      : liest?.gesamt
+        ? `${liest.fertig} von ${liest.gesamt}${liest.pfad ? ` <span class="lade-pfad">${esc(liest.pfad)}</span>` : ""}`
+        : esc(domain || "deine Angaben");
     zeilen.push(`<div class="lade-zeile${gefunden ? " ist-fertig" : " ist-dran"}">
-      <span class="lade-was">${gefunden?.cached ? "Schon gelesen" : "Startseite und Unterseiten"}</span>
-      <span class="lade-wert">${gefunden ? esc(gefunden.company || domain) : esc(domain || "deine Angaben")}</span>
+      <span class="lade-was">${gefunden?.cached ? "Schon gelesen" : liest?.gesamt && !gefunden ? "Unterseiten" : "Startseite und Unterseiten"}</span>
+      <span class="lade-wert">${lesewert}</span>
     </div>`);
 
     // 2. Die Farben, als Farbe - nicht als Wort "Farben übernommen".
@@ -858,20 +865,63 @@
   };
   /** Die Kanal-Texte kommen vom Server in der Sie-Form des klassischen Panels - hier wird geduzt. */
   const duzen = (t) => String(t ?? "").replace(/\bIhre\b/g, "Deine").replace(/\bIhrem\b/g, "deinem").replace(/\bIhren\b/g, "deinen").replace(/\bIhr\b/g, "Dein").replace(/\bSie\b/g, "du");
+  /* ---------------------------- Entwurf A1: Kanäle als Kanäle ------------------------------
+   * Freigegeben am 19.09.2026. Vorher waren es drei gleich grosse schwarze Balken
+   * untereinander - das sah aus wie ein Formular, und der Weiter-Knopf wog genauso viel wie
+   * die beiden Verbinden-Knoepfe.
+   *
+   * Jetzt eine Zeile je Kanal: das Zeichen in der Farbe des Kanals, Name, eine kurze Zeile
+   * dazu, rechts der Verbinden-Knopf in derselben Farbe. Getrennt nur durch Haarlinien, keine
+   * Kaesten. Der Weg weiter ist ein Textlink - er darf nicht so schwer wiegen wie die Sache,
+   * um die es auf diesem Bildschirm geht.
+   */
+  const KANAL_FARBE = {
+    instagram: "linear-gradient(45deg, #feda75, #d62976 55%, #4f5bd5)",
+    linkedin: "#0A66C2",
+    google: "#5f6368",
+  };
+  const KANAL_ZEILE = { instagram: "Feed-Beiträge und Stories", linkedin: "dein persönliches Profil", google: "Bewertungen" };
+
   function verbindenKarteHtml(p, imOnboarding) {
     const k = kanal(p.id);
     const uebersprungen = S.skipped.has(p.id);
     const ok = k && k.status === "ok";
-    const hinweis = S.notice && S.notice.provider === p.id ? `<p class="small" style="color:${S.notice.kind === "bad" ? "var(--schlecht)" : "var(--gut)"}">${esc(S.notice.text)}</p>` : "";
-    let knopf;
-    if (ok) knopf = `<p class="connect-state">✓ Verbunden als ${esc(k.accountName || "—")}</p>${!imOnboarding ? `<button type="button" class="link" data-disconnect="${esc(p.id)}">Trennen</button>` : ""}`;
-    else if (!p.available) knopf = `<button type="button" class="btn secondary" disabled>${LOGO[p.id] || ""}${esc(p.name)} verbinden</button><p class="connect-state off">${S.sandbox ? "In der Testversion nicht möglich - hier gibt es keine echten Konten." : "Auf diesem Server nicht eingerichtet."}</p>`;
-    else knopf = `<a class="btn" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start">${LOGO[p.id] || ""}${esc(p.name)} verbinden</a>${k ? `<p class="connect-state off">Verbindung ${k.status === "expired" ? "abgelaufen" : k.status === "blocked" ? "blockiert" : "läuft bald ab"} - bitte neu verbinden.</p>` : ""}`;
-    return `<div class="connect" id="connect-${esc(p.id)}">
-      ${knopf}
-      <p class="small muted">${esc(duzen(p.tagline))}${p.notice ? ` ${esc(duzen(p.notice))}` : ""}</p>
+    const farbe = KANAL_FARBE[p.id] || "var(--text)";
+    const hinweis = S.notice && S.notice.provider === p.id
+      ? `<p class="kanal-notiz${S.notice.kind === "bad" ? " ist-schlecht" : ""}">${esc(S.notice.text)}</p>` : "";
+
+    let rechts;
+    if (ok) {
+      rechts = `<span class="kanal-ok">Verbunden${!imOnboarding ? ` <button type="button" class="link" data-disconnect="${esc(p.id)}">trennen</button>` : ""}</span>`;
+    } else if (!p.available) {
+      rechts = `<button type="button" class="kanal-knopf ist-aus" disabled>Verbinden</button>`;
+    } else {
+      rechts = `<a class="kanal-knopf" style="background:${farbe}" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start">Verbinden</a>`;
+    }
+
+    // Die Unterzeile sagt genau eine Sache: bei verbundenen Kanaelen den Kontonamen, sonst
+    // wofuer der Kanal da ist. Keine Erklaersaetze.
+    const unter = ok
+      ? esc(k.accountName || "")
+      : !p.available
+        ? (S.sandbox ? "in der Testversion nicht möglich" : "auf diesem Server nicht eingerichtet")
+        : k
+          ? `Verbindung ${k.status === "expired" ? "abgelaufen" : k.status === "blocked" ? "blockiert" : "läuft bald ab"}`
+          : KANAL_ZEILE[p.id] || "";
+
+    // Die Zeile selbst enthaelt NUR die drei Spalten. Alles Zusaetzliche - eine Rueckmeldung
+    // nach dem Verbinden - steht darunter, sonst waere eine Zeile hoeher als die andere und
+    // die Liste haette keinen Rhythmus mehr. Ein eigenes "Später" je Kanal gibt es nicht
+    // mehr: der Weg unten deckt das ab, und zwei Verzichtsangebote auf einem Bildschirm sind
+    // eines zu viel.
+    void uebersprungen;
+    return `<div class="kanal-block">
+      <div class="kanal" id="connect-${esc(p.id)}">
+        <span class="kanal-zeichen" style="background:${farbe}" aria-hidden="true">${LOGO[p.id] || ""}</span>
+        <span class="kanal-text"><b>${esc(p.name)}</b><span>${unter}</span></span>
+        ${rechts}
+      </div>
       ${hinweis}
-      ${!ok && imOnboarding ? (uebersprungen ? `<p class="connect-state off">Später - du findest das jederzeit in den Einstellungen.</p>` : `<button type="button" class="link" data-skip="${esc(p.id)}">Später verbinden</button>`) : ""}
     </div>`;
   }
   function verbindenHtml() {
@@ -880,8 +930,8 @@
       <section>
         <h1>Kanäle verbinden</h1>
         <p class="lede">Damit Pipeflow veröffentlichen kann. Jeden Kanal kannst du auch später verbinden.</p>
-        <div class="connect-liste">${liste.map((p) => verbindenKarteHtml(p, true)).join("")}</div>
-        <div class="actions" style="margin-top:30px"><button type="button" class="btn lg" id="btn-zum-dashboard">Zur Übersicht</button></div>
+        <div class="kanal-liste">${liste.map((p) => verbindenKarteHtml(p, true)).join("")}</div>
+        <button type="button" class="weiter-link" id="btn-zum-dashboard">Später, zur Übersicht</button>
       </section>`;
   }
 
@@ -890,6 +940,28 @@
     const n = S.notice;
     return n ? `<div class="notice ${n.kind || ""}" role="status">${esc(n.text)}</div>` : "";
   }
+  /* ------------------------- Entwurf B1: eine Zeile statt drei Kästen ----------------------
+   * Freigegeben am 19.09.2026. Vorher stapelten sich drei gerahmte Hinweiskaesten ueber der
+   * Woche - E-Mail bestaetigen, Instagram fehlt, LinkedIn fehlt - und fuellten am Handy eine
+   * ganze Bildschirmseite, bevor ein einziger Beitrag zu sehen war.
+   *
+   * Jetzt eine ruhige Zeile aus kurzen Links, direkt unter dem Firmennamen. Kein Rahmen, kein
+   * Erklaersatz. Wer wissen will, warum, klickt drauf. Nur die Pause bleibt hervorgehoben -
+   * das ist kein offener Punkt, sondern ein Zustand, der Beitraege aktiv anhaelt.
+   */
+  function offeneZeile() {
+    const c = S.customer;
+    const fehlend = S.providers.filter((p) => p.id !== "google" && !(kanal(p.id) && kanal(p.id).status === "ok"));
+    const punkte = [];
+    if (!c.emailVerified && !c.authProvider) punkte.push(`<button type="button" class="link" id="verify-neu">E-Mail bestätigen</button>`);
+    for (const p of fehlend) punkte.push(`<a href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start">${esc(p.name)} verbinden</a>`);
+    const pause = c.customerPaused
+      ? `<p class="offen ist-pausiert">Veröffentlichung pausiert <button type="button" class="link" data-pause="0">fortsetzen</button></p>`
+      : "";
+    if (!punkte.length) return pause;
+    return `${pause}<p class="offen">${punkte.join('<span class="offen-pkt">·</span>')}</p>`;
+  }
+
   function dashboardHtml() {
     const c = S.customer;
     const fehlend = S.providers.filter((p) => p.id !== "google" && !(kanal(p.id) && kanal(p.id).status === "ok"));
@@ -899,16 +971,15 @@
       <section>
         <div class="dash-kopf">
           <div><h1>So sehen deine nächsten Tage aus</h1><p class="lede" style="margin-top:8px">${esc(c.company)}</p></div>
-          <button type="button" class="btn" id="btn-jetzt-posten">Jetzt posten</button>
+          <!-- Textlink, kein gefuellter Knopf: die Hauptsache dieses Bildschirms sind die
+               Beitraege darunter, nicht ein zusaetzlicher Beitrag (Entwurf B1). -->
+          <button type="button" class="kopf-link" id="btn-jetzt-posten">Jetzt posten</button>
         </div>
         ${S.notice ? noticeHtml() : ""}
-        ${!c.emailVerified && !c.authProvider ? `<div class="notice" role="status"><strong>Bitte bestätige deine E-Mail-Adresse.</strong> Wir haben einen Link an ${esc(c.email)} geschickt. Erst danach veröffentlichen wir${st?.posts?.some((p) => !p.imageUrl) ? " und erstellen die restlichen Bilder" : ""}.<span><button type="button" class="link" id="verify-neu">Bestätigungsmail erneut senden</button></span></div>` : ""}
-        ${fehlend.map((p) => `<div class="notice" role="status">${esc(p.name)} ist noch nicht verbunden - dort kann noch nichts veröffentlicht werden.<span><a class="btn secondary sm" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start" style="justify-self:start">${esc(p.name)} verbinden</a></span></div>`).join("")}
-        ${c.customerPaused ? `<div class="notice bad">Deine Veröffentlichung ist pausiert.<span><button type="button" class="link" data-pause="0">Fortsetzen</button></span></div>` : ""}
+        ${offeneZeile()}
         ${laeuft ? `<p class="lauf-zeile">${st.job.kind === "backfill" || st.job.kind === "recolor" ? "Bilder werden erstellt" : "Beiträge werden erstellt"}${st.job.total ? ` - ${st.job.done} von ${st.job.total}` : ""} …</p>` : ""}
         <div class="abschnitt" id="freigaben-abschnitt">${freigabenHtml()}</div>
         <div class="abschnitt">
-          <div class="abschnitt-kopf"><h2>Geplant</h2><span class="small muted">Reihenfolge per ↑↓ oder Ziehen</span></div>
           ${wocheHtml({ dashboard: true })}
         </div>
       </section>`;
@@ -938,7 +1009,7 @@
         ${S.notice ? noticeHtml() : ""}
         ${planZeilenHtml()}
         <div class="zeile" id="zeile-anders"><span class="zeile-k">Ausrichtung ändern</span><div class="zeile-v"><span class="muted">In eigenen Worten sagen, was anders sein soll - wir schreiben die offenen Beiträge neu.</span></div><button type="button" class="stift" data-go="anders" aria-label="Ausrichtung ändern">${STIFT}</button></div>
-        <div class="abschnitt" id="verbinden"><div class="abschnitt-kopf"><h2>Kanäle</h2></div><div class="connect-liste">${liste.map((p) => verbindenKarteHtml(p, false)).join("")}</div></div>
+        <div class="abschnitt" id="verbinden"><div class="abschnitt-kopf"><h2>Kanäle</h2></div><div class="kanal-liste">${liste.map((p) => verbindenKarteHtml(p, false)).join("")}</div></div>
         <div class="abschnitt"><div class="abschnitt-kopf"><h2>Veröffentlicht</h2></div>${S.verlauf === null ? `<p class="leer">Wird geladen …</p>` : verlaufHtml()}</div>
         <div class="abschnitt">
           <div class="abschnitt-kopf"><h2>Konto</h2></div>

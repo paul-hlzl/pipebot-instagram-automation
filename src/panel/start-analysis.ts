@@ -111,9 +111,21 @@ export interface Unterseite {
  * zurueck. Eine Seite, die nicht laedt, faellt still weg - eine kaputte Unterseite darf die
  * Vorschau nie scheitern lassen.
  */
-export async function unterseitenLesen(startHtml: string, basis: string): Promise<Unterseite[]> {
+export interface LeseFortschritt {
+  /** Wie viele Unterseiten ueberhaupt versucht werden. Kommt sofort, vor der ersten Antwort. */
+  onStart?: (anzahl: number) => void;
+  /** Eine Seite ist da (oder gescheitert) - mit ihrem Pfad, damit die Oberflaeche ihn zeigt. */
+  onSeite?: (pfad: string, fertig: number, gesamt: number) => void;
+}
+
+export async function unterseitenLesen(startHtml: string, basis: string, fortschritt: LeseFortschritt = {}): Promise<Unterseite[]> {
   const kandidaten = interneLinks(startHtml, basis).slice(0, KANDIDATEN_MAX);
   if (!kandidaten.length) return [];
+  // Die neun Sekunden, in denen die Unterseiten geholt werden, waren bisher die Stelle ohne
+  // jede sichtbare Bewegung (Ansage vom 19.09.2026). Jetzt meldet jede Seite, sobald sie da
+  // ist, und die Oberflaeche schreibt den Pfad hin.
+  fortschritt.onStart?.(kandidaten.length);
+  let fertig = 0;
   // Gesamtbudget statt engem Einzellimit (19.09.2026, gemessen). Die Unterseiten sind mit
   // rund 6 s der groesste Einzelposten der Analyse - aber nicht, weil wir zu lange warten:
   // sie laufen nachweislich parallel (6 Seiten einzeln 29,1 s, parallel 8,3 s), die Website
@@ -123,13 +135,17 @@ export async function unterseitenLesen(startHtml: string, basis: string): Promis
   const budget = new Promise<(Unterseite | null)[]>((f) => setTimeout(() => f([]), GESAMT_BUDGET_MS));
   const geholt: (Unterseite | null)[] = await Promise.race([budget, Promise.all(
     kandidaten.map(async (url) => {
+      const pfad = (() => { try { return new URL(url).pathname; } catch { return url; } })();
       try {
         const html = await fetchTextSafely(url, 6000);
         const seite = extractPageText(html, { maxBodyChars: ZEICHEN_JE_SEITE });
         const text = [seite.title, seite.description, seite.bodyText].filter(Boolean).join(" ").trim();
-        return text.length >= 200 ? { pfad: new URL(url).pathname, text } : null;
+        return text.length >= 200 ? { pfad, text } : null;
       } catch {
         return null;
+      } finally {
+        fertig++;
+        fortschritt.onSeite?.(pfad, fertig, kandidaten.length);
       }
     }),
   )]);
@@ -143,7 +159,7 @@ export async function unterseitenLesen(startHtml: string, basis: string): Promis
  * Website EINMAL laden und daraus beides gewinnen: den Text fuer die KI-Analyse und die
  * Markenfarben. Zweiter Aufruf derselben Domain kommt aus dem Zwischenspeicher (Abschnitt 8).
  */
-export async function analysiereWebsite(website: string): Promise<{ analyse: DomainAnalysis; ausCache: boolean }> {
+export async function analysiereWebsite(website: string, fortschritt: LeseFortschritt = {}): Promise<{ analyse: DomainAnalysis; ausCache: boolean }> {
   const domain = normalizeDomain(website);
   const zwischengespeichert = cacheLesen(domain);
   if (zwischengespeichert) return { analyse: zwischengespeichert, ausCache: true };
@@ -165,7 +181,7 @@ export async function analysiereWebsite(website: string): Promise<{ analyse: Dom
   // und die inhaltsreichste Seite (Produkte, Wirkstoffe) war nie dabei.
   const [colors, unterseiten, logo] = await Promise.all([
     extractBrandColorsFromHtml(html, url).catch(() => null),
-    unterseitenLesen(html, url).catch(() => [] as Unterseite[]),
+    unterseitenLesen(html, url, fortschritt).catch(() => [] as Unterseite[]),
     logoFinden(html, url).then((x) => x?.fund ?? null).catch(() => null),
   ]);
   const sprache = websiteSprache(html, `${seite.title} ${seite.description} ${seite.bodyText}`);
