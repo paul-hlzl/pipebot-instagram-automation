@@ -49,8 +49,10 @@
   /* Einfallendes Licht: zwei sehr schwache Lichtkegel oben. Ohne erkannte Markenfarben ein
      neutraler Grauton; sobald die Website Farben hergibt, setzt start.js diese beiden Werte
      auf die Marke um - mit niedriger Deckkraft, damit es Licht bleibt und kein Hintergrund. */
+  /* Ohne erkannte Markenfarben bleibt es ein sehr schwaches Grau - dasselbe wie bisher. */
   --licht-1: rgba(13, 13, 13, .05);
   --licht-2: rgba(13, 13, 13, .03);
+  --licht-3: rgba(13, 13, 13, .02);
   /* Zwei Signalfarben, ausschliesslich Bedeutung, nie Dekoration */
   --gut:     #137a3f;
   --schlecht:#b42318;
@@ -86,11 +88,17 @@ body {
      und am Handy spart es das staendige Neuzeichnen. rgba(255,255,255,0) statt `transparent`,
      weil Safari `transparent` als Schwarz interpoliert und dann ein grauer Schleier entsteht. */
   background-color: var(--grund);
+  /* Drei Kegel statt zwei (19.09.2026): zwei oben wie bisher, dazu ein sehr weiter, sehr
+     schwacher weiter unten. Der dritte ist der Grund, warum die Farbe jetzt auch nach dem
+     ersten Bildschirm noch da ist, ohne dass irgendwo eine Flaeche entsteht. Die Karten
+     bleiben reinweiss - dadurch waechst ihr Abstand zum Grund mit, statt zu schrumpfen. */
   background-image:
     radial-gradient(120% 70% at 12% -2%, var(--licht-1), rgba(255, 255, 255, 0) 72%),
-    radial-gradient(95% 55% at 96% 2%, var(--licht-2), rgba(255, 255, 255, 0) 66%);
+    radial-gradient(95% 55% at 96% 2%, var(--licht-2), rgba(255, 255, 255, 0) 66%),
+    radial-gradient(140% 60% at 50% 100%, var(--licht-3), rgba(255, 255, 255, 0) 70%);
   background-repeat: no-repeat;
-  background-size: 100% 900px, 100% 760px;
+  background-size: 100% 1100px, 100% 900px, 100% 100%;
+  background-attachment: scroll, scroll, fixed;
   font-family: var(--sans); font-size: var(--t-body); line-height: 1.5;
   letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -479,4 +487,28 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
   .streifen { gap: 14px; overflow-x: visible; }
   .tagkarte { flex: 1 1 0; min-width: 0; }
   .tagbild .kachel.mini .kachel-h { font-size: 11px; }
+}
+
+/* ---- Markenlogo des Kunden in der Kopfzeile ---------------------------------------------
+   Erscheint, sobald die Website gelesen ist. Bewusst klein und ohne Kasten: auffallen soll,
+   dass die Oberflaeche zum Kunden gehoert, nicht das Logo. Eine feine senkrechte Linie
+   trennt es vom Produktnamen, damit es nicht wie Teil von "Pipeflow" wirkt. */
+.marke-kunde {
+  display: flex; align-items: center; min-width: 0;
+  /* margin-right:auto haelt das Logo am Produktnamen - .top verteilt sonst mit
+     space-between und schoebe es in die Bildschirmmitte. */
+  margin: 2px auto 0 14px; padding-left: 14px; border-left: 1px solid var(--linie);
+  animation: logo-auf .5s var(--kurve) both;
+}
+.marke-kunde[hidden] { display: none; }
+/* 32 px statt 26: eine breite Wortmarke wird darunter unleserlich - gemessen an der
+   Schriftmarke von Channoine, die bei 26 px nur noch ein Fleck war. Der Pipeflow-Schriftzug
+   daneben ist 27 px, damit steht beides gleichwertig ohne dass das Kundenlogo lauter wird. */
+.marke-kunde img { display: block; height: 32px; width: auto; max-width: 168px; object-fit: contain; }
+/* App-Kachel mit eigenem Hintergrund: runde Ecken, sonst klebt ein Quadrat auf dem Papier. */
+.marke-kunde.kachel-logo img { border-radius: 7px; height: 28px; max-width: 28px; }
+@keyframes logo-auf { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@media (max-width: 420px) {
+  .marke-kunde { margin-left: 10px; padding-left: 10px; }
+  .marke-kunde img { height: 26px; max-width: 104px; }
 }

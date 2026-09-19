@@ -13,12 +13,18 @@ import { ToolError } from "../errors.js";
 import { setContentPillars } from "./credentials.js";
 import { normalizeDomain } from "./start-quota.js";
 import { fremdeSchrift, websiteSprache } from "./sprache.js";
+import { logoFinden, logoAblegen, type LogoFund } from "./brand-logo.js";
+import path from "node:path";
+import { PACKAGE_ROOT } from "../config.js";
 
 /* ------------------------------- Domain-Zwischenspeicher ------------------------------- */
 
 export interface DomainAnalysis {
   suggestion: WebsiteSuggestion;
   colors: BrandColorResult | null;
+  /** Auf der Website gefundenes Logo (19.09.2026). Der Zwischenspeicher merkt sich nur die
+   *  Adresse; die Datei wird pro Kunde geholt, weil sie pro Kunde liegt. */
+  logo?: LogoFund | null;
   /** Sprache der Website (19.09.2026). Vorher war "de" fest angenommen; die Sprachwache in
    *  planning.ts prueft jeden Beitrag gegen genau diesen Wert. Aeltere Eintraege im
    *  Zwischenspeicher haben ihn nicht - dort gilt weiter "de". */
@@ -148,9 +154,10 @@ export async function analysiereWebsite(website: string): Promise<{ analyse: Dom
   // Grund, warum ueberhaupt genug Stoff fuer zehn verschiedene Aufhaenger zusammenkommt: die
   // Startseite allein trug bei channoine-mayr.at 1.873 von 42.031 Zeichen, also 4,5 Prozent,
   // und die inhaltsreichste Seite (Produkte, Wirkstoffe) war nie dabei.
-  const [colors, unterseiten] = await Promise.all([
+  const [colors, unterseiten, logo] = await Promise.all([
     extractBrandColorsFromHtml(html, url).catch(() => null),
     unterseitenLesen(html, url).catch(() => [] as Unterseite[]),
+    logoFinden(html, url).then((x) => x?.fund ?? null).catch(() => null),
   ]);
   const sprache = websiteSprache(html, `${seite.title} ${seite.description} ${seite.bodyText}`);
   let suggestion = await suggestFromWebsite(seite, unterseiten);
@@ -166,12 +173,30 @@ export async function analysiereWebsite(website: string): Promise<{ analyse: Dom
     if (nochmal) throw new ToolError(`Die Analyse dieser Website kam in ${nochmal}er Schrift zurück. Bitte versuche es noch einmal.`);
   }
   console.log(`[start] ${domain}: Startseite + ${unterseiten.length} Unterseite(n) gelesen (${unterseiten.map((u) => u.pfad).join(", ") || "keine"}), Sprache ${sprache}`);
-  const analyse: DomainAnalysis = { suggestion, colors, sprache };
+  const analyse: DomainAnalysis = { suggestion, colors, sprache, logo };
   cacheSchreiben(domain, analyse);
   return { analyse, ausCache: false };
 }
 
 /** Analyse-Ergebnis und Markenfarben in die BESTEHENDEN Kundenfelder schreiben - kein zweites System. */
+/**
+ * Holt das gefundene Logo fuer diesen einen Kunden und legt es ab. Getrennt von
+ * `uebernehmeAnalyse`, weil das Netz im Spiel ist - und bewusst so gebaut, dass ein
+ * fehlschlagender Download NICHTS kaputtmacht: dann bleibt die Kopfzeile eben ohne Logo.
+ */
+export async function logoUebernehmen(customerId: string, analyse: DomainAnalysis): Promise<void> {
+  if (!analyse.logo) return;
+  try {
+    const { bytes } = await import("../ssrf-safe-fetch.js").then((m) => m.fetchBinarySafely(analyse.logo!.url, 8000, 3_000_000));
+    const ziel = await logoAblegen(bytes, path.join(PACKAGE_ROOT, "data/logos"), `auto-${customerId}.png`);
+    db.prepare("UPDATE customers SET detected_logo_url = ?, detected_logo_tile = ?, updated_at = ? WHERE id = ?")
+      .run(ziel, analyse.logo.eigenerGrund ? 1 : 0, nowIso(), customerId);
+    console.log(`[start] ${customerId}: Logo uebernommen (${analyse.logo.quelle}, ${analyse.logo.breite}x${analyse.logo.hoehe}${analyse.logo.eigenerGrund ? ", eigener Grund" : ""}).`);
+  } catch (err) {
+    console.warn(`[start] ${customerId}: Logo konnte nicht geholt werden -`, err instanceof Error ? err.message : err);
+  }
+}
+
 export function uebernehmeAnalyse(customerId: string, website: string | null, analyse: DomainAnalysis): void {
   const { suggestion, colors } = analyse;
   const hashtags = suggestion.hashtags.map((h) => `#${h}`).join(" ");

@@ -122,15 +122,37 @@
    * niedrige Deckkraft: es soll wie einfallendes Licht wirken, nicht wie eine farbige Flaeche.
    * Ohne erkannte Farben bleibt der neutrale Grauton aus der CSS-Datei stehen.
    */
+  /**
+   * Wie stark darf dieses Licht sein? Nicht als feste Zahl, sondern aus dem Abstand der
+   * Markenfarbe zum Papierweiss gerechnet (Auftrag 19.09.2026).
+   *
+   * Der Grund: ein fester Alphawert trifft jede Marke anders. Bei 0,2 bleibt ein warmes Gold
+   * ein Lichtschein, ein sattes Rot waere schon eine Farbflaeche. Gemessen wurde, dass die
+   * sichtbare Abweichung vom Grund ungefaehr Alpha mal Abstand mal 0,75 betraegt; ZIEL ist die
+   * staerkste Stelle oben links. 26 Stufen sind deutlich mehr als die 19 von vorher und
+   * bleiben unterhalb dessen, was man als Farbe benennen wuerde.
+   */
+  function lichtStaerke(rgb) {
+    const ZIEL = 26;
+    const grund = [250, 249, 247];
+    const abstand = Math.max(...rgb.map((v, i) => Math.abs(v - grund[i])));
+    if (abstand < 8) return 0;
+    return Math.round(Math.min(0.3, ZIEL / (abstand * 0.75)) * 1000) / 1000;
+  }
+
   function lichtSetzen() {
     const c = S.customer;
     const wurzel = document.documentElement;
     const zuRgb = (hex) => { const n = parseInt(String(hex || "").slice(1), 16); return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255] : null; };
     const eins = c && c.gradientEnabled ? zuRgb(c.accentColor) : null;
-    if (!eins) { wurzel.style.removeProperty("--licht-1"); wurzel.style.removeProperty("--licht-2"); return; }
+    if (!eins) {
+      for (const n of ["--licht-1", "--licht-2", "--licht-3"]) wurzel.style.removeProperty(n);
+      return;
+    }
     const zwei = zuRgb(c.gradientColor2) || eins;
-    wurzel.style.setProperty("--licht-1", `rgba(${eins.join(", ")}, .13)`);
-    wurzel.style.setProperty("--licht-2", `rgba(${zwei.join(", ")}, .085)`);
+    for (const [name, farbe, anteil] of [["--licht-1", eins, 1], ["--licht-2", zwei, 0.72], ["--licht-3", eins, 0.36]]) {
+      wurzel.style.setProperty(name, `rgba(${farbe.join(", ")}, ${lichtStaerke(farbe) * anteil})`);
+    }
   }
 
   function schriftenLaden() {
@@ -155,6 +177,7 @@
     S.gerendert = S.screen;
     stage.innerHTML = `<div class="screen${wechsel ? " enter" : ""}">${html ? html() : ""}</div>`;
     kopfzeile();
+    markeKunde();
     testleiste();
     farbBlattSetzen();
     if (["website", "beschreibung"].includes(S.screen) && S.turnstileSiteKey && S.customer && !S.customer.authProvider) renderTurnstile();
@@ -261,6 +284,33 @@
       const ziel = window.scrollY + kacheln.getBoundingClientRect().top - kopf;
       window.scrollTo({ top: Math.max(0, ziel), behavior: "auto" });
     });
+  }
+
+  /**
+   * Das Logo des Kunden in der Kopfzeile. Erscheint erst, wenn die Website gelesen ist, und
+   * bleibt still weg, wenn keines erkannt wurde. Bewusst klein und ohne Rahmen: es soll
+   * auffallen, dass die Oberflaeche zum Kunden gehoert, nicht das Logo selbst.
+   * Bringt das Bild seinen eigenen Hintergrund mit (App-Kachel), bekommt es runde Ecken -
+   * sonst saehe ein dunkles Quadrat auf hellem Papier wie ein Aufkleber aus.
+   */
+  function markeKunde() {
+    const huelle = $("#marke-kunde");
+    if (!huelle) return;
+    const zeigen = Boolean(S.customer?.brandLogo);
+    huelle.hidden = !zeigen;
+    huelle.classList.toggle("kachel-logo", Boolean(S.customer?.brandLogoTile));
+    if (!zeigen) return;
+    const bild = $("#marke-kunde-bild");
+    const quelle = `${MOUNT}/api/brand-logo`;
+    if (bild.getAttribute("src") !== quelle) {
+      bild.removeAttribute("width");
+      bild.removeAttribute("height");
+      bild.alt = S.customer.company ? `Logo von ${S.customer.company}` : "Logo";
+      // Laesst sich das Bild nicht laden, verschwindet die Huelle wieder - lieber nichts als
+      // ein kaputtes Bildsymbol neben dem Produktnamen.
+      bild.onerror = () => { huelle.hidden = true; };
+      bild.src = quelle;
+    }
   }
 
   function go(screen, opts = {}) {
@@ -1128,8 +1178,11 @@
     const rgb = (hex) => { const n = parseInt(String(hex || "").slice(1), 16); return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(", ") : null; };
     const a1 = rgb(q.accentColor);
     if (a1 && q.gradientEnabled) {
-      document.documentElement.style.setProperty("--licht-1", `rgba(${a1}, .13)`);
-      document.documentElement.style.setProperty("--licht-2", `rgba(${rgb(q.gradientColor2) || a1}, .085)`);
+      const zahlen = (t) => t.split(",").map((x) => Number(x.trim()));
+      const st = lichtStaerke(zahlen(a1));
+      document.documentElement.style.setProperty("--licht-1", `rgba(${a1}, ${st})`);
+      document.documentElement.style.setProperty("--licht-2", `rgba(${rgb(q.gradientColor2) || a1}, ${Math.round(st * 720) / 1000})`);
+      document.documentElement.style.setProperty("--licht-3", `rgba(${a1}, ${Math.round(st * 360) / 1000})`);
     }
     const v = $("#picker-vorschau", form);
     if (v) v.style.background = hg;

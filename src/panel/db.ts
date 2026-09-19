@@ -358,6 +358,11 @@ migrateColumns("customers", [
   // Stillstands-Wache: Zeitpunkt der letzten Meldung an Paul, damit pro Stillstands-Phase genau
   // eine Mail rausgeht statt taeglich einer (siehe panel/standstill-watch.ts).
   ["standstill_alert_sent_at", "TEXT"],
+  // 19.09.2026: das auf der Website erkannte Logo. BEWUSST getrennt von `logo_url` - das ist
+  // der eigene Upload des Kunden und darf nie ueberschrieben werden. Die Kopfzeile zeigt den
+  // Upload, wenn es einen gibt, sonst dieses hier.
+  ["detected_logo_url", "TEXT"],
+  ["detected_logo_tile", "INTEGER NOT NULL DEFAULT 0"],
   ["accent_color", "TEXT"],
   ["watermark_text", "TEXT"],
   ["avoid_topics", "TEXT"],

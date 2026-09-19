@@ -9,7 +9,7 @@
 import { db, type CustomerRow } from "./db.js";
 import { backfillMissingImages, planCustomerWeek, recolorPlannedPosts, regeneratePlannedPostsForBranding, type PlanWeekOptions } from "./planning.js";
 import { listContentPillars } from "./credentials.js";
-import { analysiereWebsite, uebernehmeAnalyse, type DomainAnalysis } from "./start-analysis.js";
+import { analysiereWebsite, uebernehmeAnalyse, logoUebernehmen, type DomainAnalysis } from "./start-analysis.js";
 import { suggestFromWebsite } from "../anthropic.js";
 import { logUsageCost } from "./analytics.js";
 
@@ -85,6 +85,9 @@ export function runPreviewJob(customerId: string, opts: { website: string | null
     if (!ausCache) logUsageCost(customerId, "easy-onboarding-analyze", analyse.suggestion.costUsd ?? null);
     job.phase = "colors";
     uebernehmeAnalyse(customerId, opts.website, analyse);
+    // Das Logo danach: es haengt am Netz und darf den Lauf nicht aufhalten oder scheitern
+    // lassen. Ohne Logo bleibt die Kopfzeile still beim Standardaussehen.
+    await logoUebernehmen(customerId, analyse);
     const frisch = freshRow(customerId);
     job.found = {
       company: frisch?.company ?? row.company,

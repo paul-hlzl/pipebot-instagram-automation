@@ -516,6 +516,9 @@ function publicState(c: CustomerRow) {
       uiMode: c.ui_mode === "easy" ? "easy" : "classic",
       // Testlauf der Sandbox (start-testmode.ts): die Oberflaeche zeigt daraufhin die Testleiste.
       isTest: (c as { status?: string }).status === "test",
+      // Markenlogo fuer die Kopfzeile (19.09.2026): eigener Upload schlaegt erkanntes Logo.
+      brandLogo: Boolean(c.logo_url || (c as { detected_logo_url?: string | null }).detected_logo_url),
+      brandLogoTile: Boolean((c as { detected_logo_tile?: number }).detected_logo_tile) && !c.logo_url,
       // Easy Onboarding: ueber welchen Weg das Konto entstanden ist. Steuert im neuen Panel, ob
       // der E-Mail-Bestaetigungs-Hinweis ueberhaupt in Frage kommt (Auftrag Abschnitt 5).
       authProvider: c.auth_provider ?? null,
@@ -660,6 +663,38 @@ export function createPanelRouter(): Router {
         return;
       }
       res.sendFile(row.logo_url);
+    }),
+  );
+
+  /**
+   * Das Logo fuer die Kopfzeile. Zeigt den eigenen Upload des Kunden, wenn es einen gibt,
+   * sonst das auf seiner Website erkannte. Eigene Route statt /api/logo, damit das
+   * Upload-Verhalten (inklusive Loeschen) unveraendert bleibt.
+   */
+  router.get(
+    "/api/brand-logo",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).end();
+        return;
+      }
+      const row = db.prepare("SELECT logo_url, detected_logo_url FROM customers WHERE id = ?").get(c.id) as
+        | { logo_url: string | null; detected_logo_url: string | null }
+        | undefined;
+      const datei = row?.logo_url || row?.detected_logo_url;
+      if (!datei) {
+        res.status(404).end();
+        return;
+      }
+      try {
+        await fsPromises.access(datei);
+      } catch {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.sendFile(datei);
     }),
   );
 
