@@ -200,6 +200,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
    der Sekundaerfarbe - sekundaer wird ueber Gestaltung gesagt, nicht ueber eine andere Breite. */
 .auth-btn.mail-weg { background: transparent; color: var(--text-2); font-weight: 400; }
 .auth-btn.mail-weg:hover { background: var(--wash); color: var(--text); border-color: var(--text-2); }
+.auth-schon { margin-top: 16px; font-size: var(--t-small); color: var(--text-2); line-height: 1.5; }
 .auth-eintrag { display: grid; gap: 6px; }
 .auth-notiz { font-size: var(--t-small); color: var(--text-2); padding: 0 4px; line-height: 1.45; }
 .auth-btn[disabled] { cursor: default; }

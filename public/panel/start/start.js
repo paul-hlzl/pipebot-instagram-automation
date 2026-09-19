@@ -196,6 +196,10 @@
                unter dem Trenner und die ruhigere Gestaltung - nicht eine andere Breite. -->
           <button type="button" class="auth-btn mail-weg" data-go="email">Mit E-Mail fortfahren</button>
         </div>
+        <!-- Wiederkehrende brauchen keinen eigenen Weg, nur die Gewissheit, dass derselbe Knopf
+             auch anmeldet (Auftrag: kein sichtbarer Unterschied zwischen Registrieren und
+             Anmelden). Deshalb ein Satz statt eines zweiten Einstiegs. -->
+        <p class="auth-schon">Schon ein Konto? Dieselben Knöpfe melden dich an - wir erkennen dich an deiner Adresse.</p>
         <p class="hint">Mit dem Fortfahren stimmst du zu, dass Pipeline AI Solutions deine Angaben speichert, um Beiträge für dich vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
       </section>`;
   }
