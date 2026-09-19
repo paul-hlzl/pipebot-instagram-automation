@@ -498,7 +498,7 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
    dass die Oberflaeche zum Kunden gehoert, nicht das Logo. Eine feine senkrechte Linie
    trennt es vom Produktnamen, damit es nicht wie Teil von "Pipeflow" wirkt. */
 .marke-kunde {
-  display: flex; align-items: center; min-width: 0;
+  display: flex; align-items: center; min-width: 0; gap: 10px;
   /* margin-right:auto haelt das Logo am Produktnamen - .top verteilt sonst mit
      space-between und schoebe es in die Bildschirmmitte. */
   margin: 2px auto 0 14px; padding-left: 14px; border-left: 1px solid var(--linie);
@@ -509,12 +509,22 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
    Schriftmarke von Channoine, die bei 26 px nur noch ein Fleck war. Der Pipeflow-Schriftzug
    daneben ist 27 px, damit steht beides gleichwertig ohne dass das Kundenlogo lauter wird. */
 .marke-kunde img { display: block; height: 32px; width: auto; max-width: 168px; object-fit: contain; }
+.marke-kunde img[hidden], .marke-kunde-name[hidden] { display: none; }
+/* Das ✕ ist Verbindung, nicht Gewicht: klein und grau. */
+.marke-x { font-size: 12px; color: var(--text-2); line-height: 1; }
+/* Der Name als Text: gleich hoch wie der Pipeflow-Schriftzug wirkt, aber in Grotesk und in der
+   Markenfarbe. Lange Namen werden mit Auslassung gekappt, bevor sie die Kopfzeile sprengen. */
+.marke-kunde-name {
+  font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 /* App-Kachel mit eigenem Hintergrund: runde Ecken, sonst klebt ein Quadrat auf dem Papier. */
 .marke-kunde.kachel-logo img { border-radius: 7px; height: 28px; max-width: 28px; }
 @keyframes logo-auf { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 @media (max-width: 420px) {
-  .marke-kunde { margin-left: 10px; padding-left: 10px; }
+  .marke-kunde { margin-left: 10px; padding-left: 10px; gap: 8px; }
   .marke-kunde img { height: 26px; max-width: 104px; }
+  .marke-kunde-name { font-size: 15px; max-width: 108px; }
 }
 
 /* ---- Ladebildschirm: echte Zwischenergebnisse statt Schrittliste ------------------------

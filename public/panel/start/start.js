@@ -296,19 +296,34 @@
   function markeKunde() {
     const huelle = $("#marke-kunde");
     if (!huelle) return;
-    const zeigen = Boolean(S.customer?.brandLogo);
-    huelle.hidden = !zeigen;
-    huelle.classList.toggle("kachel-logo", Boolean(S.customer?.brandLogoTile));
-    if (!zeigen) return;
+    const c = S.customer;
+    // Erst wenn die Firmendaten da sind - vorher steht als Firma nur der aus der E-Mail
+    // geratene Name, und "Pipeflow ✕ paul" waere kein Markenauftritt.
+    const bekannt = Boolean(c && (c.brandLogo || c.industry || c.website));
+    huelle.hidden = !bekannt;
+    if (!bekannt) return;
     const bild = $("#marke-kunde-bild");
+    const name = $("#marke-kunde-name");
+    huelle.classList.toggle("kachel-logo", Boolean(c.brandLogoTile));
+    const alsText = () => {
+      bild.hidden = true;
+      name.hidden = false;
+      name.textContent = c.company || "";
+      name.title = c.company || "";
+      // Markenfarbe: sie ist schon auf 4,5:1 gegen Weiss gerechnet, also dunkel genug als
+      // Schrift auf dem Papiergrund. Ohne erkannte Farbe bleibt es die Textfarbe.
+      name.style.color = c.gradientEnabled && c.accentColor ? c.accentColor : "";
+    };
+    if (!c.brandLogo) { alsText(); return; }
+    name.hidden = true;
+    bild.hidden = false;
     const quelle = `${MOUNT}/api/brand-logo`;
     if (bild.getAttribute("src") !== quelle) {
       bild.removeAttribute("width");
       bild.removeAttribute("height");
-      bild.alt = S.customer.company ? `Logo von ${S.customer.company}` : "Logo";
-      // Laesst sich das Bild nicht laden, verschwindet die Huelle wieder - lieber nichts als
-      // ein kaputtes Bildsymbol neben dem Produktnamen.
-      bild.onerror = () => { huelle.hidden = true; };
+      bild.alt = c.company ? `Logo von ${c.company}` : "Logo";
+      // Laedt das Logo nicht, steht der Name da - nie ein kaputtes Bildsymbol, nie eine Luecke.
+      bild.onerror = alsText;
       bild.src = quelle;
     }
   }
@@ -970,7 +985,7 @@
     return `
       <section>
         <div class="dash-kopf">
-          <div><h1>So sehen deine nächsten Tage aus</h1><p class="lede" style="margin-top:8px">${esc(c.company)}</p></div>
+          <div><h1>So sehen deine nächsten Tage aus</h1></div>
           <!-- Textlink, kein gefuellter Knopf: die Hauptsache dieses Bildschirms sind die
                Beitraege darunter, nicht ein zusaetzlicher Beitrag (Entwurf B1). -->
           <button type="button" class="kopf-link" id="btn-jetzt-posten">Jetzt posten</button>

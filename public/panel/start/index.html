@@ -82,7 +82,13 @@
   <!-- Markenlogo des Kunden, sobald die Website gelesen ist. Steht rechts neben dem
        Pipeflow-Schriftzug, durch eine feine Linie getrennt, und bleibt leer, wenn keines
        erkannt wurde (Auftrag 19.09.2026). -->
-  <span class="marke-kunde" id="marke-kunde" hidden><img id="marke-kunde-bild" alt="" width="0" height="0"></span>
+  <!-- "Pipeflow ✕ Firma" (19.09.2026): das Logo, wenn eines gefunden wurde, sonst der Firmenname
+       als Text in der Markenfarbe - an derselben Stelle. Die Kopfzeile wirkt nie leer. -->
+  <span class="marke-kunde" id="marke-kunde" hidden>
+    <span class="marke-x" aria-hidden="true">✕</span>
+    <img id="marke-kunde-bild" alt="" width="0" height="0" hidden>
+    <span class="marke-kunde-name" id="marke-kunde-name" hidden></span>
+  </span>
   <nav class="top-actions" id="top-actions" aria-label="Konto"></nav>
 </header>
 

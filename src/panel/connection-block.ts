@@ -12,6 +12,48 @@
  */
 import { db, nowIso, type ConnectionRow } from "./db.js";
 import { ConnectionBlockedError, detectPlatformBlock, type PlatformBlock } from "./platform-blocks.js";
+import { sendMailBestEffort } from "./mailer.js";
+
+/** Derselbe Empfaenger wie bei der Stillstands-Wache, mit derselben Variable umstellbar. */
+function alarmEmpfaenger(): string | undefined {
+  return process.env.PANEL_ALERT_EMAIL ?? "office@pipebot.at";
+}
+
+/**
+ * Meldet eine NEUE Sperre per Mail (19.09.2026) - an den Betreiber, und an den Kunden, weil nur
+ * der sie beheben kann. Genau einmal je Sperre: markConnectionBlocked schreibt nur, wenn der
+ * Code neu ist, und nur dann kommt dieser Aufruf. Ein Fehler beim Mailen bricht nichts ab
+ * (sendMailBestEffort), die Sperre selbst ist da schon vermerkt.
+ */
+function sperreMelden(customerId: string, provider: string, block: PlatformBlock): void {
+  const kunde = db.prepare("SELECT company, email FROM customers WHERE id = ?").get(customerId) as { company: string; email: string } | undefined;
+  const name = kunde?.company ?? customerId;
+  const kanal = provider === "instagram" ? "Instagram" : provider === "linkedin" ? "LinkedIn" : provider;
+  const panel = (process.env.PANEL_BASE_URL ?? "").replace(/\/$/, "");
+  const an = alarmEmpfaenger();
+  if (an) {
+    sendMailBestEffort({
+      to: an,
+      subject: `[Pipeflow] ${kanal}-Verbindung gesperrt: ${name}`,
+      text:
+        `Die ${kanal}-Verbindung von ${name} (${kunde?.email ?? "-"}) wurde als gesperrt vermerkt.\n\n` +
+        `Grund (${block.code}): ${block.reason}\n\n` +
+        `Kunden-id: ${customerId}\n` +
+        `Bis zum Neu-Verbinden wird auf diesem Kanal nichts mehr veroeffentlicht. Diese Meldung kommt einmal je Sperre.`,
+    });
+  }
+  if (kunde?.email) {
+    sendMailBestEffort({
+      to: kunde.email,
+      subject: `${kanal} ist nicht mehr verbunden - Pipeflow`,
+      text:
+        `Hallo,\n\n${block.reason}\n\n` +
+        `Solange die Verbindung fehlt, veroeffentlicht Pipeflow auf ${kanal} nichts; deine geplanten Beitraege bleiben erhalten.\n\n` +
+        (panel ? `Neu verbinden: ${panel}/panel/\n\n` : "") +
+        `Pipeflow`,
+    });
+  }
+}
 
 // Weiterreichen, damit Aufrufer nur ein Modul kennen muessen.
 export { ConnectionBlockedError, detectPlatformBlock, type PlatformBlock };
@@ -37,7 +79,9 @@ export function markConnectionBlocked(customerId: string, provider: string, bloc
   const result = db
     .prepare("UPDATE connections SET blocked_at = ?, blocked_code = ?, blocked_reason = ?, updated_at = ? WHERE customer_id = ? AND provider = ?")
     .run(nowIso(), block.code, block.reason, nowIso(), customerId, provider);
-  return result.changes > 0;
+  const neu = result.changes > 0;
+  if (neu) sperreMelden(customerId, provider, block);
+  return neu;
 }
 
 /** Hebt die Sperre auf - beim Neu-Verbinden und nach jedem erfolgreichen Aufruf. */
