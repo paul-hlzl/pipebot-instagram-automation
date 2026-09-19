@@ -112,5 +112,10 @@ for (const breite of [360, 1440]) {
   await ctx.close();
 }
 await browser.close();
+// Ueber die richtige Route beenden, nicht per SQL: nur so wird auch die abgelegte Logodatei
+// mitgeloescht (siehe logoDateiWeg in start-testmode.ts).
+await fetch(`${BASE}${MOUNT}/api/start/test/end`, { method: "POST", headers: { cookie } });
+const verwaist = fs.readdirSync("data/logos").filter((f) => f.startsWith("auto-"));
+ok("Der Testlauf laesst keine Logodatei zurueck", verwaist.length === 0, verwaist.join(", "));
 console.log(fehler ? `${fehler} Problem(e)` : "alles gruen");
 process.exit(fehler ? 1 : 0);

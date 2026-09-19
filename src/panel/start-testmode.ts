@@ -24,6 +24,21 @@ import { timingSafeEqual } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import { db, nowIso, type CustomerRow } from "./db.js";
 import { randomToken, sha256 } from "./crypto.js";
+import fs from "node:fs";
+import path from "node:path";
+import { PACKAGE_ROOT } from "../config.js";
+
+/** Das automatisch geholte Logo liegt als Datei, nicht nur als Zeile - sonst bleiben nach
+ *  jedem Testlauf verwaiste PNGs in data/logos liegen (am 19.09.2026 waren es vier). */
+function logoDateiWeg(customerId: string): void {
+  const row = db.prepare("SELECT detected_logo_url FROM customers WHERE id = ?").get(customerId) as { detected_logo_url: string | null } | undefined;
+  const datei = row?.detected_logo_url ?? path.join(PACKAGE_ROOT, "data/logos", `auto-${customerId}.png`);
+  try {
+    fs.unlinkSync(datei);
+  } catch {
+    // Keine Datei da - nichts zu tun.
+  }
+}
 
 function kundeLaden(id: string): CustomerRow {
   return db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as CustomerRow;
@@ -69,6 +84,7 @@ export function testkundeLoeschen(customerId: string): void {
   const row = db.prepare("SELECT id, status FROM customers WHERE id = ?").get(customerId) as { id: string; status: string } | undefined;
   if (!row) return;
   if (row.status !== "test") throw new Error(`Abgelehnt: ${customerId} ist kein Testkunde (status=${row.status}).`);
+  logoDateiWeg(customerId);
   const loeschen = db.transaction(() => {
     for (const tabelle of tabellenMitKunde()) db.prepare(`DELETE FROM ${tabelle} WHERE customer_id = ?`).run(customerId);
     db.prepare("DELETE FROM customers WHERE id = ?").run(customerId);
@@ -93,6 +109,7 @@ export function kontoZuruecksetzen(customerId: string): void {
   if (!sandboxBetrieb()) throw new Error("Abgelehnt: Zuruecksetzen gibt es nur in der Sandbox.");
   const row = db.prepare("SELECT id FROM customers WHERE id = ?").get(customerId) as { id: string } | undefined;
   if (!row) throw new Error(`Abgelehnt: ${customerId} gibt es nicht.`);
+  logoDateiWeg(customerId);
   const zuruecksetzen = db.transaction(() => {
     for (const tabelle of tabellenMitKunde()) {
       if (NICHT_LOESCHEN.has(tabelle)) continue;
@@ -105,6 +122,7 @@ export function kontoZuruecksetzen(customerId: string): void {
       `UPDATE customers SET tour_done_at = NULL, website = NULL, industry = NULL, about = NULL,
          tone = 'sachlich', custom_hashtags = NULL, avoid_topics = NULL, watermark_text = NULL,
          accent_color = NULL, gradient_color2 = NULL, gradient_enabled = 0, gradient_direction = 'diagonal',
+         detected_logo_url = NULL, detected_logo_tile = 0,
          branding_last_changed_at = NULL, skipped_providers = NULL, customer_paused = 0, updated_at = ?
        WHERE id = ?`,
     ).run(nowIso(), customerId);
