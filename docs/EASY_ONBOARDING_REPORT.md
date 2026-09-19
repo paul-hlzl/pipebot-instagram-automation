@@ -14,12 +14,21 @@ echtem Chromium bei 360 und 1440 px: `docs/easy-onboarding/shots/`. Farbproben:
 
 ## 1. Anmeldung über Google, Microsoft, Apple - Stand und Aufwand
 
-**Stand 19.09.2026, 11:05 Uhr:** Microsoft ist eingetragen und der Knopf ist live geschaltet -
-aber der gelieferte Clientschlüssel ist die **Geheimnis-ID**, nicht der **Wert**, und wird von
-Microsoft abgelehnt (AADSTS7000215, zweimal gegengeprüft: einmal mit dem eingetragenen Wert,
-einmal mit einem absichtlich falschen - beide Male dieselbe Ablehnung). Bis der richtige Wert da
-ist, bricht die Anmeldung im letzten Schritt ab und zeigt „Die Anmeldung mit Microsoft ist noch
-nicht fertig eingerichtet." Google und Apple sind unverändert ohne Zugangsdaten.
+**Stand 19.09.2026, 11:45 Uhr: Microsoft ist scharf.** Client-ID und Client-Secret-Wert liegen
+in `/root/staging.ecosystem.json` (Rechte 600, außerhalb des Repos), der Knopf ist ein echter
+Login, `AUTH_MICROSOFT_TENANT` ist bewusst nicht gesetzt (also `common`). Der Schlüssel ist
+direkt bei Microsoft gegengeprüft: eine Client-Credentials-Anfrage liefert HTTP 200 mit Token,
+der Schlüssel wird also akzeptiert. Der erste Anlauf schlug fehl, weil statt des Wertes die
+Geheimnis-ID geliefert worden war (AADSTS7000215) - daher der neue `AuthNotConfiguredError`, der
+diesen Fall als „noch nicht fertig eingerichtet" statt als „versuch es noch einmal" meldet.
+
+**Was ich NICHT prüfen kann:** ob die Redirect-URI in Entra hinterlegt ist. Microsoft prüft sie
+erst NACH der Anmeldung; eine Anfrage mit absichtlich falscher Adresse liefert von außen exakt
+dieselbe Anmeldemaske (mit und ohne `prompt=none` getestet). Fehlt sie, bricht der Login nach
+der Passworteingabe mit AADSTS50011 ab. Einzutragen ist zeichengenau:
+`https://mcp.pipebot.at/panel/sandbox/auth/microsoft/callback`
+
+Google und Apple sind unverändert ohne Zugangsdaten.
 
 **Was fehlt und nur du anlegen kannst:** die Anbieter-Apps selbst und ihre Schlüssel. Der
 Auftrag sagt ausdrücklich, dass du sie anlegst, nicht ich.
