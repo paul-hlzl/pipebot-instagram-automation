@@ -49,7 +49,7 @@
     screen: "konto", gerendert: null, providers: [], authProviders: [], aiAvailable: false, turnstileSiteKey: null, sandbox: false,
     customer: null, connections: [], skipped: new Set(),
     status: null, approvals: [], verlauf: null,
-    notice: null, grenze: null, tagWahl: null, editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
+    notice: null, grenze: null, tagWahl: null, jobFertigSeit: 0, vorladen: false, wochenSig: "", editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
     beschreibung: "", website: "", leerlauf: 0,
   };
   const angemeldet = () => Boolean(S.customer);
@@ -528,7 +528,7 @@
           ${schritt(nachLesen ? "done" : "open", "Themen erkannt", gefunden?.pillars?.length ? esc(gefunden.pillars.join(", ")) : "")}
           ${schritt(nachLesen ? "done" : "open", "Farben übernommen", farbPunkte)}
           ${schritt(textFertig && nachLesen ? "done" : nachLesen ? "active" : "open", "Beiträge entworfen", job.total ? `${job.done} von ${job.total}${!textFertig && langsam ? " · dauert gerade etwas länger …" : ""}` : "")}
-          ${schritt(bilderFertig ? "done" : (st?.posts?.length ? "active" : "open"), "Bilder erstellt", bildZiel ? `${Math.min(bildFertig, bildZiel)} von ${bildZiel}` : "")}
+          ${schritt(bilderFertig && !S.vorladen ? "done" : (st?.posts?.length ? "active" : "open"), "Bilder erstellt", S.vorladen ? "werden geladen …" : bildZiel ? `${Math.min(bildFertig, bildZiel)} von ${bildZiel}` : "")}
         </ol>
       </section>`;
   }
@@ -964,6 +964,70 @@
       return null;
     }
   }
+  /* ----------------------- Der Ergebnisbildschirm erscheint fertig -------------------------
+   * Vorher wurde umgeschaltet, sobald EIN Beitrag existierte - der Rest tropfte danach in die
+   * Seite, Karte fuer Karte, und die Woche sprang bei jedem Nachzuegler. Das sah kaputt aus,
+   * auf beiden Bildschirmgroessen (Ansage vom 19.09.2026).
+   *
+   * Jetzt wird gewartet, bis der Lauf fertig ist UND jedes Bild da ist, und danach werden die
+   * Bilder noch im Hintergrund geladen, bevor der Bildschirm kommt. Sonst waere das Popp-Problem
+   * nur verschoben: der Server meldet fertig, der Browser laedt aber erst beim Anzeigen.
+   *
+   * Zwei Notbremsen, damit ein einzelnes haengendes Bild nie den ganzen Bildschirm blockiert.
+   */
+  /** Gesamtdeckel ab dem Klick auf "Vorschau erstellen". */
+  const MAX_WARTEN_MS = 75_000;
+  /** Nachfrist ab dem Moment, in dem der Lauf fertig gemeldet ist, aber Bilder fehlen. */
+  const NACHFRIST_MS = 15_000;
+  /** Wie lange der Browser hoechstens auf die Bilddateien selbst wartet. */
+  const VORLADEN_MS = 9_000;
+
+  function alleBilderDa(daten) {
+    // Solange noch geschrieben wird, ist NICHTS vollstaendig - auch wenn der eine Beitrag, der
+    // schon da ist, zufaellig sein Bild hat. Genau daran ist der erste Anlauf gescheitert: der
+    // Bildschirm kam mit einem einzigen Tag und fuellte sich danach sichtbar auf.
+    const job = daten.job || {};
+    if (!["done", "error", "idle"].includes(job.phase)) return false;
+    const posts = (daten.posts || []).filter((p) => p.status !== "rejected");
+    if (!posts.length) return false;
+    // Ohne erkannte Markenfarben bekommen unbestaetigte Konten absichtlich nur die ersten
+    // Bilder - dann ist "alle da" erreicht, sobald es nicht mehr wird.
+    const ziel = erwarteteBilder();
+    return posts.filter((p) => p.imageUrl).length >= Math.min(ziel, posts.length);
+  }
+
+  /** Laedt die Bilder in den Browser-Zwischenspeicher. Wartet hoechstens VORLADEN_MS - ein
+   *  langsames Bild darf den Bildschirm verzoegern, aber nicht verhindern. */
+  function bilderVorladen(urls) {
+    if (!urls.length) return Promise.resolve();
+    return new Promise((fertig) => {
+      let offen = urls.length;
+      const ab = setTimeout(fertig, VORLADEN_MS);
+      const eins = () => { if (--offen <= 0) { clearTimeout(ab); fertig(); } };
+      for (const u of urls) {
+        const bild = new Image();
+        bild.onload = eins;
+        bild.onerror = eins;
+        bild.src = u;
+      }
+    });
+  }
+
+  async function zumErgebnis(daten) {
+    S.poll = null;
+    const urls = (daten.posts || []).map((p) => p.imageUrl).filter(Boolean);
+    if (urls.length) {
+      // Der letzte Schritt bekommt seine eigene Zeile, damit der Ladezustand auch in diesen
+      // Sekunden sichtbar arbeitet und nicht einfach steht.
+      S.vorladen = true;
+      render();
+      await bilderVorladen(urls);
+      S.vorladen = false;
+    }
+    S.wochenSig = wochenSignatur();
+    go("ergebnis");
+  }
+
   function pollStarten() {
     if (S.poll) return;
     S.poll = -1;
@@ -974,11 +1038,15 @@
       const laeuft = !["done", "error", "idle"].includes(job.phase);
       if (S.screen === "arbeitet") {
         if (job.phase === "error" && !daten.posts.length) { S.fehlerText = job.message || "Die Beiträge konnten nicht erstellt werden."; S.poll = null; go("fehler"); return; }
-        if (daten.posts.length && (job.done >= 1 || !laeuft)) { S.poll = null; go("ergebnis"); return; }
         if (!laeuft && !daten.posts.length && job.phase === "idle") { S.fehlerText = "Die Vorbereitung wurde unterbrochen."; S.poll = null; go("fehler"); return; }
+        if (!laeuft && !S.jobFertigSeit) S.jobFertigSeit = Date.now();
+        const zuLange = Date.now() - S.arbeitSeit > MAX_WARTEN_MS
+          || (S.jobFertigSeit && Date.now() - S.jobFertigSeit > NACHFRIST_MS);
+        if (daten.posts.length && (alleBilderDa(daten) || zuLange)) { await zumErgebnis(daten); return; }
         render();
       } else if (S.screen === "ergebnis" || S.screen === "dashboard") {
-        wocheAktualisieren();
+        const sig = wochenSignatur();
+        if (sig !== S.wochenSig) { S.wochenSig = sig; wocheAktualisieren(); }
         S.leerlauf = laeuft ? 0 : S.leerlauf + 1;
         const wartetAufBilder = daten.posts.some((p) => !p.imageUrl) && S.customer?.emailVerified;
         if (!laeuft && (!wartetAufBilder || S.leerlauf > 15)) { pollStoppen(); return; }
@@ -990,7 +1058,35 @@
   function pollStoppen() { if (S.poll) { if (S.poll !== -1) clearTimeout(S.poll); S.poll = null; } }
   /** Nur die Woche neu zeichnen, damit ein offenes Inline-Feld oder ein aufgeklappter Text nicht
    *  verschwindet, wenn im Hintergrund ein Beitrag fertig wird. */
+  /** Was sich an der Woche ueberhaupt aendern kann. Ist die Zeichenkette gleich geblieben,
+   *  wird nichts angefasst - sonst zeichnete jeder Abruf neu, und die Seite zuckte. */
+  function wochenSignatur() {
+    const st = S.status;
+    return JSON.stringify({
+      phase: st?.job?.phase ?? "", done: st?.job?.done ?? 0, total: st?.job?.total ?? 0,
+      posts: (st?.posts || []).map((p) => `${p.id}|${p.status}|${p.imageUrl ? 1 : 0}|${p.headline || ""}`),
+    });
+  }
+
   function wocheAktualisieren() {
+    // Ergebnisbildschirm: Streifen und Tagesdetail an Ort und Stelle tauschen. Ein voller
+    // render() waere hier falsch - er warf die Seite neu auf und liess sie sichtbar springen.
+    const streifen = $(".streifen");
+    if (streifen && S.screen === "ergebnis") {
+      const { posts, tage } = tageMitBeitraegen();
+      if (!tage.length) { render(); return; }
+      const aktiv = gewaehlterTag(tage);
+      const offen = new Set($$(".post.is-open").map((el) => el.dataset.id));
+      const tmp = document.createElement("div");
+      tmp.innerHTML = streifenHtml(posts, tage, aktiv) + tagDetailHtml(posts, tage, aktiv);
+      const neuerStreifen = tmp.querySelector(".streifen");
+      const neuesDetail = tmp.querySelector(".tagdetail");
+      const altesDetail = $(".tagdetail");
+      if (neuerStreifen) streifen.replaceWith(neuerStreifen);
+      if (neuesDetail && altesDetail) altesDetail.replaceWith(neuesDetail);
+      offen.forEach((id) => $(`.post[data-id="${CSS.escape(id)}"]`)?.classList.add("is-open"));
+      return;
+    }
     const woche = $("#woche");
     if (!woche) { render(); return; }
     const offen = new Set($$(".post.is-open", woche).map((el) => el.dataset.id));
@@ -1079,6 +1175,7 @@
       return;
     }
     S.arbeitSeit = Date.now();
+    S.jobFertigSeit = 0;
     try {
       const r = await api("POST", "/api/start/preview", body);
       uebernehmen(r);
@@ -1482,8 +1579,14 @@
       if (eingerichtet()) { go(h === "einstellungen" ? "einstellungen" : h === "dashboard" ? "dashboard" : "willkommen"); return; }
       const job = S.status?.job;
       const laeuft = job && !["done", "error", "idle"].includes(job.phase);
-      if (S.status?.posts?.length) go("ergebnis");
-      else if (laeuft) { S.arbeitSeit = Date.now(); go("arbeitet"); }
+      // Neu geladen, waehrend noch gearbeitet wird: zurueck auf den Ladezustand, nicht in
+      // eine halb gefuellte Woche.
+      if (laeuft || (S.status?.posts?.length && !alleBilderDa(S.status))) { S.arbeitSeit = Date.now(); S.jobFertigSeit = 0; go("arbeitet"); }
+      // Auch beim Neuladen erst vorladen: sonst tropfen die Bilder hier genauso nach wie
+      // frueher beim ersten Mal, nur dass es niemandem auffaellt, weil sie meist schon im
+      // Zwischenspeicher des Browsers liegen. Beim ersten Neuladen auf einem anderen Geraet
+      // taeten sie das nicht.
+      else if (S.status?.posts?.length) { await zumErgebnis(S.status); }
       else go("website", { keepNotice: true });
       return;
     }

@@ -108,7 +108,11 @@ export function runPreviewJob(customerId: string, opts: { website: string | null
       console.log(`[start] ${customerId}: Markenfarben erkannt, Bilder werden lokal gerendert - kein Bilderdeckel.`);
     }
     const result = await planCustomerWeek(frisch ?? row, {
-      concurrency: 3,
+      // 6 statt 3 (19.09.2026): der Kunde wartet waehrenddessen auf einen leeren Bildschirm.
+      // Gemessen sank das Schreiben von 13,5 auf 8,2 Sekunden. Die Wiederholungssperre haelt
+      // trotzdem, weil Pruefen und Belegen synchron in einem Schritt passieren (planning.ts):
+      // derselbe Lauf kam auf 0 von 45 auffaelligen Paaren, hoechste Aehnlichkeit 0,20.
+      concurrency: 6,
       feature: "easy-onboarding-preview",
       imageBudget,
       postBudget: opts.postBudget,
@@ -165,7 +169,7 @@ export function runAdjustJob(customerId: string, keepImageless: boolean): StartJ
     if (!row) throw new Error("Kunde nicht gefunden");
     const result = await regeneratePlannedPostsForBranding(row, true, {
       keepImageless,
-      concurrency: 3,
+      concurrency: 6,
       onProgress: (done, total, errors) => {
         job.done = done;
         job.total = total;
@@ -175,7 +179,7 @@ export function runAdjustJob(customerId: string, keepImageless: boolean): StartJ
     if (result.updated === 0 && result.errors > 0) throw new Error("Die Beiträge konnten nicht neu geschrieben werden.");
     // Neue Slots (z. B. nach geaendertem Rhythmus) gleich mit - Budgets wie beim ersten Lauf.
     const pillars = listContentPillars(row.id);
-    await planCustomerWeek(row, { pillars, concurrency: 3, feature: "easy-onboarding-adjust", ...(keepImageless ? { imageBudget: 0 } : {}) });
+    await planCustomerWeek(row, { pillars, concurrency: 6, feature: "easy-onboarding-adjust", ...(keepImageless ? { imageBudget: 0 } : {}) });
   })()
     .then(() => finish(job))
     .catch((err) => {
