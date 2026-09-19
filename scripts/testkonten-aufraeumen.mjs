@@ -19,11 +19,16 @@ const dbPfad = args.includes("--db") ? args[args.indexOf("--db") + 1] : "/root/m
 const nurZeigen = args.includes("--zeigen");
 const db = new Database(dbPfad);
 
+// Die beiden festen Test-Kunden aus docs/SANDBOX.md bleiben stehen: test-start.mjs braucht
+// "Testfirma Eins" als bekannte Adresse, und ihre Zugangslinks stehen in /root/sandbox-keys.env.
+const GESCHUETZT = ["test1@sandbox.invalid", "test2@sandbox.invalid"];
+
 const treffer = db.prepare(`
   SELECT id, email, company, status, created_at FROM customers
-   WHERE email LIKE '%@sandbox.invalid' OR email LIKE '%@example.invalid' OR status = 'test'
+   WHERE (email LIKE '%@sandbox.invalid' OR email LIKE '%@example.invalid' OR status = 'test')
+     AND email NOT IN (${GESCHUETZT.map(() => "?").join(",")})
    ORDER BY created_at
-`).all();
+`).all(...GESCHUETZT);
 
 console.log(`Datenbank: ${dbPfad}`);
 console.log(`Gefunden: ${treffer.length} Testkonto/-konten`);
