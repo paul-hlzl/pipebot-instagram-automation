@@ -115,7 +115,9 @@ await browser.close();
 // Ueber die richtige Route beenden, nicht per SQL: nur so wird auch die abgelegte Logodatei
 // mitgeloescht (siehe logoDateiWeg in start-testmode.ts).
 await fetch(`${BASE}${MOUNT}/api/start/test/end`, { method: "POST", headers: { cookie } });
-const verwaist = fs.readdirSync("data/logos").filter((f) => f.startsWith("auto-"));
+// Gemeint sind die Dateien der TESTLAEUFE (cus_test_...). Normale Sandbox-Konten duerfen ihr
+// Logo behalten - sonst schlaegt die Pruefung an, sobald jemand vorher einen Durchgang gefahren hat.
+const verwaist = fs.readdirSync("data/logos").filter((f) => f.startsWith("auto-cus_test_"));
 ok("Der Testlauf laesst keine Logodatei zurueck", verwaist.length === 0, verwaist.join(", "));
 console.log(fehler ? `${fehler} Problem(e)` : "alles gruen");
 process.exit(fehler ? 1 : 0);

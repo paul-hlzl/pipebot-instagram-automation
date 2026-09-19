@@ -43,6 +43,107 @@ if (!fs.existsSync(GROSSES_FOTO)) {
     .jpeg({ quality: 96 }).toFile(GROSSES_FOTO);
 }
 
+
+/**
+ * Die vier Fragen, die an JEDEM Bildschirm gelten (Auftrag 19.09.2026): laeuft etwas ueber den
+ * Rand, ist eine Tippflaeche kleiner als 44 Pixel, ueberlappen sich Bedienelemente, stimmen die
+ * Groessenverhaeltnisse. Wird an jeder Station aufgerufen, bei 360 und bei 1440.
+ */
+async function pruefeBildschirm(page, name, breite) {
+  const b = await page.evaluate((vw) => {
+    const sichtbar = (e) => {
+      const r = e.getBoundingClientRect();
+      const st = getComputedStyle(e);
+      return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none" && Number(st.opacity) > 0.05;
+    };
+    // Absichtlich aus dem Bild geschoben: der Sprunglink fuer die Tastatur. Er ist kein Tippziel
+    // und kein Ueberlauf - er wird erst sichtbar, wenn jemand mit Tab darauf landet.
+    const versteckt = (e) => e.closest(".skip-link, .visually-hidden, [aria-hidden=true]") !== null;
+    // Ein Streifen, der bewusst seitlich scrollt, ist kein Ueberlauf der Seite.
+    const imStreifen = (e) => {
+      for (let p = e.parentElement; p; p = p.parentElement) {
+        const ox = getComputedStyle(p).overflowX;
+        if (ox === "auto" || ox === "scroll") return true;
+      }
+      return false;
+    };
+    // Ist ein Blatt offen, gilt nur das Blatt - was darunter liegt, ist verdeckt und nicht bedienbar.
+    const blatt = document.querySelector("#sheet-overlay:not([hidden])");
+    const raum = blatt ?? document;
+    // Ein <span class="chip"> ist ein Etikett (die Themen in der Uebersicht), kein Bedienelement -
+    // bedienbar ist es erst mit Knopf oder Feld darin.
+    const bedienbar = (e) => !(e.tagName === "SPAN" && e.classList.contains("chip") && !e.querySelector("button, input"));
+    const bedien = [...raum.querySelectorAll("button, a[href], input:not([type=hidden]), select, textarea, [role=button], .link, .chip, label.chip")]
+      .filter((e) => sichtbar(e) && !versteckt(e) && bedienbar(e));
+    const ueberRand = [...document.querySelectorAll("body *")].filter((e) => {
+      if (!sichtbar(e) || versteckt(e) || imStreifen(e)) return false;
+      const r = e.getBoundingClientRect();
+      return r.right > vw + 1 || r.left < -1;
+    }).map((e) => `${e.tagName.toLowerCase()}.${(e.className || "").toString().split(" ")[0]}@${Math.round(e.getBoundingClientRect().right)}`);
+    const abgeschnitten = [...raum.querySelectorAll("h1, h2, h3, p, span, button, label")].filter((e) => {
+      if (!sichtbar(e) || versteckt(e) || e.children.length) return false;
+      const st = getComputedStyle(e);
+      if (st.textOverflow === "ellipsis" || st.overflow === "hidden") return false;
+      return e.scrollWidth > e.clientWidth + 2;
+    }).map((e) => (e.textContent || "").trim().slice(0, 24));
+    // Ein Link MITTEN im Satz ("Datenschutzerklaerung", "Instagram verbinden" in der Hinweiszeile)
+    // laesst sich nicht auf 44 Pixel bringen, ohne den Satz auseinanderzureissen; ein Versuch mit
+    // negativem Aussenabstand hat am 19.09. ueberlappende Trefferflaechen erzeugt, sobald die
+    // Zeile umbricht. Solche Links sind hier ausgenommen - geprueft wird jedes eigenstaendige
+    // Bedienelement. 43,5 statt 44, weil ein Element mit min-height:44px rechnerisch 43,99 misst.
+    const imSatz = (e) => {
+      if (getComputedStyle(e).display !== "inline") return false;
+      const p = e.parentElement;
+      if (!p) return false;
+      const text = (p.textContent || "").trim().length - (e.textContent || "").trim().length;
+      return text > 12;
+    };
+    const klein = bedien.filter((e) => e.getBoundingClientRect().height < 43.5 && !imSatz(e))
+      .map((e) => `${(e.textContent || e.getAttribute("aria-label") || e.tagName).trim().slice(0, 18)}:${Math.round(e.getBoundingClientRect().height)}`);
+    const imSatzKlein = bedien.filter((e) => e.getBoundingClientRect().height < 43.5 && imSatz(e))
+      .map((e) => `${(e.textContent || "").trim().slice(0, 18)}:${Math.round(e.getBoundingClientRect().height)}`);
+    // Ueberlappung: nur Elemente, die auf EINER Zeile stehen. Ein umbrochenes Element im Fliesstext
+    // hat ein Umfassungsrechteck ueber mehrere Zeilen - das ueberschneidet sich rechnerisch mit
+    // seinen Nachbarn, ohne dass sich auf dem Schirm irgendetwas ueberdeckt.
+    const einzeilig = (e) => e.getClientRects().length === 1;
+    // Eine klebende Leiste (der Weiter-Knopf am unteren Rand) liegt gewollt ueber dem Inhalt
+    // und hat dafuer einen eigenen Hintergrund. Das ist keine Ueberlappung im Layout.
+    const klebt = (e) => { for (let p = e; p; p = p.parentElement) { const q = getComputedStyle(p).position; if (q === 'sticky' || q === 'fixed') return true; } return false; };
+    const paare = [];
+    const kandidaten = bedien.filter((e) => einzeilig(e) && !klebt(e));
+    for (let i = 0; i < kandidaten.length; i++) {
+      for (let j = i + 1; j < kandidaten.length; j++) {
+        const a = kandidaten[i], c = kandidaten[j];
+        if (a.contains(c) || c.contains(a)) continue;
+        const ra = a.getBoundingClientRect(), rc = c.getBoundingClientRect();
+        const x = Math.min(ra.right, rc.right) - Math.max(ra.left, rc.left);
+        const y = Math.min(ra.bottom, rc.bottom) - Math.max(ra.top, rc.top);
+        if (x > 2 && y > 2) paare.push(`${(a.textContent || a.tagName).trim().slice(0, 12)}|${(c.textContent || c.tagName).trim().slice(0, 12)}`);
+      }
+    }
+    const verzerrt = [...raum.querySelectorAll("img")].filter(sichtbar).filter((e) => {
+      if (!e.naturalWidth) return false;
+      const r = e.getBoundingClientRect();
+      const soll = e.naturalWidth / e.naturalHeight, ist = r.width / r.height;
+      return getComputedStyle(e).objectFit === "fill" && Math.abs(soll - ist) / soll > 0.05;
+    }).length;
+    return {
+      seiteBreiter: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      ueberRand: ueberRand.slice(0, 4), abgeschnitten: abgeschnitten.slice(0, 4),
+      klein: klein.slice(0, 5), imSatzKlein: imSatzKlein.slice(0, 4), paare: paare.slice(0, 4), verzerrt,
+      h1: Math.round(parseFloat(getComputedStyle(document.querySelector("h1") || document.body).fontSize)),
+      bedienElemente: bedien.length,
+    };
+  }, breite);
+  ok(`${name} @${breite}: kein Ueberlauf`, !b.seiteBreiter && b.ueberRand.length === 0, `${b.seiteBreiter ? "Seite scrollt quer; " : ""}${b.ueberRand.join(", ")}`);
+  ok(`${name} @${breite}: keine Tippflaeche unter 44 px`, b.klein.length === 0, b.klein.join(", "));
+  if (b.imSatzKlein.length) console.log(`       (Links im Satz, bewusst kleiner: ${b.imSatzKlein.join(", ")})`);
+  ok(`${name} @${breite}: nichts ueberlappt`, b.paare.length === 0, b.paare.join(", "));
+  ok(`${name} @${breite}: nichts abgeschnitten, Bilder unverzerrt, Ueberschrift lesbar`,
+    b.abgeschnitten.length === 0 && b.verzerrt === 0 && b.h1 >= (breite === 360 ? 20 : 24),
+    `abgeschnitten ${b.abgeschnitten.join("/")}, verzerrt ${b.verzerrt}, h1 ${b.h1}px, ${b.bedienElemente} Bedienelemente`);
+}
+
 /* ---------- Anmeldewege: was ohne echtes Fremdkonto pruefbar ist ---------- */
 console.log("\n=== Anmeldewege");
 const anbieter = await fetch(`${BASE}${MOUNT}/api/start/config`).then((r) => r.json());
@@ -84,6 +185,7 @@ for (const breite of [360, 1440]) {
   ok("Startbildschirm steht", await page.locator("h1").first().isVisible());
   ok("Kopfzeile traegt die Marke", (await page.locator(".marke-name").textContent()) === "Pipeflow");
   await shot("1-einstieg");
+  await pruefeBildschirm(page, "Einstieg", breite);
 
   // --- E-Mail-Weg
   const mail = `durchgang-${breite}-${Date.now()}@sandbox.invalid`;
@@ -97,6 +199,8 @@ for (const breite of [360, 1440]) {
   await page.locator("form button[type=submit]").first().click();
   await page.waitForSelector("#website", { timeout: 15000 });
   ok("Nach der E-Mail kommt die Website-Frage", await page.locator("#website").isVisible());
+  ok("Nach der E-Mail kommt die Website-Frage", await page.locator("#website").isVisible());
+  await pruefeBildschirm(page, "Website-Frage", breite);
 
   // --- Website lesen
   await page.fill("#website", WEBSITE);
@@ -107,12 +211,14 @@ for (const breite of [360, 1440]) {
   const ladeText = await page.locator("#stage").innerText();
   ok("Der Ladebildschirm zeigt, was gerade passiert", /lesen|liest|Farben|Themen|schreibt|Bilder|Sekunden/i.test(ladeText), ladeText.split("\n").slice(0, 3).join(" | "));
   await shot("2-laden");
+  await pruefeBildschirm(page, "Ladebildschirm", breite);
   await page.waitForSelector(".post, .ergebnis, #ergebnis", { timeout: 180000 });
   await page.waitForTimeout(1200);
   const dauer = Math.round((Date.now() - t0) / 1000);
   console.log(`  ... Wartezeit bis zum Ergebnis: ${dauer} s`);
   ok("Ergebnis erscheint in unter 60 Sekunden", dauer < 60, `${dauer} s`);
   await shot("3-ergebnis");
+  await pruefeBildschirm(page, "Ergebnis", breite);
 
   // --- Was die Analyse geliefert hat
   const kundeId = db.prepare("SELECT id FROM customers WHERE email = ?").get(mail)?.id;
@@ -146,11 +252,13 @@ for (const breite of [360, 1440]) {
   await page.locator('[data-go="plan"]').first().click();
   await page.waitForSelector("#btn-plan-uebernehmen", { timeout: 10000 });
   ok("Der Plan zeigt Themen, Kanaele, Rhythmus und Farbe", ["themen", "kanaele", "rhythmus", "farbe"].every((z) => true) && (await page.locator("#zeile-themen, #zeile-rhythmus, #zeile-farbe").count()) === 3);
+  await pruefeBildschirm(page, "Plan", breite);
   await page.locator("#btn-plan-uebernehmen").click();
   await page.waitForSelector("#btn-zum-dashboard", { timeout: 20000 });
   const kanalText = await page.locator("#stage").innerText();
   ok("Kanaele verbinden wird angeboten", /Instagram/.test(kanalText) && /LinkedIn/.test(kanalText));
   await shot("4-kanaele");
+  await pruefeBildschirm(page, "Kanaele", breite);
   nichtPruefbar("Instagram/LinkedIn wirklich verbinden", "dafuer braucht es ein echtes Konto und die Freigabe beim Anbieter - in der Sandbox bewusst nicht moeglich");
   await page.locator("#btn-zum-dashboard").click();
   await page.waitForTimeout(1800);
@@ -164,6 +272,7 @@ for (const breite of [360, 1440]) {
   const handlungen = await page.locator(".post").first().locator(".post-actions button").count();
   ok("Auf der Karte stehen zwei Handlungen und das Mehr-Menue", handlungen === 3, String(handlungen));
   await shot("5-uebersicht");
+  await pruefeBildschirm(page, "Uebersicht", breite);
 
   // --- Tippflaechen
   const klein = await page.locator(".post button, .post .link").evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().height < 44 && e.offsetParent !== null).length);
@@ -173,6 +282,8 @@ for (const breite of [360, 1440]) {
   const ersteId = await page.locator(".post").first().getAttribute("data-id");
   await page.locator(`.post[data-id="${ersteId}"] [data-bearbeiten]`).click();
   await page.waitForSelector("#f-bearbeiten", { timeout: 8000 });
+  await page.waitForTimeout(400);
+  await pruefeBildschirm(page, "Blatt Bearbeiten", breite);
   const neuerKopf = `Vom Kunden geaendert ${breite}`;
   await page.fill("#b-kopf", neuerKopf);
   await page.locator("#f-bearbeiten button[type=submit]").click();
@@ -195,6 +306,7 @@ for (const breite of [360, 1440]) {
   await page.waitForTimeout(400);
   await page.locator("#sheet-body [data-tag-blatt]").first().click();
   await page.waitForTimeout(400);
+  await pruefeBildschirm(page, "Blatt Anderer Tag", breite);
   const chips = await page.locator("#sheet-body .chip").evaluateAll((els) => els.map((e) => ({ aus: !!e.querySelector("input:disabled"), an: !!e.querySelector("input:checked") })));
   const frei = chips.findIndex((x) => !x.aus && !x.an);
   ok("Es gibt freie Tage zum Verschieben", frei >= 0, `${chips.filter((x) => x.aus).length} von ${chips.length} belegt`);
@@ -231,6 +343,7 @@ for (const breite of [360, 1440]) {
   await page.locator('[data-go="einstellungen"]').first().click();
   await page.waitForSelector("#zeile-rhythmus", { timeout: 8000 });
   await shot("6-einstellungen");
+  await pruefeBildschirm(page, "Einstellungen", breite);
   await page.locator('#zeile-rhythmus [data-edit="rhythmus"]').click();
   await page.waitForTimeout(400);
   const wahl = page.locator('#zeile-rhythmus input[name=frequency]:not(:checked)').first();

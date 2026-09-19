@@ -26,6 +26,10 @@ const adminTs = readFileSync(new URL("../src/panel/admin.ts", import.meta.url), 
 // Route, die nur die neue Oberflaeche nutzt, faelschlich als unerreichbar.
 const startJs = readFileSync(new URL("../public/panel/start/start.js", import.meta.url), "utf8");
 const startRoutesTs = readFileSync(new URL("../src/panel/start-routes.ts", import.meta.url), "utf8");
+// Die neue Oberflaeche registriert Routen aus mehreren Modulen (Wochenkontrolle 19.09.2026,
+// Testmodus). Ohne sie meldet der Abgleich unten Routen als fehlend, die es sehr wohl gibt.
+const wocheRoutesTs = readFileSync(new URL("../src/panel/woche-routes.ts", import.meta.url), "utf8");
+const testmodeTs = readFileSync(new URL("../src/panel/start-testmode.ts", import.meta.url), "utf8");
 
 let problems = 0;
 const fail = (msg, list) => {
@@ -108,7 +112,7 @@ else pass("jede Klasse im Markup hat mindestens eine CSS-Regel");
 
 /* ---------- 3. API-Aufrufe gegen die Server-Routen ---------- */
 const routes = new Set();
-for (const src of [routerTs, adminTs, startRoutesTs]) {
+for (const src of [routerTs, adminTs, startRoutesTs, wocheRoutesTs, testmodeTs]) {
   for (const m of src.matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
     routes.add(`${m[1].toUpperCase()} ${m[2]}`);
   }
@@ -211,7 +215,7 @@ const wirdAufgerufen = (route) => {
 // Nur die Routen des KUNDEN-Routers pruefen. Die Admin-Seite ist eine eigene Datei mit eigener
 // Pruefung (Abschnitt 4) und ruft ihre Routen selbst auf.
 const panelRoutes = new Set();
-for (const m of (routerTs + "\n" + startRoutesTs).matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
+for (const m of (routerTs + "\n" + startRoutesTs + "\n" + wocheRoutesTs + "\n" + testmodeTs).matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
   panelRoutes.add(`${m[1].toUpperCase()} ${normalize(m[2]).replace(/:[\w]+/g, ":x")}`);
 }
 const nurServer = [...panelRoutes]

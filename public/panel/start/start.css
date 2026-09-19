@@ -142,7 +142,9 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
   padding: 18px var(--rand) 10px; max-width: var(--spalte-breit); margin: 0 auto;
 }
-.marke { text-decoration: none; display: block; line-height: 1; }
+/* 44 px, weil der Schriftzug ein Link auf den Start ist - gemessen waren es 42
+   (27 px Name + 4 + 11 px Zusatz). Die Schrift bleibt gleich, nur die Flaeche waechst. */
+.marke { text-decoration: none; display: flex; flex-direction: column; justify-content: center; min-height: 44px; line-height: 1; }
 .marke-name { font-family: var(--serif); font-size: 27px; letter-spacing: -0.01em; display: block; }
 .marke-sub { display: block; margin-top: 4px; font-size: 11px; letter-spacing: .04em; color: var(--text-2); white-space: nowrap; }
 .top-actions { display: flex; gap: 8px; align-items: center; padding-top: 4px; }
@@ -585,7 +587,7 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
 .kanal-notiz.ist-schlecht { color: var(--schlecht); }
 /* Der Weg weiter wiegt weniger als die Kanäle: Textlink, nicht Knopf. */
 .weiter-link {
-  display: block; width: 100%; margin-top: 26px; padding: 0; border: 0; background: none;
+  display: flex; align-items: center; justify-content: center; width: 100%; margin-top: 26px; padding: 0; border: 0; background: none;
   font-size: 15px; color: var(--text-2); text-decoration: underline; text-underline-offset: 3px;
   min-height: var(--tap); cursor: pointer; font-family: inherit;
 }
@@ -633,3 +635,4 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
 .rueck { position: fixed; left: 16px; right: 16px; bottom: 18px; z-index: 250; background: var(--text); color: #fff; border-radius: 12px; padding: 10px 14px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; animation: hoch var(--dauer) var(--kurve) both; }
 .rueck-knopf { background: none; border: 0; color: #fff; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: var(--tap); padding: 0 4px; }
 @media (min-width: 720px) { .rueck { left: auto; right: 24px; width: 380px; } }
+
