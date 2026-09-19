@@ -24,7 +24,10 @@ function getHeadlineSafeZone(format: PostFormat): SafeZone {
   if (format === "story") {
     return { left: 0.1, right: 0.9, top: 0.2, bottom: 0.8 };
   }
-  return { left: 0.18, right: 0.82, top: 0, bottom: 1 };
+  // Unten bleiben 14 % frei: dort steht seit 19.09.2026 der Firmenname (siehe
+  // addPipelineWatermark). Vorher lief die Headline ueber die volle Hoehe und haette ihn bei
+  // sehr langen Texten ueberschrieben.
+  return { left: 0.18, right: 0.82, top: 0, bottom: 0.86 };
 }
 
 export function escapeXml(text: string): string {
@@ -342,7 +345,7 @@ export async function addPipelineWatermark(
   logoPath?: string | null,
   /** Panel v15: dieselbe Kundenschrift wie die Headline (siehe fonts.ts) - Standard unveraendert
    *  "Liberation Serif, serif" fuer Aufrufer ohne Kundenwahl. */
-  font: { family: string; weight: number } = { family: "Liberation Serif, serif", weight: 400 },
+  font: { family: string; weight: number; glyphWidthFactor?: number } = { family: "Liberation Serif, serif", weight: 400 },
 ): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width ?? 1024;
@@ -358,25 +361,64 @@ export async function addPipelineWatermark(
     }
   }
 
-  const fontSize = Math.round(height * 0.11);
-  const marginRight = Math.round(width * (format === "story" ? 0.1 : 0.07));
-  const cx = width - marginRight;
-  const cy = height / 2;
+  // Firmenname: lesbar, waagrecht, immer an derselben Stelle (Auftrag vom 19.09.2026).
+  //
+  // Vorher stand er als 11 % hohe, um 90 Grad gedrehte Schrift mit 18 % Deckkraft am rechten
+  // Rand. Zwei Dinge gingen damit schief. Erstens war er Dekoration, keine Marke - bei 18 %
+  // Deckkraft liest ihn niemand. Zweitens wird das 1:1-Bild in der Wochenvorschau in einem
+  // 4:5-Rahmen gezeigt (start.css, .media.feed), also werden links und rechts je 10 % der
+  // Breite abgeschnitten - genau die Zone, in der er stand. Vom Namen blieb ein senkrechter
+  // Streifen uebrig.
+  //
+  // Jetzt: unten links, auf derselben Fluchtlinie wie die Headline, in der Kundenschrift, mit
+  // genug Deckkraft zum Lesen. Die x-Spanne liegt zwischen 18 % und 82 % der Breite und
+  // ueberlebt damit jeden mittigen 4:5-Beschnitt. `textLength` deckelt die Breite hart, damit
+  // auch ein langer Firmenname nie in den beschnittenen Rand laeuft.
+  const zone = getHeadlineSafeZone(format);
+  const linkeKante = Math.round(width * zone.left);
+  const maxBreite = Math.round(width * (zone.right - zone.left));
+  // Schriftgrad: so gross wie moeglich, aber nie breiter als die sichere Zone. Lieber kleiner
+  // setzen als die Glyphen stauchen - ein gequetschter Firmenname sieht falsch aus. Erst wenn
+  // auch der kleinste Grad nicht reicht, deckelt `textLength` hart (Notnagel, siehe unten).
+  const glyphFaktor = font.glyphWidthFactor ?? DEFAULT_GLYPH_WIDTH_FACTOR;
+  const maxGrad = Math.round(height * 0.042);
+  // Untergrenze: darunter ist der Name in der kleinen Wochenvorschau nicht mehr zu entziffern.
+  // Ein sehr langer Firmenname wird ab hier von `textLength` leicht gestaucht statt weiter
+  // verkleinert - lieber etwas schmaler als unlesbar. Namen bis rund 30 Zeichen bleiben
+  // unberuehrt bei voller Groesse.
+  const minGrad = Math.round(height * 0.032);
+  let fontSize = maxGrad;
+  while (fontSize > minGrad && estimateTextWidth(watermarkText, fontSize, glyphFaktor) > maxBreite) fontSize -= 1;
+  // Reicht auch der kleinste Grad nicht, wird gekuerzt statt gestaucht. `textLength` waere der
+  // naheliegende Weg, aber librsvg setzt es bei diesem Text nachweislich NICHT um (gemessen mit
+  // scripts/test-firmenname.mjs: der Name lief trotz textLength bis x=995 statt 840). Auf eine
+  // Zusicherung, die der Renderer ignoriert, darf hier nichts aufbauen - sonst steht der Name
+  // wieder im abgeschnittenen Rand, also genau der Fehler, der behoben werden sollte.
+  let anzeige = watermarkText;
+  if (estimateTextWidth(anzeige, fontSize, glyphFaktor) > maxBreite) {
+    while (anzeige.length > 4 && estimateTextWidth(`${anzeige}…`, fontSize, glyphFaktor) > maxBreite) {
+      anzeige = anzeige.slice(0, -1);
+    }
+    anzeige = `${anzeige.trimEnd()}…`;
+  }
+  const grundlinie = Math.round(height * 0.935);
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="nameSchatten" x="-20%" y="-40%" width="140%" height="220%">
+        <feDropShadow dx="0" dy="${Math.round(fontSize * 0.05)}" stdDeviation="${Math.round(fontSize * 0.12)}" flood-color="#000000" flood-opacity="0.28"/>
+      </filter>
+    </defs>
     <text
-      x="${cx}"
-      y="${cy}"
+      x="${linkeKante}"
+      y="${grundlinie}"
       font-family="${escapeXml(font.family)}"
       font-weight="${font.weight}"
       font-size="${fontSize}"
       fill="#ffffff"
-      fill-opacity="0.18"
-      text-anchor="middle"
-      dominant-baseline="middle"
-      letter-spacing="${Math.round(fontSize * 0.06)}"
-      transform="rotate(-90 ${cx} ${cy})"
-    >${escapeXml(watermarkText)}</text>
+      fill-opacity="0.92"
+      filter="url(#nameSchatten)"
+    >${escapeXml(anzeige)}</text>
   </svg>`;
 
   return sharp(imageBuffer)
