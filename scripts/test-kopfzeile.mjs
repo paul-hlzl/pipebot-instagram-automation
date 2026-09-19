@@ -45,13 +45,16 @@ for (const breite of [360, 1440]) {
   m = await lesen(page);
   ok("Ohne Logo steht der Firmenname da", m.alsName && m.text === "Channoine Mayr" && !m.alsBild, m.text);
   ok("... in der Markenfarbe", m.farbe === "rgb(163, 102, 41)", m.farbe);
-  ok("Die Kopfzeile bleibt gleich hoch", Math.abs(m.kopfHoehe - basisHoehe) <= 2, `${m.kopfHoehe} gegen ${basisHoehe}`);
+  // Am Handy darf die Marke in eine zweite Zeile ruecken (bis 30 px mehr), am Schreibtisch nicht.
+  const spiel = breite <= 420 ? 30 : 2;
+  ok("Die Kopfzeile waechst hoechstens um die zweite Zeile", m.kopfHoehe - basisHoehe <= spiel && m.kopfHoehe >= basisHoehe, `${m.kopfHoehe} gegen ${basisHoehe}`);
+  ok("Ein normaler Firmenname wird nicht gekappt", !m.abgeschnitten, `${m.nameBreite} px`);
   await page.screenshot({ path: `docs/easy-onboarding/entwuerfe/kopf-name-${breite}.png`, clip: { x: 0, y: 0, width: breite, height: 260 } });
   // 3) Sehr langer Name: gekappt, nichts laeuft aus dem Fenster, Kopfzeile bleibt gleich hoch
   db.prepare("UPDATE customers SET company='Mayr Kosmetik und Hautpflege Handelsgesellschaft mbH' WHERE id=?").run(id);
   await page.goto(`${BASE}${MOUNT}/start/?t=${Date.now()}`, { waitUntil: "domcontentloaded" }); await page.waitForSelector("#marke-kunde:not([hidden])", { timeout: 20000 }); await page.waitForTimeout(800);
   m = await lesen(page);
-  ok("Ein langer Name wird gekappt statt umzubrechen", m.abgeschnitten && m.kopfHoehe - basisHoehe <= 2, `${m.nameBreite} px breit, Kopf ${m.kopfHoehe}`);
+  ok("Ein langer Name wird gekappt statt umzubrechen", m.abgeschnitten && m.kopfHoehe - basisHoehe <= spiel, `${m.nameBreite} px breit, Kopf ${m.kopfHoehe}`);
   ok("Nichts laeuft aus dem Fenster", m.rechts <= m.fenster, `${m.rechts} von ${m.fenster}`);
   await page.screenshot({ path: `docs/easy-onboarding/entwuerfe/kopf-lang-${breite}.png`, clip: { x: 0, y: 0, width: breite, height: 260 } });
   // 4) Uebersicht: kein Firmenname mehr unter der Ueberschrift

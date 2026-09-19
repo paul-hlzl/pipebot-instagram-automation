@@ -522,9 +522,15 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
 .marke-kunde.kachel-logo img { border-radius: 7px; height: 28px; max-width: 28px; }
 @keyframes logo-auf { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 @media (max-width: 420px) {
-  .marke-kunde { margin-left: 10px; padding-left: 10px; gap: 8px; }
-  .marke-kunde img { height: 26px; max-width: 104px; }
-  .marke-kunde-name { font-size: 15px; max-width: 108px; }
+  /* Am Handy reicht die Breite neben "powered by Pipeline AI Solutions" nicht: schon
+     "Channoine Mayr" wurde zu "Channoi…" (gemessen: 77 px Platz). Deshalb rueckt die Marke
+     des Kunden in eine zweite Zeile unter den Schriftzug, ueber die volle Breite - lesbar
+     bis rund 30 Zeichen, danach Auslassung. Die Kopfzeile wird dafuer 28 px hoeher, nur hier. */
+  .top { flex-wrap: wrap; gap: 2px 12px; }
+  .top-actions { order: 2; }
+  .marke-kunde { order: 3; flex-basis: 100%; margin: 2px 0 0; padding-left: 0; border-left: 0; gap: 8px; }
+  .marke-kunde img { height: 26px; max-width: 160px; }
+  .marke-kunde-name { font-size: 16px; max-width: 260px; }
 }
 
 /* ---- Ladebildschirm: echte Zwischenergebnisse statt Schrittliste ------------------------
