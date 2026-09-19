@@ -12,12 +12,17 @@ import { extractPageText } from "../website-analyze.js";
 import { ToolError } from "../errors.js";
 import { setContentPillars } from "./credentials.js";
 import { normalizeDomain } from "./start-quota.js";
+import { fremdeSchrift, websiteSprache } from "./sprache.js";
 
 /* ------------------------------- Domain-Zwischenspeicher ------------------------------- */
 
 export interface DomainAnalysis {
   suggestion: WebsiteSuggestion;
   colors: BrandColorResult | null;
+  /** Sprache der Website (19.09.2026). Vorher war "de" fest angenommen; die Sprachwache in
+   *  planning.ts prueft jeden Beitrag gegen genau diesen Wert. Aeltere Eintraege im
+   *  Zwischenspeicher haben ihn nicht - dort gilt weiter "de". */
+  sprache?: "de" | "en";
 }
 
 const DOMAIN_CACHE_STUNDEN = Number(process.env.PANEL_DOMAIN_CACHE_HOURS) > 0 ? Number(process.env.PANEL_DOMAIN_CACHE_HOURS) : 24 * 7;
@@ -147,9 +152,21 @@ export async function analysiereWebsite(website: string): Promise<{ analyse: Dom
     extractBrandColorsFromHtml(html, url).catch(() => null),
     unterseitenLesen(html, url).catch(() => [] as Unterseite[]),
   ]);
-  const suggestion = await suggestFromWebsite(seite, unterseiten);
-  console.log(`[start] ${domain}: Startseite + ${unterseiten.length} Unterseite(n) gelesen (${unterseiten.map((u) => u.pfad).join(", ") || "keine"})`);
-  const analyse: DomainAnalysis = { suggestion, colors };
+  const sprache = websiteSprache(html, `${seite.title} ${seite.description} ${seite.bodyText}`);
+  let suggestion = await suggestFromWebsite(seite, unterseiten);
+  // Sprachwache schon hier: eine Analyse in fremder Schrift wuerde sich ueber Beschreibung und
+  // Saeulen auf JEDEN Beitrag der Woche vererben. Ein Neuversuch, danach wird abgebrochen -
+  // lieber keine Vorschau als eine Woche auf Russisch.
+  const analyseText = `${suggestion.industry} ${suggestion.about} ${suggestion.pillars.map((x) => `${x.title} ${x.description}`).join(" ")}`;
+  const schrift = fremdeSchrift(analyseText);
+  if (schrift) {
+    console.warn(`[start] ${domain}: Analyse kam in ${schrift}er Schrift zurueck - zweiter Versuch.`);
+    suggestion = await suggestFromWebsite(seite, unterseiten);
+    const nochmal = fremdeSchrift(`${suggestion.industry} ${suggestion.about} ${suggestion.pillars.map((x) => `${x.title} ${x.description}`).join(" ")}`);
+    if (nochmal) throw new ToolError(`Die Analyse dieser Website kam in ${nochmal}er Schrift zurück. Bitte versuche es noch einmal.`);
+  }
+  console.log(`[start] ${domain}: Startseite + ${unterseiten.length} Unterseite(n) gelesen (${unterseiten.map((u) => u.pfad).join(", ") || "keine"}), Sprache ${sprache}`);
+  const analyse: DomainAnalysis = { suggestion, colors, sprache };
   cacheSchreiben(domain, analyse);
   return { analyse, ausCache: false };
 }
@@ -160,7 +177,7 @@ export function uebernehmeAnalyse(customerId: string, website: string | null, an
   const hashtags = suggestion.hashtags.map((h) => `#${h}`).join(" ");
   db.prepare(
     `UPDATE customers SET company = COALESCE(NULLIF(?, ''), company), contact_name = COALESCE(NULLIF(?, ''), contact_name),
-       website = COALESCE(?, website), industry = ?, about = ?, tone = ?, custom_hashtags = ?,
+       website = COALESCE(?, website), industry = ?, about = ?, tone = ?, custom_hashtags = ?, language = ?,
        accent_color = COALESCE(?, accent_color), gradient_enabled = ?, gradient_color2 = COALESCE(?, gradient_color2), gradient_direction = ?,
        updated_at = ? WHERE id = ?`,
   ).run(
@@ -171,6 +188,7 @@ export function uebernehmeAnalyse(customerId: string, website: string | null, an
     suggestion.about || null,
     suggestion.tone,
     hashtags || null,
+    analyse.sprache ?? "de",
     colors?.accentColor ?? null,
     colors ? 1 : 0,
     colors?.gradientColor2 ?? null,

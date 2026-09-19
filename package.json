@@ -26,6 +26,7 @@
     "test:reviews": "node scripts/test-reviews.mjs",
     "test:video": "node scripts/test-video.mjs",
     "test:start-quota": "node --import tsx --test scripts/start-quota.test.ts",
+    "test:sprache": "node scripts/test-sprache.mjs",
     "test:aufhaenger": "node scripts/test-aufhaenger.mjs",
     "test:firmenname": "node scripts/test-firmenname.mjs",
     "test:testmodus": "node scripts/test-testmodus.mjs",

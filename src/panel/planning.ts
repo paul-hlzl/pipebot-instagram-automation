@@ -43,6 +43,7 @@ import {
 } from "./credentials.js";
 import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./schedule.js";
 import { wochenfarbe } from "./brand-colors.js";
+import { sprachFehler } from "./sprache.js";
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
 import { anthropicAvailable, generatePlannedPostContent } from "../anthropic.js";
@@ -138,6 +139,13 @@ export function aufhaengerKollision(headline: string, vergeben: string[]): strin
   return null;
 }
 
+function assertSprache(headline: string, caption: string, sprache: string): void {
+  const problem = sprachFehler(`${headline} ${caption}`, sprache);
+  if (problem) {
+    throw new ToolError(`${problem} Schreibe ausschliesslich auf ${sprache === "en" ? "Englisch" : "Deutsch"} und ausschliesslich in lateinischer Schrift.`);
+  }
+}
+
 function assertHeadlineRenderable(row: CustomerRow, channel: PlannableChannel, headline: string): void {
   const font = getFontOption(row.font_choice ?? DEFAULT_FONT_ID);
   const layout = headlineLayoutForFormat(headline, CHANNEL_IMAGE_FORMAT[channel], font);
@@ -229,14 +237,38 @@ async function generatePost(
     vergebeneAufhaenger: opts.vergebenJetzt?.().slice(-12),
   };
 
+  const sprache = row.language ?? "de";
   let content = await generatePlannedPostContent(baseInput);
   let costUsd = content.costUsd;
   let belegt = false;
   logUsageCost(row.id, feature, content.costUsd);
+
+  /**
+   * Sprachwache (19.09.2026). Anders als die uebrigen Pruefungen wird diese NIE durchgewinkt:
+   * ein russischer Beitrag geht im Namen des Kunden raus, ein fehlender Tag nicht. Deshalb bis
+   * zu zwei zusaetzliche Versuche - Text kostet 0,0017 USD, das ist die Sache wert - und
+   * danach lieber ein Fehler als ein Beitrag in fremder Schrift.
+   */
+  for (let versuch = 0; versuch < 2; versuch++) {
+    const problem = sprachFehler(`${content.headline} ${content.caption}`, sprache);
+    if (!problem) break;
+    console.warn(`[planning] ${row.id}: Sprachwache hat angeschlagen (${problem}) - Versuch ${versuch + 2}.`);
+    content = await generatePlannedPostContent({
+      ...baseInput,
+      avoidNote: `${problem} Schreibe ausschliesslich auf ${sprache === "en" ? "Englisch" : "Deutsch"} und ausschliesslich in lateinischer Schrift.`,
+    });
+    costUsd = costUsd != null && content.costUsd != null ? costUsd + content.costUsd : content.costUsd ?? costUsd;
+    logUsageCost(row.id, feature, content.costUsd);
+  }
+  const bleibt = sprachFehler(`${content.headline} ${content.caption}`, sprache);
+  if (bleibt) {
+    throw new ToolError(`Beitrag verworfen: ${bleibt} Auch nach drei Versuchen kam kein Text in der richtigen Sprache zurück.`);
+  }
   try {
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertHeadlineRenderable(row, channel, content.headline);
+    assertSprache(content.headline, content.caption, sprache);
     if (opts.reservieren) {
       const problem = opts.reservieren(content.headline);
       if (problem) throw new ToolError(`${problem} Nimm einen anderen Aufhänger - ein anderes Angebot, einen anderen Anlass, eine andere Zielgruppe -, nicht dieselbe Aussage in neuen Worten.`);
@@ -252,6 +284,9 @@ async function generatePost(
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertHeadlineRenderable(row, channel, content.headline);
+    // Die Sprache dagegen SCHON: hier wird geworfen, der Beitrag entsteht nicht. Ein Tag ohne
+    // Beitrag ist reparierbar, ein russischer Beitrag im Namen des Kunden nicht.
+    assertSprache(content.headline, content.caption, sprache);
     // Nach dem zweiten Versuch wird die Aehnlichkeit NICHT mehr erzwungen: lieber ein etwas
     // aehnlicher Beitrag als ein fehlender Tag in der Woche (Auftrag: keine leeren Tage).
     if (opts.reservieren && !belegt) {

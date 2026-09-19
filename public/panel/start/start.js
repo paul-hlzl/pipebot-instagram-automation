@@ -49,7 +49,7 @@
     screen: "konto", gerendert: null, providers: [], authProviders: [], aiAvailable: false, turnstileSiteKey: null, sandbox: false,
     customer: null, connections: [], skipped: new Set(),
     status: null, approvals: [], verlauf: null,
-    notice: null, grenze: null, editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
+    notice: null, grenze: null, tagWahl: null, editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
     beschreibung: "", website: "", leerlauf: 0,
   };
   const angemeldet = () => Boolean(S.customer);
@@ -502,6 +502,54 @@
     }).join("")}</div>`;
   }
 
+  /* ---------------------------- Layout A: der Wochenstreifen -------------------------------
+   * Freigegeben am 19.09.2026. Vorher war der Ergebnisbildschirm eine Liste aus zehn grossen
+   * Karten: am Handy 9,2 Bildschirmlaengen, am Schreibtisch 5,5. Man sah nie die Woche,
+   * immer nur zwei Beitraege - obwohl die Ueberschrift genau die Woche verspricht.
+   *
+   * Jetzt: oben eine Reihe mit einer schmalen Karte je Tag, darunter der gewaehlte Tag in
+   * voller Groesse mit Bild, Ueberschrift und Text. Der Streifen selbst ist eine kleine Wand
+   * aus Markenbildern, der Teil darunter der Beweis, dass die Texte taugen. Beides zusammen
+   * passt am Schreibtisch auf einen Bildschirm.
+   *
+   * Nur der Ergebnisbildschirm. Die Uebersicht im Dashboard bleibt die Liste - dort wird
+   * gearbeitet, nicht beeindruckt.
+   */
+  function tageMitBeitraegen() {
+    const posts = (S.status?.posts || []).filter((p) => p.status !== "rejected" && aktiveKanaele().includes(p.channel));
+    return { posts, tage: [...new Set(posts.map((p) => p.scheduledFor))].sort() };
+  }
+
+  /** Der gerade gezeigte Tag. Faellt auf den ersten zurueck, wenn die Auswahl verschwindet -
+   *  etwa weil ein Beitrag uebersprungen wurde oder die Woche neu geschrieben wird. */
+  function gewaehlterTag(tage) {
+    return tage.includes(S.tagWahl) ? S.tagWahl : tage[0];
+  }
+
+  function streifenHtml(posts, tage, aktiv) {
+    return `<div class="streifen" role="tablist" aria-label="Tage der Woche">${tage.map((tag) => {
+      const liste = posts.filter((p) => p.scheduledFor === tag);
+      const erster = liste[0];
+      const bild = erster?.imageUrl
+        ? `<img src="${esc(erster.imageUrl)}" alt="" loading="lazy">`
+        : `<span class="kachel mini" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(erster?.headline || "")}</span></span>`;
+      return `<button type="button" class="tagkarte${tag === aktiv ? " ist-aktiv" : ""}" role="tab" aria-selected="${tag === aktiv}" data-tagwahl="${esc(tag)}">
+        <span class="tagname">${esc(kurzDatum(tag))}</span>
+        <span class="tagbild">${bild}</span>
+        <span class="tagzahl">${liste.length} ${liste.length === 1 ? "Beitrag" : "Beiträge"}</span>
+      </button>`;
+    }).join("")}</div>`;
+  }
+
+  function tagDetailHtml(posts, tage, aktiv) {
+    const liste = posts.filter((p) => p.scheduledFor === aktiv).sort((a, b) => KANAL_REIHE.indexOf(a.channel) - KANAL_REIHE.indexOf(b.channel));
+    const nr = tage.indexOf(aktiv) + 1;
+    return `<section class="tagdetail" aria-live="polite">
+      <div class="tagdetail-kopf"><span class="etikett">${esc(langDatum(aktiv))}</span><span class="etikett">Tag ${nr} von ${tage.length}</span></div>
+      <div class="tag-posts">${liste.map((p) => postHtml(p)).join("")}</div>
+    </section>`;
+  }
+
   function skelettHtml(ch) {
     const meta = KANAL[ch];
     return `<article class="post" aria-busy="true"><div class="post-meta"><span class="chan ${ch}">${esc(meta.label)}</span><span class="status">wird geschrieben …</span></div><div class="media ${meta.format}"><div class="skeleton">Beitrag entsteht gerade</div></div></article>`;
@@ -553,7 +601,12 @@
         <p class="lede">${satz}${farbSatz}</p>
         ${offen ? `<p class="lauf-zeile">Noch ${offen} ${offen === 1 ? "Beitrag" : "Beiträge"} in Arbeit - sie erscheinen gleich hier.</p>` : ""}
         ${S.notice ? noticeHtml() : ""}
-        ${wocheHtml()}
+        ${(() => {
+          const { posts, tage } = tageMitBeitraegen();
+          if (!tage.length) return wocheHtml();
+          const aktiv = gewaehlterTag(tage);
+          return streifenHtml(posts, tage, aktiv) + tagDetailHtml(posts, tage, aktiv);
+        })()}
         <div class="sticky-actions">
           <button type="button" class="btn lg" data-go="plan">Passt, weiter</button>
           <button type="button" class="link" data-go="anders">Anders machen</button>
@@ -1261,6 +1314,8 @@
       go(ziel);
       return;
     }
+    const tagKarte = t.closest("[data-tagwahl]");
+    if (tagKarte) { S.tagWahl = tagKarte.dataset.tagwahl; render(); return; }
     if (t.closest("#test-neu")) { testNeu(); return; }
     if (t.closest("#test-ende")) { testEnde(); return; }
     if (t.closest("#ki-verbessern")) { kiVerbessern(); return; }

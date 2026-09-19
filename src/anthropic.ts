@@ -449,6 +449,13 @@ export async function generatePlannedPostContent(input: {
     : "";
 
   const system =
+    // Die Sprachvorgabe steht ZUERST und nennt Sprache UND Schriftsystem. Vorher stand sie
+    // mitten im Block als Halbsatz; bei channoine-mayr.at kam trotzdem ein Beitrag auf Russisch
+    // heraus. Der Prompt allein garantiert nichts - die Garantie liefert die Pruefung in
+    // planning.ts (sprache.ts) -, aber er senkt die Trefferquote und kostet nichts extra.
+    `SPRACHE: Schreibe headline und caption vollständig auf ${languageName}, jedes einzelne Wort. ` +
+    "Verwende ausschliesslich lateinische Schrift - niemals kyrillische, griechische, arabische, " +
+    "hebräische, chinesische, japanische oder koreanische Zeichen, auch nicht in einzelnen Wörtern. " +
     `Du schreibst einen einzelnen Social-Media-Beitrag (${input.channel === "linkedin" ? "LinkedIn" : "Instagram"}) für ein ` +
     "Kleinunternehmen, im Rahmen einer automatischen Vorausplanung. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - " +
     'kein einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: ' +
