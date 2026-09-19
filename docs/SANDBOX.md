@@ -156,3 +156,27 @@ Dazu gehört ebenso:
 - **Eine Einstellung, eine Umsetzung.** Kommt dieselbe Einstellung an zwei Orten vor
   (Onboarding und Einstellungen), teilen sich beide eine Funktion - siehe `gradientFieldsHtml`.
 - `npm run audit:panel` und `npm run test:panel` laufen vor jedem Ausliefern.
+
+## Stand 19.09.2026 - Easy-Onboarding-Auftrag (Sandbox-Worktree)
+
+Der Staging-Prozess laeuft seit 19.09.2026 **nicht mehr aus `/root/mcp-live/dist`**, sondern aus
+einem eigenen Git-Worktree `/root/mcp-sandbox` (Branch `feature/easy-onboarding`,
+`script: /root/mcp-sandbox/dist/index.js` in `/root/staging.ecosystem.json`, Sicherung der alten
+Fassung: `/root/staging.ecosystem.json.bak-20260919`). Grund: ein Build in `/root/mcp-live` haette
+das `dist/` veraendert, das Produktion beim naechsten Neustart laden wuerde - Regel 2 des Auftrags
+(nie am laufenden Produktionsserver bauen). Rueckweg: `.bak` zuruecckopieren, `pm2 delete
+instagram-mcp-staging && pm2 start /root/staging.ecosystem.json && pm2 save`.
+
+Die neue Oberflaeche liegt unter **https://mcp.pipebot.at/panel/sandbox/start/** (Dateien
+`public/panel/start/`, ausgeliefert wie bisher ueber `node scripts/deploy-panel.mjs sandbox`).
+Das klassische Panel unter `/panel/sandbox/` ist unveraendert; ein Easy-Kunde erreicht es ueber
+`/panel/sandbox/?classic=1`.
+
+Neue Test-Skripte (alle nur gegen Staging): `npm run test:start-quota` (reine Logik),
+`npm run test:start` (HTTP, erzeugt EINE echte Vorschau, ca. 0,10 USD), `npm run
+test:start-browser` (Chromium, 360/1440 px, Screenshots nach `docs/easy-onboarding/shots/`),
+`npm run test:prod-copy` (Sandbox-Build gegen eine Kopie der letzten Produktions-Sicherung auf
+Port 3111, keine KI-Aufrufe). Bericht: `docs/EASY_ONBOARDING_REPORT.md`.
+
+`SANDBOX_KEY_A` und `SANDBOX_KEY_B` waren am 19.09.2026 beide ungueltig (Login antwortete
+`?error=login`) und wurden neu erzeugt; alte Datei: `/root/sandbox-keys.env.bak-20260919`.

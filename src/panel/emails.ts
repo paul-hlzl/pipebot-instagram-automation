@@ -42,6 +42,21 @@ export function verificationEmail(input: { to: string; company: string; verifyUr
   };
 }
 
+/** Easy Onboarding: Einmal-Anmeldelink (eine Stunde gueltig) - der dauerhafte Zugangslink bleibt bestehen. */
+export function loginLinkEmail(input: { to: string; company: string; loginUrl: string }): MailInput {
+  return {
+    to: input.to,
+    subject: "Dein Anmeldelink - Pipeflow",
+    text:
+      `Hallo,\n\n` +
+      `hier ist dein Anmeldelink für "${input.company}":\n${input.loginUrl}\n\n` +
+      `Er ist eine Stunde lang gültig und funktioniert genau einmal. Dein gespeicherter persönlicher ` +
+      `Zugangslink bleibt unverändert gültig.\n\n` +
+      `Falls du das nicht angefordert hast, ignoriere diese E-Mail einfach - es passiert nichts.\n\n` +
+      `Dein Pipeflow-Team\nPipeline AI Solutions`,
+  };
+}
+
 /** Panel v6 Aufgabe 5: neuer persönlicher Zugangslink nach "Zugang verloren?". */
 export function accessRecoveryEmail(input: { to: string; company: string; loginUrl: string }): MailInput {
   return {

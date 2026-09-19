@@ -25,6 +25,7 @@ import {
   listApprovedPendingPosts,
   listContentPillars,
   listPlannedPosts,
+  listPlannedPostsWithoutImage,
   logPlanningError,
   markPlannedPostStatus,
   overwritePendingApprovalContent,
@@ -32,6 +33,7 @@ import {
   pickWeightedPillar,
   resolveImageBranding,
   scheduleInputFor,
+  setPlannedPostImage,
   splitCommaList,
   splitHashtagList,
   type ContentPillar,
@@ -98,6 +100,7 @@ interface PlanOneResult {
 interface GeneratedPost {
   headline: string;
   caption: string;
+  /** Leer, wenn der Aufrufer bewusst ohne Bild generiert hat (Easy Onboarding vor der Bestaetigung). */
   imageUrl: string;
   accentColorUsed?: string;
   /** Combined Anthropic (text, incl. a possible retry) + fal.ai (image) cost for this one post. */
@@ -117,7 +120,13 @@ interface GeneratedPost {
  * der Text bezahlt, aber nirgends erfasst. Und der normale Tagesplan hat ueberhaupt nie gebucht,
  * dadurch fehlte in der Kostenuebersicht ausgerechnet der groesste Posten.
  */
-async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar: ContentPillar | null, feature = "planned-post"): Promise<GeneratedPost> {
+async function generatePost(
+  row: CustomerRow,
+  channel: PlannableChannel,
+  pillar: ContentPillar | null,
+  feature = "planned-post",
+  opts: { withImage?: boolean } = {},
+): Promise<GeneratedPost> {
   const styleSamples = await getStyleSamples(row.id);
   const bannedWords = splitCommaList(row.banned_words);
   const requiredElements = splitCommaList(row.required_elements);
@@ -160,6 +169,12 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
   }
 
   const branding = resolveImageBranding(row.id);
+  // Easy Onboarding (Kostenschutz): vor der E-Mail-Bestaetigung nur fuer die ersten Slots ein
+  // echtes Bild - der Text ist billig, das Bild nicht. Zeilen ohne Bild bekommen es spaeter ueber
+  // backfillMissingImages (nach der Bestaetigung) nachgetragen.
+  if (opts.withImage === false) {
+    return { headline: content.headline, caption: content.caption, imageUrl: "", accentColorUsed: branding.accentColor, costUsd };
+  }
   const generated = await generateImageUrl(content.headline, CHANNEL_IMAGE_FORMAT[channel], branding);
   costUsd = costUsd != null ? costUsd + FAL_IMAGE_COST_USD : FAL_IMAGE_COST_USD;
   logUsageCost(row.id, feature, FAL_IMAGE_COST_USD);
@@ -167,15 +182,15 @@ async function generatePost(row: CustomerRow, channel: PlannableChannel, pillar:
   return { headline: content.headline, caption: content.caption, imageUrl: generated.imageUrl, accentColorUsed: branding.accentColor, costUsd };
 }
 
-async function planOnePost(row: CustomerRow, channel: PlannableChannel, scheduledFor: string, pillar: ContentPillar | null): Promise<PlanOneResult> {
-  const generated = await generatePost(row, channel, pillar);
+async function planOnePost(row: CustomerRow, channel: PlannableChannel, scheduledFor: string, pillar: ContentPillar | null, withImage = true, feature = "planned-post"): Promise<PlanOneResult> {
+  const generated = await generatePost(row, channel, pillar, feature, { withImage });
   createPlannedPost({
     customerId: row.id,
     channel,
     scheduledFor,
     headline: generated.headline,
     caption: generated.caption,
-    imageUrl: generated.imageUrl,
+    imageUrl: generated.imageUrl || undefined,
     pillarTitle: pillar?.title,
     accentColorUsed: generated.accentColorUsed,
   });
@@ -199,7 +214,14 @@ export interface BrandingRegenResult {
  * Keeps each row's already-assigned content pillar and schedule slot, so this only refreshes the
  * wording/image to match the new branding instead of reshuffling the week.
  */
-export async function regeneratePlannedPostsForBranding(row: CustomerRow, includeEdited: boolean): Promise<BrandingRegenResult> {
+export interface BrandingRegenOptions {
+  /** Easy Onboarding vor der Bestaetigung: Zeilen ohne Bild bleiben ohne Bild (nur Text neu). */
+  keepImageless?: boolean;
+  concurrency?: number;
+  onProgress?: (done: number, total: number, errors: number) => void;
+}
+
+export async function regeneratePlannedPostsForBranding(row: CustomerRow, includeEdited: boolean, opts: BrandingRegenOptions = {}): Promise<BrandingRegenResult> {
   if (!anthropicAvailable()) {
     throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
   }
@@ -212,29 +234,37 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
   let updated = 0;
   let skipped = 0;
   let errors = 0;
-  for (const plan of candidates) {
-    const channel = plan.channel as PlannableChannel;
-    if (!(channel in CHANNEL_SCHEDULE)) {
-      skipped++;
-      continue;
+  const work = candidates.filter((plan) => {
+    if (plan.channel in CHANNEL_SCHEDULE) return true;
+    skipped++;
+    return false;
+  });
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < work.length) {
+      const plan = work[next++];
+      const channel = plan.channel as PlannableChannel;
+      const pillar = plan.pillarTitle ? pillars.find((p) => p.title === plan.pillarTitle) ?? { id: "", title: plan.pillarTitle, description: null, weight: 1 } : null;
+      try {
+        const withImage = opts.keepImageless ? Boolean(plan.imageUrl) : true;
+        const generated = await generatePost(row, channel, pillar, "planned-post-branding-regen", { withImage });
+        overwritePlannedPostContent(plan.id, {
+          headline: generated.headline,
+          caption: generated.caption,
+          imageUrl: generated.imageUrl,
+          accentColorUsed: generated.accentColorUsed,
+        });
+        updated++;
+      } catch (err) {
+        errors++;
+        const message = err instanceof Error ? err.message : String(err);
+        logPlanningError(row.id, channel, plan.scheduledFor, `Branding-Neugenerierung fehlgeschlagen: ${message}`);
+        console.error(`[panel] Branding-Neugenerierung fehlgeschlagen für ${row.id}/${channel}/${plan.scheduledFor}:`, message);
+      }
+      opts.onProgress?.(updated + errors, work.length, errors);
     }
-    const pillar = plan.pillarTitle ? pillars.find((p) => p.title === plan.pillarTitle) ?? { id: "", title: plan.pillarTitle, description: null, weight: 1 } : null;
-    try {
-      const generated = await generatePost(row, channel, pillar, "planned-post-branding-regen");
-      overwritePlannedPostContent(plan.id, {
-        headline: generated.headline,
-        caption: generated.caption,
-        imageUrl: generated.imageUrl,
-        accentColorUsed: generated.accentColorUsed,
-      });
-      updated++;
-    } catch (err) {
-      errors++;
-      const message = err instanceof Error ? err.message : String(err);
-      logPlanningError(row.id, channel, plan.scheduledFor, `Branding-Neugenerierung fehlgeschlagen: ${message}`);
-      console.error(`[panel] Branding-Neugenerierung fehlgeschlagen für ${row.id}/${channel}/${plan.scheduledFor}:`, message);
-    }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, opts.concurrency ?? 1), Math.max(1, work.length)) }, worker));
   return { updated, skipped, errors };
 }
 
@@ -282,7 +312,6 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
     // beheben sollte (Signup mit Wegwerf-Adresse, nie wiedergekommen, kostet trotzdem jede Nacht).
     if (!row.email_verified) continue;
 
-    const scheduleInput = scheduleInputFor(row);
     const pillars = listContentPillars(row.id);
 
     // Erst aufraeumen, dann planen: die Schleife darunter ueberspringt jeden Tag, fuer den schon
@@ -291,44 +320,166 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
     refreshed += aufgefrischt.refreshed;
     refreshFailed += aufgefrischt.failed;
 
-    // Tracks the pillar assigned to the previous planned day/channel THIS run, so a freshly
-    // generated 7-day week rotates pillars instead of all landing on the same one -
-    // pickPillarForToday's DB-based "avoid last real post" check can't see that, since no new
-    // `posts` rows exist yet mid-planning (see pickWeightedPillar's doc comment).
-    let lastPillarTitle: string | null = null;
+    // Easy Onboarding: Zeilen, die vor der Bestaetigung ohne Bild angelegt wurden und deren
+    // Nachtrag nach der Bestaetigung nicht durchkam (Prozess-Neustart, fal.ai-Ausfall), bekommen
+    // hier ihr Bild - bevor die Woche darunter aufgefuellt wird. Fuer Kunden ohne solche Zeilen
+    // ist das ein Lesezugriff und sonst nichts.
+    const nachgetragen = await backfillMissingImages(row);
+    errors += nachgetragen.failed;
 
-    const channelDefs: { channel: PlannableChannel; enabled: boolean }[] = [
-      { channel: "ig_feed", enabled: Boolean(row.ig_feed_enabled) },
-      { channel: "ig_story", enabled: Boolean(row.ig_story_enabled) },
-      { channel: "linkedin", enabled: Boolean(row.linkedin_enabled) },
-    ];
-
-    for (let offset = 0; offset < LOOKAHEAD_DAYS; offset++) {
-      const date = new Date(Date.now() + offset * 86_400_000);
-      for (const { channel, enabled } of channelDefs) {
-        if (!enabled) continue;
-        const { dateStr, due } = isPostingDayForChannel(scheduleInput, CHANNEL_SCHEDULE[channel], date);
-        if (!due) continue;
-        if (getPlannedPostByChannelDate(row.id, channel, dateStr)) {
-          skippedExisting++;
-          continue;
-        }
-        const pillar = pickWeightedPillar(pillars, lastPillarTitle);
-        if (pillar) lastPillarTitle = pillar.title;
-        try {
-          await planOnePost(row, channel, dateStr, pillar);
-          planned++;
-        } catch (err) {
-          errors++;
-          const message = err instanceof Error ? err.message : String(err);
-          logPlanningError(row.id, channel, dateStr, message);
-          console.error(`[panel] Vorausplanung fehlgeschlagen für ${row.id}/${channel}/${dateStr}:`, message);
-        }
-      }
-    }
+    const week = await planCustomerWeek(row, { pillars });
+    planned += week.planned;
+    skippedExisting += week.skippedExisting;
+    errors += week.errors;
   }
 
   return { startedAt, finishedAt: nowIso(), customersChecked, planned, skippedExisting, refreshed, refreshFailed, errors };
+}
+
+export const PLANNING_LOOKAHEAD_DAYS = LOOKAHEAD_DAYS;
+
+export interface PlanWeekProgress {
+  /** Slots, die dieser Lauf zu erzeugen hatte (ohne schon vorhandene). */
+  total: number;
+  done: number;
+  errors: number;
+}
+
+export interface PlanWeekOptions {
+  pillars?: ContentPillar[];
+  /** Hoechstens so viele NEUE Zeilen mit echtem Bild; alle weiteren nur mit Text (Easy Onboarding
+   *  vor der Bestaetigung). Undefined = alle mit Bild (bisheriges Nachtlauf-Verhalten). */
+  imageBudget?: number;
+  /** Hoechstens so viele NEUE Zeilen ueberhaupt (Kostendeckel pro unbestaetigtem Konto). */
+  postBudget?: number;
+  /** Parallel laufende Generierungen. Nachtlauf: 1 (unveraendert), Onboarding: 3. */
+  concurrency?: number;
+  feature?: string;
+  onProgress?: (p: PlanWeekProgress) => void;
+}
+
+export interface PlanWeekResult {
+  planned: number;
+  skippedExisting: number;
+  errors: number;
+  /** Slots, die wegen postBudget NICHT angelegt wurden (der Plan bleibt dort leer, bis nachgeplant wird). */
+  overBudget: number;
+}
+
+/**
+ * Plant die naechsten LOOKAHEAD_DAYS Tage fuer EINEN Kunden - die Schleife, die vorher direkt in
+ * planUpcomingPosts stand, unveraendert im Verhalten (gleiche Slot-Auswahl, gleiche Idempotenz
+ * ueber getPlannedPostByChannelDate, gleiche Saeulen-Rotation), nur herausgeloest, damit das
+ * Easy Onboarding sie SOFORT fuer den gerade angelegten Kunden aufrufen kann, statt bis 03:00
+ * Uhr zu warten. Die Routine bei claude.ai merkt davon nichts: sie liest wie bisher nur ueber
+ * get_planned_post, ob fuer heute eine Zeile existiert.
+ */
+export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions = {}): Promise<PlanWeekResult> {
+  const pillars = opts.pillars ?? listContentPillars(row.id);
+  const scheduleInput = scheduleInputFor(row);
+  const concurrency = Math.max(1, opts.concurrency ?? 1);
+  const feature = opts.feature ?? "planned-post";
+
+  const channelDefs: { channel: PlannableChannel; enabled: boolean }[] = [
+    { channel: "ig_feed", enabled: Boolean(row.ig_feed_enabled) },
+    { channel: "ig_story", enabled: Boolean(row.ig_story_enabled) },
+    { channel: "linkedin", enabled: Boolean(row.linkedin_enabled) },
+  ];
+
+  // Erst alle offenen Slots einsammeln (inkl. Saeulen-Zuweisung in Planreihenfolge - dieselbe
+  // Rotation wie bisher, nur vorab statt unmittelbar vor jeder Generierung), dann abarbeiten.
+  let skippedExisting = 0;
+  let overBudget = 0;
+  let lastPillarTitle: string | null = null;
+  const slots: { channel: PlannableChannel; dateStr: string; pillar: ContentPillar | null; withImage: boolean }[] = [];
+  for (let offset = 0; offset < LOOKAHEAD_DAYS; offset++) {
+    const date = new Date(Date.now() + offset * 86_400_000);
+    for (const { channel, enabled } of channelDefs) {
+      if (!enabled) continue;
+      const { dateStr, due } = isPostingDayForChannel(scheduleInput, CHANNEL_SCHEDULE[channel], date);
+      if (!due) continue;
+      if (getPlannedPostByChannelDate(row.id, channel, dateStr)) {
+        skippedExisting++;
+        continue;
+      }
+      if (opts.postBudget != null && slots.length >= opts.postBudget) {
+        overBudget++;
+        continue;
+      }
+      const pillar = pickWeightedPillar(pillars, lastPillarTitle);
+      if (pillar) lastPillarTitle = pillar.title;
+      const withImage = opts.imageBudget == null || slots.filter((s) => s.withImage).length < opts.imageBudget;
+      slots.push({ channel, dateStr, pillar, withImage });
+    }
+  }
+
+  const progress: PlanWeekProgress = { total: slots.length, done: 0, errors: 0 };
+  // Gesamtzahl sofort melden, damit "Beiträge entworfen 0 von 10" schon steht, bevor der erste
+  // fertig ist - sonst zeigt der Bildschirm 15 Sekunden lang keine Zahl.
+  opts.onProgress?.({ ...progress });
+  let planned = 0;
+  let errors = 0;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < slots.length) {
+      const slot = slots[next++];
+      try {
+        await planOnePost(row, slot.channel, slot.dateStr, slot.pillar, slot.withImage, feature);
+        planned++;
+      } catch (err) {
+        errors++;
+        progress.errors++;
+        const message = err instanceof Error ? err.message : String(err);
+        logPlanningError(row.id, slot.channel, slot.dateStr, message);
+        console.error(`[panel] Vorausplanung fehlgeschlagen für ${row.id}/${slot.channel}/${slot.dateStr}:`, message);
+      }
+      progress.done++;
+      opts.onProgress?.({ ...progress });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, slots.length) }, worker));
+  return { planned, skippedExisting, errors, overBudget };
+}
+
+export interface BackfillResult {
+  filled: number;
+  failed: number;
+}
+
+/**
+ * Traegt bei allen Zeilen im Vorschaufenster, die noch kein Bild haben, das Bild nach - mit dem
+ * AKTUELLEN Branding des Kunden. Aufrufer: /verify-email (sofort nach der Bestaetigung, im
+ * Hintergrund), der Nachtlauf (Sicherheitsnetz) und das Easy-Onboarding-Dashboard. Fuer
+ * Zeilen, die ein Bild haben, passiert nichts.
+ */
+export async function backfillMissingImages(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
+  const today = viennaDateStr();
+  const to = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
+  const rows = listPlannedPostsWithoutImage(row.id, today, to).filter((p) => p.headline);
+  if (!rows.length) return { filled: 0, failed: 0 };
+  const branding = resolveImageBranding(row.id);
+  let filled = 0;
+  let failed = 0;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < rows.length) {
+      const plan = rows[next++];
+      try {
+        const generated = await generateImageUrl(plan.headline as string, CHANNEL_IMAGE_FORMAT[plan.channel as PlannableChannel], branding);
+        logUsageCost(row.id, "planned-post-bild-nachtrag", FAL_IMAGE_COST_USD);
+        setPlannedPostImage(plan.id, generated.imageUrl, branding.accentColor);
+        filled++;
+      } catch (err) {
+        failed++;
+        const message = err instanceof Error ? err.message : String(err);
+        logPlanningError(row.id, plan.channel, plan.scheduledFor, `Bild-Nachtrag fehlgeschlagen: ${message}`);
+        console.error(`[panel] Bild-Nachtrag fehlgeschlagen für ${row.id}/${plan.channel}/${plan.scheduledFor}:`, message);
+      }
+      opts.onProgress?.(filled + failed, rows.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, opts.concurrency ?? 1), rows.length) }, worker));
+  return { filled, failed };
 }
 
 function msUntilNextUtcHour(hourUtc: number): number {
@@ -519,6 +670,18 @@ export async function ensureFreshPlannedPost(plan: PlannedPost): Promise<Planned
   if (plan.status !== "planned" && plan.status !== "edited" && plan.status !== "approved") return plan;
   const row = getCustomerRowById(plan.customerId);
   if (!row) return plan;
+  // Easy Onboarding: eine Zeile ohne Bild (vor der Bestaetigung angelegt, Nachtrag noch nicht
+  // durch) darf die Routine nie als "Bild existiert schon" erreichen - hier wird es nachgeholt.
+  if (!plan.imageUrl && plan.headline) {
+    const result = await backfillMissingImages(row);
+    const refreshed = result.filled ? getPlannedPostByChannelDate(plan.customerId, plan.channel, plan.scheduledFor) : null;
+    if (!refreshed?.imageUrl) {
+      markPlannedPostStatus(plan.id, "rejected");
+      logPlanningError(row.id, plan.channel, plan.scheduledFor, "Beitrag ohne Bild konnte nicht nachgezogen werden - übersprungen, Routine generiert selbst.");
+      return null;
+    }
+    plan = refreshed;
+  }
   if (!isBrandingStale(plan.brandingVersionAtGeneration, row.branding_last_changed_at)) return plan;
 
   try {

@@ -24,7 +24,11 @@
     "backup:db": "node scripts/backup-db.mjs",
     "subscribe:webhooks": "node scripts/subscribe-webhooks.mjs",
     "test:reviews": "node scripts/test-reviews.mjs",
-    "test:video": "node scripts/test-video.mjs"
+    "test:video": "node scripts/test-video.mjs",
+    "test:start-quota": "node --import tsx --test scripts/start-quota.test.ts",
+    "test:start": "node scripts/test-start.mjs",
+    "test:start-browser": "node scripts/easy-onboarding-shots.mjs",
+    "test:prod-copy": "node scripts/test-prod-copy.mjs"
   },
   "keywords": [
     "mcp",

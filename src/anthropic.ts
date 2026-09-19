@@ -98,6 +98,12 @@ export interface WebsiteSuggestion {
   about: string;
   tone: "sachlich" | "locker" | "inspirierend" | "humorvoll";
   hashtags: string[];
+  /** Easy Onboarding (19.09.2026): Firmenname, wie er auf der Seite steht - leer, wenn nicht
+   *  erkennbar. Das klassische Onboarding ignoriert das Feld (dort tippt der Kunde den Namen). */
+  company: string;
+  /** Easy Onboarding: 2-3 Themen (Content-Saeulen), aus demselben Aufruf - kein zweiter,
+   *  teurerer Web-Suche-Aufruf (suggestPillarsWithSearch) noetig, bevor der Kunde etwas sieht. */
+  pillars: { title: string; description: string }[];
   /** Geschaetzte Kosten dieses einen Aufrufs - landet in usage_costs und begruendet damit das
    *  Limit auf /api/analyze-website mit echten Zahlen statt mit einer Annahme. */
   costUsd?: number | null;
@@ -123,7 +129,10 @@ export async function suggestFromWebsite(input: { title: string; description: st
     "einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: " +
     '{"industry": "kurze Branche, 2-4 Wörter", "about": "2-3 Sätze auf Deutsch: Zielgruppe, Themen, Nutzen - ' +
     'direkt und konkret, kein Marketing-Geschwafel", "tone": "genau eines von sachlich, locker, inspirierend, ' +
-    'humorvoll", "hashtags": ["3 bis 5 Schlagwörter ohne Raute, kleingeschrieben, je ein Wort ohne Leerzeichen"]}. ' +
+    'humorvoll", "hashtags": ["3 bis 5 Schlagwörter ohne Raute, kleingeschrieben, je ein Wort ohne Leerzeichen"], ' +
+    '"company": "Name des Unternehmens, wie er auf der Seite steht (ohne Rechtsform-Zusätze wie GmbH nur, wenn sie dort auch fehlen) - leerer String, wenn nicht erkennbar", ' +
+    '"pillars": [{"title": "Thema in 1-3 Wörtern", "description": "ein Satz, worum es bei diesem Thema in Beiträgen geht"}] mit genau 3 Themen, ' +
+    "die auf der Website besonders hervorstechen und sich für regelmäßige Social-Media-Beiträge eignen}. " +
     "Schlage NIEMALS eine Farbe vor, das ist nicht Teil deiner Aufgabe. Mach eine plausible Bestapproximation, " +
     "auch wenn der Text wenig hergibt - liefere nie leere Felder ohne Versuch.";
   const user = `Titel der Seite: ${input.title || "(keiner)"}\nMeta-Beschreibung: ${input.description || "(keine)"}\nText von der Startseite:\n${input.bodyText || "(kein Text gefunden)"}`;
@@ -174,11 +183,103 @@ export async function suggestFromWebsite(input: { title: string; description: st
         .slice(0, 5)
     : [];
 
+  const pillars = Array.isArray(obj.pillars)
+    ? obj.pillars
+        .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
+        .map((p) => ({
+          title: typeof p.title === "string" ? p.title.trim().slice(0, 60) : "",
+          description: typeof p.description === "string" ? p.description.trim().slice(0, 300) : "",
+        }))
+        .filter((p) => p.title)
+        .slice(0, 3)
+    : [];
+
   return {
     industry: typeof obj.industry === "string" ? obj.industry.trim().slice(0, 120) : "",
     about: typeof obj.about === "string" ? obj.about.trim().slice(0, 600) : "",
     tone,
     hashtags,
+    company: typeof obj.company === "string" ? obj.company.trim().slice(0, 120) : "",
+    pillars,
+    costUsd: estimateCostUsd(anthropicModel, data.usage),
+  };
+}
+
+export interface AdjustmentWish {
+  about?: string;
+  tone?: WebsiteSuggestion["tone"];
+  avoidTopics?: string;
+  /** Neue Themenliste, nur wenn der Wunsch die Themen betrifft - sonst leer (Themen bleiben). */
+  pillars: { title: string; description: string }[];
+  costUsd: number | null;
+}
+
+/**
+ * Easy Onboarding, "Anders machen": EIN Freitextfeld ("lockerer, keine Preise nennen, mehr über
+ * das Team") wird auf die bestehenden Profilfelder abgebildet - Beschreibung, Tonalität,
+ * "vermeiden" und Themen. Es gibt bewusst kein neues Feld dafür: der Wunsch landet in genau den
+ * Feldern, die auch das klassische Panel und die Vorausplanung schon lesen.
+ */
+export async function interpretAdjustmentWish(input: {
+  wish: string;
+  company: string;
+  industry: string;
+  about: string;
+  tone: string;
+  avoidTopics: string;
+  pillars: { title: string; description?: string | null }[];
+}): Promise<AdjustmentWish> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+  const system =
+    "Ein Kleinunternehmer hat eine automatisch erstellte Wochenvorschau seiner Social-Media-Beiträge gesehen und sagt in " +
+    "eigenen Worten, was anders sein soll. Übersetze diesen Wunsch in Änderungen an seinem Profil. Antworte AUSSCHLIESSLICH " +
+    "mit einem JSON-Objekt - kein einleitender Satz, kein Markdown-Codeblock - nach genau diesem Schema: " +
+    '{"about": "die überarbeitete Unternehmensbeschreibung (2-3 Sätze, Deutsch) oder null, wenn der Wunsch sie nicht berührt", ' +
+    '"tone": "genau eines von sachlich, locker, inspirierend, humorvoll - oder null, wenn unverändert", ' +
+    '"avoidTopics": "kommagetrennt, was in Beiträgen NICHT vorkommen soll (bestehende Einträge beibehalten und ergänzen) - oder null", ' +
+    '"pillars": [{"title": "Thema", "description": "ein Satz"}] - die NEUE komplette Themenliste (2-4 Themen), nur wenn der Wunsch die Themen betrifft, sonst leeres Array}. ' +
+    "Ändere nur, was der Wunsch tatsächlich verlangt.";
+  const user =
+    `Firma: ${input.company || "(unbekannt)"}\nBranche: ${input.industry || "(unbekannt)"}\n` +
+    `Bisherige Beschreibung: ${input.about || "(keine)"}\nBisherige Tonalität: ${input.tone || "sachlich"}\n` +
+    `Bisher vermeiden: ${input.avoidTopics || "(nichts)"}\n` +
+    `Bisherige Themen: ${input.pillars.map((p) => p.title + (p.description ? ` (${p.description})` : "")).join("; ") || "(keine)"}\n\n` +
+    `Wunsch des Kunden: ${input.wish}`;
+
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        { model: anthropicModel, max_tokens: 600, system, messages: [{ role: "user", content: user }] },
+        { headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, timeout: INTERAKTIV_TIMEOUT_MS },
+      ),
+    INTERAKTIV_VERSUCHE,
+    "Anthropic adjustment-wish",
+  );
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) throw new ToolError("Die KI hat keine Antwort geliefert.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim());
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
+  }
+  const obj = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const pillars = Array.isArray(obj.pillars)
+    ? obj.pillars
+        .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
+        .map((p) => ({ title: typeof p.title === "string" ? p.title.trim().slice(0, 60) : "", description: typeof p.description === "string" ? p.description.trim().slice(0, 300) : "" }))
+        .filter((p) => p.title)
+        .slice(0, 4)
+    : [];
+  return {
+    about: typeof obj.about === "string" && obj.about.trim() ? obj.about.trim().slice(0, 2000) : undefined,
+    tone: VALID_TONES.includes(String(obj.tone)) ? (obj.tone as WebsiteSuggestion["tone"]) : undefined,
+    avoidTopics: typeof obj.avoidTopics === "string" && obj.avoidTopics.trim() ? obj.avoidTopics.trim().slice(0, 500) : undefined,
+    pillars,
     costUsd: estimateCostUsd(anthropicModel, data.usage),
   };
 }

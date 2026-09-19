@@ -1,0 +1,26 @@
+# Produktions-Kontrolle 2026-09-19T09:23:52Z
+## pm2
+pm2-logrotate pid 163306 restarts 0 status online
+tiktok-mcp pid 193254 restarts 1 status online
+x-mcp pid 163328 restarts 0 status online
+instagram-mcp pid 420644 restarts 7 status online
+instagram-mcp-staging pid 464004 restarts 5 status online
+## /root/panel-live sha256
+309d2e2d1527eb6855bee998f2cfb2b6d8639ab403f3f13211a43b084cb01729  /root/panel-live/admin.html
+32717dae262d0c9028d547d1206cdb178928ff197675f8f41e9b5bcc0d1d3c10  /root/panel-live/icon-192.png
+b831ca982e3d63c7ef3a5f4565d307e05b08f5e6f4ab36edb26a8cdba919f417  /root/panel-live/icon-512.png
+3d40cc3380da0a757bd11deab373806d2820d33d510c43be918f4c96f6c25f35  /root/panel-live/icon-maskable-512.png
+093a34cb07e63c6e87e6cd19720afea123428a31a3378336993351cf9331e26b  /root/panel-live/index.html
+fcc0f83aa51da0348d9ce962971ebab48b004ba2216e38222cd650b0993d6d1e  /root/panel-live/manifest.webmanifest
+7b94aea408037dc92237f3594721bb186bb368de6b36d347614443e94f0e596a  /root/panel-live/onboarding.css
+6b24c0826456d86f12dca66fcc524ed57b43563c13a729e4f8478e10584ac0df  /root/panel-live/panel-theme.css
+00362d7c35317b2c729d8d9b2f7756ec7b711111a01334f6d01ea2d3d2449615  /root/panel-live/panel.css
+a022f4cd4093545a66d90fbf0bea884d74f6da118468729a7316116d4f8e578b  /root/panel-live/panel.js
+## /root/mcp-live dist mtime + HEAD
+2026-09-18 15:44:27.961945505 +0000 /root/mcp-live/dist/index.js
+6b4f913b573082445845f8968c393438f3323da7
+0
+## prod db
+2026-09-19 04:00:06.853194184 +0000 704512 /root/mcp-server/data/panel.db
+customers 6 planned 174 cols 68
+start_previews table exists: False

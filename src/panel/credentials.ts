@@ -1673,6 +1673,54 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
  * regenerate_count. Caller (the router) is responsible for checking PLANNED_POST_MAX_REGENERATE
  * against the current count BEFORE calling generation - this function only records the result.
  */
+/**
+ * Easy Onboarding: Bild NACHTRAGEN bei einer Zeile, die vor der E-Mail-Bestaetigung bewusst ohne
+ * Bild angelegt wurde (Kostenschutz, planning.ts). Anders als updatePlannedPostImage zaehlt das
+ * NICHT als "Neu erstellen" des Kunden (regenerate_count bleibt) - es ist die erste Erstellung.
+ */
+export function setPlannedPostImage(id: string, imageUrl: string, accentColorUsed: string | undefined): PlannedPost | null {
+  const result = db
+    .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = COALESCE(?, accent_color_used), updated_at = ? WHERE id = ?")
+    .run(imageUrl, accentColorUsed ?? null, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
+}
+
+/** Alle Zeilen eines Kunden im Vorschaufenster, die noch kein Bild haben (Easy Onboarding). */
+export function listPlannedPostsWithoutImage(customerId: string, fromDate: string, toDate: string): PlannedPost[] {
+  const rows = db
+    .prepare(
+      "SELECT * FROM planned_posts WHERE customer_id = ? AND image_url IS NULL AND scheduled_for >= ? AND scheduled_for <= ? AND status IN ('planned','edited','approved') ORDER BY scheduled_for, channel",
+    )
+    .all(customerId, fromDate, toDate) as PlannedPostRow[];
+  return rows.map(toPlannedPost);
+}
+
+/**
+ * Easy Onboarding, Dashboard: Reihenfolge der naechsten Tage per Drag-and-drop - INNERHALB eines
+ * Kanals werden die vorhandenen Termine (scheduled_for) in neuer Reihenfolge auf die Zeilen
+ * verteilt. Es entsteht nie ein zweiter Beitrag fuer denselben Kanal/Tag und nie ein neuer
+ * Termin: die Routine (get_planned_post nach customer/channel/date) findet weiterhin genau eine
+ * Zeile je Slot. Nur noch nicht eingereichte/veroeffentlichte Zeilen ('planned','edited',
+ * 'approved') duerfen tauschen; taucht eine andere in `ids` auf, wird abgelehnt (null).
+ */
+export function reorderPlannedPosts(customerId: string, channel: string, ids: string[]): PlannedPost[] | null {
+  const rows = db
+    .prepare("SELECT * FROM planned_posts WHERE customer_id = ? AND channel = ? AND id IN (" + ids.map(() => "?").join(",") + ")")
+    .all(customerId, channel, ...ids) as PlannedPostRow[];
+  if (rows.length !== ids.length || new Set(ids).size !== ids.length) return null;
+  if (rows.some((r) => !["planned", "edited", "approved"].includes(r.status))) return null;
+  const dates = rows.map((r) => r.scheduled_for).sort();
+  const now = nowIso();
+  const update = db.prepare("UPDATE planned_posts SET scheduled_for = ?, updated_at = ? WHERE id = ?");
+  db.transaction(() => {
+    // Zwei Schritte, weil die Zwischenzustaende sonst auf denselben Tag fallen koennten.
+    ids.forEach((id, i) => update.run(`tmp-${i}-${dates[i]}`, now, id));
+    ids.forEach((id, i) => update.run(dates[i], now, id));
+  })();
+  return ids.map((id) => getPlannedPost(id)).filter((p): p is PlannedPost => Boolean(p));
+}
+
 export function updatePlannedPostImage(id: string, imageUrl: string, accentColorUsed: string): PlannedPost | null {
   const result = db
     .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = ?, regenerate_count = regenerate_count + 1, updated_at = ? WHERE id = ?")
@@ -1710,13 +1758,15 @@ export function countRegenerableBrandingPlannedPosts(customerId: string): { elig
  * Does not touch regenerate_count (that budget is specifically for the customer's own "Mit
  * dieser Farbe neu erstellen" button, a separate feature/limit).
  */
-export function overwritePlannedPostContent(id: string, fields: { headline: string; caption: string; imageUrl: string; accentColorUsed?: string | null }): PlannedPost | null {
+export function overwritePlannedPostContent(id: string, fields: { headline: string; caption: string; imageUrl: string | null; accentColorUsed?: string | null }): PlannedPost | null {
   const now = nowIso();
+  // Leerer String = "bewusst ohne Bild" (Easy Onboarding vor der Bestaetigung) -> NULL, damit
+  // listPlannedPostsWithoutImage die Zeile spaeter findet und das Bild nachtraegt.
   const result = db
     .prepare(
       "UPDATE planned_posts SET headline = ?, caption = ?, image_url = ?, accent_color_used = ?, status = 'planned', updated_at = ?, branding_version_at_generation = ? WHERE id = ?",
     )
-    .run(fields.headline, fields.caption, fields.imageUrl, fields.accentColorUsed ?? null, now, now, id);
+    .run(fields.headline, fields.caption, fields.imageUrl || null, fields.accentColorUsed ?? null, now, now, id);
   if (result.changes === 0) return null;
   return getPlannedPost(id);
 }

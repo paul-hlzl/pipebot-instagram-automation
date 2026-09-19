@@ -21,6 +21,11 @@ const indexHtml = readFileSync(new URL("../public/panel/index.html", import.meta
 const adminHtml = readFileSync(new URL("../public/panel/admin.html", import.meta.url), "utf8");
 const routerTs = readFileSync(new URL("../src/panel/router.ts", import.meta.url), "utf8");
 const adminTs = readFileSync(new URL("../src/panel/admin.ts", import.meta.url), "utf8");
+// Easy Onboarding (19.09.2026): zweite Oberflaeche unter /start mit eigenen Routen - beide
+// gehoeren in dieselbe Pruefung (Aufrufe gegen Routen, Routen gegen Aufrufe), sonst gilt eine
+// Route, die nur die neue Oberflaeche nutzt, faelschlich als unerreichbar.
+const startJs = readFileSync(new URL("../public/panel/start/start.js", import.meta.url), "utf8");
+const startRoutesTs = readFileSync(new URL("../src/panel/start-routes.ts", import.meta.url), "utf8");
 
 let problems = 0;
 const fail = (msg, list) => {
@@ -103,7 +108,7 @@ else pass("jede Klasse im Markup hat mindestens eine CSS-Regel");
 
 /* ---------- 3. API-Aufrufe gegen die Server-Routen ---------- */
 const routes = new Set();
-for (const src of [routerTs, adminTs]) {
+for (const src of [routerTs, adminTs, startRoutesTs]) {
   for (const m of src.matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
     routes.add(`${m[1].toUpperCase()} ${m[2]}`);
   }
@@ -116,7 +121,7 @@ const normalize = (p) => p.split("?")[0].replace(/\$\{[^}]*\}/g, ":x").replace(/
 const routeSet = new Set([...routes].map((r) => { const [m, p] = r.split(" "); return `${m} ${normalize(p).replace(/:[\w]+/g, ":x")}`; }));
 
 const calls = new Set();
-for (const m of panelJs.matchAll(/api\(\s*"(GET|POST|PATCH|PUT|DELETE)"\s*,\s*`?["'`]?([^"'`,)]+)/g)) {
+for (const m of (panelJs + "\n" + startJs).matchAll(/api\(\s*"(GET|POST|PATCH|PUT|DELETE)"\s*,\s*`?["'`]?([^"'`,)]+)/g)) {
   calls.add(`${m[1]} ${normalize(m[2].trim())}`);
 }
 // Ein dynamisches Segment (`${action}`) kann mehrere Routen treffen - deshalb Vergleich ueber ein
@@ -206,7 +211,7 @@ const wirdAufgerufen = (route) => {
 // Nur die Routen des KUNDEN-Routers pruefen. Die Admin-Seite ist eine eigene Datei mit eigener
 // Pruefung (Abschnitt 4) und ruft ihre Routen selbst auf.
 const panelRoutes = new Set();
-for (const m of routerTs.matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
+for (const m of (routerTs + "\n" + startRoutesTs).matchAll(/router\.(get|post|patch|put|delete)\(\s*["'`]([^"'`]+)["'`]/g)) {
   panelRoutes.add(`${m[1].toUpperCase()} ${normalize(m[2]).replace(/:[\w]+/g, ":x")}`);
 }
 const nurServer = [...panelRoutes]
@@ -221,7 +226,7 @@ const nurServer = [...panelRoutes]
     // Letzte Chance: manche Aufrufe bauen die Adresse dynamisch zusammen oder haengen sie an ein
     // src-Attribut. Taucht der Pfad irgendwo woertlich im Panel auf, gilt er als erreichbar.
     const woertlich = pfad.replace(/\/:x/g, "");
-    return !panelJs.includes(woertlich);
+    return !panelJs.includes(woertlich) && !startJs.includes(woertlich);
   })
   .sort();
 if (nurServer.length) {

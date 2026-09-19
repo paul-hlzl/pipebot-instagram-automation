@@ -651,6 +651,37 @@ for (const tabelle of ["planned_posts", "pending_approvals"]) {
 // Verhalten: naechster Onboarding-Schritt). NULL = altes Verhalten, unveraendert.
 migrateColumns("oauth_states", [["return_to", "TEXT"]]);
 
+// Easy Onboarding (19.09.2026, Sandbox-Auftrag) - alles additiv, NULL = bisheriges Verhalten:
+//   ui_mode   'easy' = der Kunde ist ueber den neuen Ein-Feld-Flow gekommen und landet unter
+//             ${mount}/start/ statt im klassischen Panel (siehe router.ts). NULL/'classic' =
+//             bestehende Kunden, sehen exakt weiter das, was sie kennen.
+//   plan_tier 'basic'/'pro' - nur die Struktur fuer spaetere Preisstufen (tiers.ts), keine
+//             Bezahlfunktion. NULL = basic.
+// start_previews: serverseitige, neustartfeste Zaehler fuer den Kostenschutz VOR der E-Mail-
+// Bestaetigung (start-quota.ts). Kein Fremdschluessel auf customers - ein Zaehler muss auch
+// dann noch zaehlen, wenn das unbestaetigte Konto spaeter geloescht wurde (sonst waere Loeschen
+// + neu anlegen ein Weg um den Deckel herum).
+migrateColumns("customers", [["ui_mode", "TEXT"], ["plan_tier", "TEXT"]]);
+// Einmal-Anmeldelink fuer Bildschirm 1 des Easy Onboardings ("bekannte Adresse -> Link per Mail"):
+// eigener, eine Stunde gueltiger Token statt des dauerhaften login_key_hash. Sonst koennte jeder,
+// der eine fremde E-Mail-Adresse eintippt, den gespeicherten Zugangslink des Kunden entwerten
+// (bei "Zugang verloren?" im klassischen Panel ist genau das das gewollte Verhalten, hier nicht).
+migrateColumns("customers", [["login_link_token_hash", "TEXT"], ["login_link_expires_at", "TEXT"]]);
+db.exec(`
+CREATE TABLE IF NOT EXISTS start_previews (
+  id TEXT PRIMARY KEY,
+  ip TEXT NOT NULL,
+  domain TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'preview',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS start_previews_ip ON start_previews(ip, created_at DESC);
+CREATE INDEX IF NOT EXISTS start_previews_domain ON start_previews(domain, created_at DESC);
+CREATE INDEX IF NOT EXISTS start_previews_customer ON start_previews(customer_id, kind);
+`);
+
 export interface CustomerRow {
   standstill_alert_sent_at: string | null;
   id: string;
@@ -720,6 +751,12 @@ export interface CustomerRow {
   video_zoom_direction: string;
   video_voice: string;
   video_voice_enabled: number;
+  /** Easy Onboarding: 'easy' | 'classic' | NULL (= classic). */
+  ui_mode: string | null;
+  /** Preisstufen-Struktur (tiers.ts): 'basic' | 'pro' | NULL (= basic). */
+  plan_tier: string | null;
+  login_link_token_hash: string | null;
+  login_link_expires_at: string | null;
 }
 
 export interface ConnectionRow {
