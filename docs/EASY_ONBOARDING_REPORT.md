@@ -14,7 +14,15 @@ echtem Chromium bei 360 und 1440 px: `docs/easy-onboarding/shots/`. Farbproben:
 
 ## 1. Anmeldung über Google, Microsoft, Apple - Stand und Aufwand
 
-**Stand 19.09.2026, 11:45 Uhr: Microsoft ist scharf.** Client-ID und Client-Secret-Wert liegen
+**Stand 19.09.2026, 12:20 Uhr: Google und Microsoft sind scharf und beide echt anmeldbar.**
+Google: Client-ID und Clientschlüssel eingetragen, Schlüssel vorab bei Google gegengeprüft
+(unser Wert scheitert nur am Test-Code mit `invalid_grant`, ein absichtlich falscher wird mit
+`invalid_client` abgewiesen). Anders als bei Microsoft ließ sich hier auch die Redirect-URI von
+außen prüfen, weil Google sie sofort validiert: mit der hinterlegten Adresse erscheint die
+Anmeldemaske („Weiter zu pipebot.at"), mit einer erfundenen „Zugriff blockiert". Apple erscheint
+im Panel gar nicht mehr.
+
+**Frühere Notiz, Microsoft:** Client-ID und Client-Secret-Wert liegen
 in `/root/staging.ecosystem.json` (Rechte 600, außerhalb des Repos), der Knopf ist ein echter
 Login, `AUTH_MICROSOFT_TENANT` ist bewusst nicht gesetzt (also `common`). Der Schlüssel ist
 direkt bei Microsoft gegengeprüft: eine Client-Credentials-Anfrage liefert HTTP 200 mit Token,

@@ -203,7 +203,8 @@ Sandbox-Eintrag den Produktionsprozess miterreichen. pm2-Umgebung schlaegt doten
 Sandbox-Prozess liest die Werte also von dort. Achtung: `pm2 save` schreibt sie zusaetzlich nach
 `/root/.pm2/dump.pm2` - diese Datei war 644 und ist jetzt 600.
 
-Microsoft ist seit 19.09.2026 eingetragen (`AUTH_MICROSOFT_CLIENT_ID`,
+Google und Microsoft sind seit 19.09.2026 eingetragen und echt anmeldbar; Apple erscheint im
+Panel gar nicht (`hiddenUntilConfigured`). Microsoft ist seit 19.09.2026 eingetragen (`AUTH_MICROSOFT_CLIENT_ID`,
 `AUTH_MICROSOFT_CLIENT_SECRET`), **`AUTH_MICROSOFT_TENANT` bewusst NICHT** - ohne die Variable
 nimmt `auth-providers.ts` den `common`-Endpunkt, und nur damit koennen sich fremde Mandanten und
 persoenliche Microsoft-Konten anmelden. Redirect-URI in Entra:
