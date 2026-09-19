@@ -18,6 +18,7 @@
 import { chromium } from "/root/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
 import Database from "better-sqlite3";
 import fs from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 
 const BASE = process.env.STAGING_URL ?? "https://mcp.pipebot.at";
 const MOUNT = process.env.STAGING_MOUNT ?? "/panel/sandbox";
@@ -30,6 +31,8 @@ const db = new Database(process.env.STAGING_DB ?? "/root/mcp-server/data/panel-s
 const ohneBasis = (u) => (MOUNT ? (u.split(MOUNT)[1] ?? u) : (u.split(new URL(BASE).host)[1] ?? u));
 
 let fehler = 0;
+// Selbst angelegte Sitzungen (nur mit KONTO=...), werden am Ende wieder entfernt.
+const sitzungen = [];
 const offen = [];
 const ok = (t, b, e = "") => { console.log(`  ${b ? "ok  " : "FAIL"} - ${t}${e ? ` :: ${e}` : ""}`); if (!b) fehler++; };
 const nichtPruefbar = (t, grund) => { offen.push(`${t} - ${grund}`); console.log(`  offen- ${t} :: ${grund}`); };
@@ -165,14 +168,18 @@ for (const id of ["google", "microsoft"]) {
     ok(`${id}: Rueckadresse zeigt auf diese Instanz`, zurueck === `${BASE}${MOUNT}/auth/${id}/callback`, zurueck);
     nichtPruefbar(`${id}: Anmeldung zu Ende gehen`, "dafuer braucht es ein echtes Konto beim Anbieter und ein Passwort - kann ich nicht");
   } else {
-    ok(`${id}: ohne Zugangsdaten sauber abgewiesen, kein Absturz`, r.status === 302 && ziel.includes("error="), `${r.status} ${ziel.split("?")[1] ?? ""}`);
+    // Ohne Zugangsdaten leitet der Server zurueck zum Start und sagt, warum
+    // (autherror=not_configured) - kein Absturz, keine leere Seite.
+    ok(`${id}: ohne Zugangsdaten sauber abgewiesen, kein Absturz`, [302, 303].includes(r.status) && /autherror=|error=/.test(ziel), `${r.status} ${ziel.split("?")[1] ?? ""}`);
     nichtPruefbar(`${id}: Anmeldung`, "fuer diesen Anbieter sind keine Zugangsdaten hinterlegt");
   }
 }
 
 /* ---------- Der Durchgang ---------- */
 const browser = await chromium.launch();
-for (const breite of [360, 1440]) {
+// BREITEN=360 fuehrt nur eine Breite - gebraucht, wenn pro Lauf ein eigenes Konto noetig ist.
+const BREITEN = (process.env.BREITEN ?? "360,1440").split(",").map((b) => Number(b.trim()));
+for (const breite of BREITEN) {
   console.log(`\n=== Durchgang @${breite}`);
   const ctx = await browser.newContext({ viewport: { width: breite, height: breite === 360 ? 780 : 900 } });
   const page = await ctx.newPage();
@@ -192,7 +199,31 @@ for (const breite of [360, 1440]) {
   await pruefeBildschirm(page, "Einstieg", breite);
 
   // --- E-Mail-Weg
-  const mail = `durchgang-${breite}-${Date.now()}@sandbox.invalid`;
+  // KONTO=<E-Mail> nimmt ein bestehendes Konto und legt sich selbst eine Sitzung an, statt eines
+  // anzulegen. Gebraucht auf Produktion: dort duerfen pro Netzwerk nur fuenf Konten am Tag
+  // entstehen, und die waren beim Abnahmelauf schon verbraucht.
+  const mail = process.env.KONTO ?? `durchgang-${breite}-${Date.now()}@sandbox.invalid`;
+  if (process.env.KONTO) {
+    const kid = db.prepare("SELECT id FROM customers WHERE email = ?").get(mail)?.id;
+    if (!kid) throw new Error(`Konto ${mail} gibt es nicht`);
+    const roh = randomBytes(24).toString("hex");
+    db.prepare("INSERT INTO sessions (token_hash, customer_id, expires_at) VALUES (?,?,?)")
+      .run(createHash("sha256").update(roh).digest("hex"), kid, new Date(Date.now() + 36e5).toISOString());
+    sitzungen.push(createHash("sha256").update(roh).digest("hex"));
+    await ctx.addCookies([{ name: "pp_session", value: roh, domain: new URL(BASE).host, path: MOUNT || "/", httpOnly: true, secure: true, sameSite: "Lax" }]);
+    db.prepare("UPDATE customers SET website = NULL, industry = NULL WHERE id = ?").run(kid);
+    db.prepare("DELETE FROM planned_posts WHERE customer_id = ?").run(kid);
+    // ANBIETER=google markiert das Testkonto als "ueber Google angemeldet". Fuer solche Konten
+    // laesst der Server die Bot-Pruefung aus (der Anbieter hat den Menschen schon bestaetigt) -
+    // nur so kommt ein automatisierter Browser auf Produktion ueberhaupt bis zur Vorschau.
+    // Die Bot-Pruefung selbst wird getrennt belegt, sie ist hier nicht Gegenstand der Pruefung.
+    if (process.env.ANBIETER) {
+      db.prepare("UPDATE customers SET auth_provider = ? WHERE id = ?").run(process.env.ANBIETER, kid);
+      ok("Konto gilt als ueber den Anbieter angemeldet (Bot-Pruefung entfaellt)", true, process.env.ANBIETER);
+    }
+    await page.goto(`${BASE}${MOUNT}/start/?t=${Date.now()}`, { waitUntil: "domcontentloaded" });
+    ok("Bestehendes Konto angemeldet", true, mail);
+  } else {
   if (await page.locator('[data-go="email"]').count()) await page.locator('[data-go="email"]').first().click();
   await page.waitForSelector("#email", { timeout: 10000 });
   await page.fill("#email", "keine-echte-adresse");
@@ -201,6 +232,7 @@ for (const breite of [360, 1440]) {
   ok("Falsche E-Mail wird am Feld gemeldet, nicht als Absturz", Boolean((await page.locator("#err-email").textContent())?.trim()));
   await page.fill("#email", mail);
   await page.locator("form button[type=submit]").first().click();
+  }
   await page.waitForSelector("#website", { timeout: 15000 });
   ok("Nach der E-Mail kommt die Website-Frage", await page.locator("#website").isVisible());
   ok("Nach der E-Mail kommt die Website-Frage", await page.locator("#website").isVisible());
@@ -208,6 +240,18 @@ for (const breite of [360, 1440]) {
 
   // --- Website lesen
   await page.fill("#website", WEBSITE);
+  // Mit dem echten Cloudflare-Schluessel (Produktion) zeigt die Bot-Pruefung einem automatisierten
+  // Browser ein Kaestchen zum Anhaken; ein Mensch sieht es meist gar nicht. Fuer den Abnahmelauf
+  // wird es angetippt. In der Sandbox laeuft ein Testschluessel, der sofort bestaetigt.
+  const hatToken = () => page.evaluate(() => { try { return Boolean(window.turnstile?.getResponse()); } catch { return false; } });
+  if ((await page.locator("#turnstile-slot").count()) && !(await hatToken())) {
+    await page.waitForTimeout(3000);
+    if (!(await hatToken())) {
+      await page.locator("#turnstile-slot").click({ position: { x: 34, y: 34 } }).catch(() => {});
+      for (let i = 0; i < 10 && !(await hatToken()); i++) await page.waitForTimeout(1500);
+    }
+    ok("Bot-Pruefung liefert eine Bestaetigung", await hatToken());
+  }
   const t0 = Date.now();
   await page.locator("#btn-vorschau").click();
   await page.waitForSelector(".lade-schritt, .lade, #lade", { timeout: 15000 }).catch(() => {});
@@ -383,6 +427,7 @@ for (const breite of [360, 1440]) {
   await ctx.close();
 }
 await browser.close();
+for (const h of sitzungen) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(h);
 
 console.log(`\n${fehler ? `${fehler} Problem(e)` : "alles gruen"}`);
 if (offen.length) { console.log("\nNicht pruefbar:"); for (const o of offen) console.log(`  - ${o}`); }

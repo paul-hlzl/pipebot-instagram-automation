@@ -1,0 +1,14 @@
+import { chromium } from "/root/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
+const b=await chromium.launch(); const ctx=await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
+const page=await ctx.newPage();
+await page.goto(`https://app.pipeflow.at/start/?t=${Date.now()}`,{waitUntil:"domcontentloaded"});
+await page.waitForTimeout(1500);
+await page.locator('[data-go="email"]').first().click().catch(()=>{});
+await page.waitForSelector("#email",{timeout:10000});
+await page.fill("#email", `p5-${Date.now()}@sandbox.invalid`);
+await page.locator("form button[type=submit]").first().click();
+await page.waitForSelector("#website",{timeout:15000});
+await page.waitForTimeout(9000);
+await page.locator("#turnstile-slot").screenshot({path:"/tmp/claude-0/-root/9d7c8207-27fd-4b05-84d9-cdef65867a28/scratchpad/turnstile.png"});
+console.log("Bild vom Widget gespeichert");
+await b.close();

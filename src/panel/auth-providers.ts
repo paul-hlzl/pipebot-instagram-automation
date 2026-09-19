@@ -244,5 +244,14 @@ export function getAuthProvider(id: string): AuthProvider | undefined {
 export function authProvidersPublic(): { id: string; name: string; available: boolean; note: string | null }[] {
   return authProviders
     .filter((p) => p.isConfigured() || !p.hiddenUntilConfigured)
-    .map((p) => ({ id: p.id, name: p.name, available: p.isConfigured(), note: p.isConfigured() ? null : p.pendingNote }));
+    // Der Kunde bekommt einen Satz, der IHN etwas angeht. `pendingNote` sagt, was WIR noch tun
+    // muessen ("Braucht einen OAuth-Client in der Google Cloud Console") - das stand bis zum
+    // 19.09.2026 auf der oeffentlichen Seite und geht niemanden draussen etwas an. Der
+    // technische Satz bleibt im Code und in der Admin-Uebersicht.
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      available: p.isConfigured(),
+      note: p.isConfigured() ? null : `Noch nicht freigeschaltet. Mit E-Mail geht es sofort.`,
+    }));
 }
