@@ -70,6 +70,7 @@ import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 import { registerStartRoutes } from "./start-routes.js";
 import { registerTestmodeRoutes, testmodusMoeglich } from "./start-testmode.js";
+import { registerWocheRoutes, merken } from "./woche-routes.js";
 import { limitsAusgeschaltet } from "./start-quota.js";
 import { runBackfillJob } from "./start-jobs.js";
 import { featuresForTier, normalizeTier } from "./tiers.js";
@@ -1112,6 +1113,7 @@ export function createPanelRouter(): Router {
   // Nur wirksam, wenn PANEL_SANDBOX=true UND PANEL_TEST_KEY gesetzt sind - sonst faellt der
   // Einstieg auf 404 durch (siehe start-testmode.ts).
   registerTestmodeRoutes(router, { currentCustomer, startSession, endSession, publicState, clientIp, mountFor, rateLimited, trialDays });
+  registerWocheRoutes(router, { currentCustomer, rateLimited });
 
   router.post("/api/signup", safe(async (req, res) => {
     if (rateLimited(`signup:${clientIp(req)}`, 5, 3_600_000)) {
@@ -1556,6 +1558,7 @@ export function createPanelRouter(): Router {
         res.status(400).json({ error: err instanceof ToolError ? err.message : "Der Text konnte nicht gespeichert werden - bitte prüfen Sie ihn noch einmal." });
         return;
       }
+      merken(plan.id, "Bearbeitet");
       const updated = updatePlannedPostText(plan.id, { headline, caption });
       res.json({ post: updated });
     }),
@@ -1648,6 +1651,7 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Dieser Beitrag wurde bereits veröffentlicht." });
       return;
     }
+    merken(plan.id, "Übersprungen");
     res.json({ post: markPlannedPostStatus(plan.id, "rejected") });
   });
 
@@ -1671,6 +1675,7 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Dieser Beitrag kann nicht mehr freigegeben werden." });
       return;
     }
+    merken(plan.id, "Freigegeben");
     const updated = markPlannedPostStatus(plan.id, "approved");
     triggerRoutineNow("planned-post-approve");
     res.json({ post: updated });

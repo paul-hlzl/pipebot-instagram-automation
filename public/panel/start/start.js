@@ -603,7 +603,9 @@
   /* ================= Die Woche (ohne leere Tage) ================= */
   function wocheHtml(opts = {}) {
     const st = S.status;
-    const posts = (st?.posts || []).filter((p) => p.status !== "rejected" && aktiveKanaele().includes(p.channel));
+    // In der Uebersicht bleibt ein uebersprungener Beitrag sichtbar - gedaempft, mit "Doch
+    // posten" (Konzept 19.09.2026). Nur die Ergebnis-Vorschau blendet ihn aus.
+    const posts = (st?.posts || []).filter((p) => (opts.dashboard || p.status !== "rejected") && aktiveKanaele().includes(p.channel));
     const laeuft = st?.job && !["done", "error", "idle"].includes(st.job.phase);
     // Nur Tage, an denen wirklich etwas rausgeht. Ein Tag ohne Beitrag erscheint nicht -
     // kein grauer Kasten, kein Platzhalter (Auftrag Abschnitt 5, Abnahme 3).
@@ -672,29 +674,43 @@
     return `<article class="post" aria-busy="true"><div class="post-meta"><span class="chan ${ch}">${esc(meta.label)}</span><span class="status">wird geschrieben …</span></div><div class="media ${meta.format}"><div class="skeleton">Beitrag entsteht gerade</div></div></article>`;
   }
 
+  /* -------------------- Die Karte (Konzept 19.09.2026, freigegeben) ---------------------
+   * Zustand oben rechts, Bild, Ueberschrift, Textanfang, und genau zwei Handlungen. Der Rest
+   * liegt hinter "···" im Blatt. Kein Ziehen, keine Pfeile - Antippen, auf beiden Geraeten. */
+  const ZUSTAND = {
+    planned: ["geplant", "Geplant"], edited: ["bearb", "Von dir bearbeitet"], approved: ["frei", "Freigegeben"],
+    submitted: ["frei", "Unterwegs"], published: ["frei", "Veröffentlicht"], rejected: ["ueber", "Übersprungen"],
+    channel_disconnected: ["ueber", "Kanal getrennt"],
+  };
+  function zustandVon(p) {
+    if (p.origin === "kunde" && !p.pillarTitle && p.status !== "rejected" && p.status !== "published") return ["eigen", "Eigener Beitrag"];
+    return ZUSTAND[p.status] || ["geplant", p.status];
+  }
   function postHtml(p, opts = {}) {
     const meta = KANAL[p.channel] || KANAL.ig_feed;
     const c = S.customer;
     const wm = (c && (c.watermarkText || c.company)) || "";
+    const [zk, zt] = zustandVon(p);
     const medien = p.imageUrl
       ? `<img src="${esc(p.imageUrl)}" alt="Beitragsbild: ${esc(p.headline || "")}" loading="lazy">`
       : `<div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div><span class="kachel-notiz">${c?.emailVerified || bilderKostenlos() ? "Bild wird gerade erstellt" : "Bild folgt nach der Bestätigung"}</span>`;
-    const statusText = { edited: "von dir bearbeitet", approved: "freigegeben", submitted: "in der Freigabe", published: "veröffentlicht", channel_disconnected: "Kanal getrennt" }[p.status] || "";
-    const sortierbar = opts.dashboard && ["planned", "edited", "approved"].includes(p.status);
-    const aktionen = opts.dashboard ? `
-      <div class="post-actions">
-        ${c?.approvalMode && ["planned", "edited"].includes(p.status) ? `<button type="button" class="btn sm" data-freigeben-plan="${esc(p.id)}">Freigeben</button>` : ""}
-        ${["planned", "edited", "approved"].includes(p.status) ? `<button type="button" class="link" data-skip-plan="${esc(p.id)}">Überspringen</button>` : ""}
-        ${sortierbar ? `<span class="order-btns" role="group" aria-label="Reihenfolge"><button type="button" data-move="up" data-id="${esc(p.id)}" aria-label="Früher">↑</button><button type="button" data-move="down" data-id="${esc(p.id)}" aria-label="Später">↓</button></span><span class="griff" draggable="true" data-drag="${esc(p.id)}" title="Ziehen zum Umsortieren">⠿</span>` : ""}
-      </div>` : "";
-    return `<article class="post" data-id="${esc(p.id)}" data-channel="${esc(p.channel)}" data-date="${esc(p.scheduledFor)}">
-      <div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><span class="status ${p.status === "approved" || p.status === "published" ? "ok" : ""}">${esc(statusText)}</span></div>
+    const aenderbar = ["planned", "edited", "approved"].includes(p.status);
+    let aktionen = "";
+    if (p.status === "rejected") aktionen = `<button type="button" class="link" data-unskip="${esc(p.id)}">Doch posten</button>`;
+    else if (aenderbar) {
+      const erste = c?.approvalMode && ["planned", "edited"].includes(p.status)
+        ? `<button type="button" class="link stark" data-freigeben-plan="${esc(p.id)}">Freigeben</button><button type="button" class="link" data-bearbeiten="${esc(p.id)}">Bearbeiten</button>`
+        : `<button type="button" class="link stark" data-bearbeiten="${esc(p.id)}">Bearbeiten</button><button type="button" class="link leise" data-skip-plan="${esc(p.id)}">Überspringen</button>`;
+      aktionen = `${erste}<button type="button" class="link mehr" data-mehr="${esc(p.id)}" aria-label="Weitere Möglichkeiten">···</button>`;
+    }
+    return `<article class="post${p.status === "rejected" ? " ist-uebersprungen" : ""}" data-id="${esc(p.id)}">
+      <div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><span class="zust ${zk}"><i></i>${zt}</span></div>
       <div class="media ${meta.format}">${medien}</div>
-      <div class="post-body">
-        <h3 class="post-h">${esc(p.headline || "")}</h3>
-        ${p.caption ? `<p class="post-c">${esc(p.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}
-      </div>${aktionen}</article>`;
+      <div class="post-body"><h3 class="post-h">${esc(p.headline || "")}</h3>${p.caption ? `<p class="post-c">${esc(p.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}</div>
+      ${aktionen ? `<div class="post-actions">${aktionen}</div>` : ""}
+    </article>`;
   }
+
 
   /* ================= Bildschirm 4: das Ergebnis ================= */
   function ergebnisHtml() {
@@ -971,8 +987,8 @@
     if (!c.emailVerified && !c.authProvider) punkte.push(`<button type="button" class="link" id="verify-neu">E-Mail bestätigen</button>`);
     for (const p of fehlend) punkte.push(`<a href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start">${esc(p.name)} verbinden</a>`);
     const pause = c.customerPaused
-      ? `<p class="offen ist-pausiert">Veröffentlichung pausiert <button type="button" class="link" data-pause="0">fortsetzen</button></p>`
-      : "";
+      ? `<p class="offen ist-pausiert">Pausiert - nichts geht raus <button type="button" class="link" data-pause="0">fortsetzen</button></p>`
+      : `<p class="offen">Automatik läuft<span class="offen-pkt">·</span><button type="button" class="link" data-pause="1">pausieren</button></p>`;
     if (!punkte.length) return pause;
     return `${pause}<p class="offen">${punkte.join('<span class="offen-pkt">·</span>')}</p>`;
   }
@@ -996,6 +1012,7 @@
         <div class="abschnitt" id="freigaben-abschnitt">${freigabenHtml()}</div>
         <div class="abschnitt">
           ${wocheHtml({ dashboard: true })}
+          <button type="button" class="eigen-plus" id="eigen-neu"><b>+</b>Eigenen Beitrag schreiben</button>
         </div>
       </section>`;
   }
@@ -1449,6 +1466,115 @@
       </form>`;
     $("#sheet-overlay").hidden = false;
   }
+  /* ------------------------ Das Blatt zu einem Beitrag (Konzept M2) ------------------------ */
+  const postVon = (id) => (S.status?.posts || []).find((p) => p.id === id);
+  function blattOeffnen(titel, html) {
+    $("#sheet-title").textContent = titel;
+    $("#sheet-body").innerHTML = html;
+    $("#sheet-overlay").hidden = false;
+  }
+  const RUECK_MS = 8000;
+  let rueckTimer = null;
+  /** Nach jeder Handlung: eine Zeile unten, ein Schritt zurueck, acht Sekunden. */
+  function rueckAnbieten(postId, text) {
+    const alt = $("#rueck"); if (alt) alt.remove();
+    const el = document.createElement("div");
+    el.id = "rueck"; el.className = "rueck"; el.setAttribute("role", "status");
+    el.innerHTML = `<span>${esc(text)}</span><button type="button" class="rueck-knopf" data-undo="${esc(postId)}">Rückgängig</button>`;
+    document.body.appendChild(el);
+    clearTimeout(rueckTimer);
+    rueckTimer = setTimeout(() => el.remove(), RUECK_MS);
+  }
+  async function postAktualisieren(post) {
+    const i = S.status.posts.findIndex((p) => p.id === post.id);
+    if (i >= 0) S.status.posts[i] = post; else S.status.posts.push(post);
+    S.wochenSig = wochenSignatur();
+    render();
+  }
+  function tagChips(name, aktiv, belegte) {
+    const chips = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(Date.now() + i * 86400000); const iso = d.toISOString().slice(0, 10);
+      const belegt = belegte.has(iso) && iso !== aktiv;
+      chips.push(`<label class="chip${belegt ? " ist-belegt" : ""}"><input type="radio" name="${name}" value="${iso}" ${iso === aktiv ? "checked" : ""} ${belegt ? "disabled" : ""}><span>${esc(kurzDatum(iso))}${belegt ? " · belegt" : ""}</span></label>`);
+    }
+    return `<div class="chips">${chips.join("")}</div>`;
+  }
+  const belegteTage = (channel, ausser) => new Set((S.status?.posts || []).filter((p) => p.channel === channel && p.status !== "rejected" && p.id !== ausser).map((p) => p.scheduledFor));
+
+  function bearbeitenBlatt(id) {
+    const p = postVon(id); if (!p) return;
+    const meta = KANAL[p.channel] || KANAL.ig_feed;
+    blattOeffnen(`${kurzDatum(p.scheduledFor)} · ${meta.label}`, `
+      <form id="f-bearbeiten" data-id="${esc(p.id)}" novalidate>
+        <div class="bildzeile">${p.imageUrl ? `<img class="bild-klein" src="${esc(p.imageUrl)}" alt="">` : `<span class="bild-klein leer"></span>`}<span class="small">${p.imageSource === "kunde" ? "Dein eigenes Bild" : "Bild aus deinen Farben"}</span><label class="link bild-wahl">Eigenes Bild<input type="file" id="bild-datei" accept="image/png,image/jpeg,image/webp" hidden></label></div>
+        <div class="field"><label for="b-kopf">Überschrift</label><input class="input" id="b-kopf" name="headline" maxlength="80" value="${esc(p.headline || "")}" required></div>
+        ${p.channel === "ig_story" ? "" : `<div class="field"><label for="b-text">Text</label><textarea class="textarea" id="b-text" name="caption" rows="5" maxlength="2200">${esc(p.caption || "")}</textarea></div>`}
+        <p class="error" id="err-bearbeiten" aria-live="assertive"></p>
+        <div class="actions" style="margin-top:14px"><button class="btn lg" type="submit">Speichern</button></div>
+        <div class="leise-reihe">
+          <button type="button" class="link" data-tag-blatt="${esc(p.id)}">Anderer Tag</button>
+          <button type="button" class="link" data-regen="${esc(p.id)}">Neu schreiben lassen</button>
+          <button type="button" class="link" data-skip-plan="${esc(p.id)}" data-schliessen>Entfernen</button>
+        </div>
+      </form>`);
+  }
+  function tagBlatt(id) {
+    const p = postVon(id); if (!p) return;
+    blattOeffnen("Anderer Tag", `
+      <form id="f-tag" data-id="${esc(p.id)}" novalidate>
+        <p class="small muted" style="margin-bottom:10px">${esc(p.headline || "")}</p>
+        ${tagChips("tag", p.scheduledFor, belegteTage(p.channel, p.id))}
+        <p class="error" id="err-tag" aria-live="assertive"></p>
+        <div class="actions" style="margin-top:14px"><button class="btn lg" type="submit">Verschieben</button></div>
+      </form>`);
+  }
+  function eigenBlatt() {
+    const kanaele = aktiveKanaele();
+    blattOeffnen("Eigener Beitrag", `
+      <form id="f-eigen" novalidate>
+        <div class="field"><label>Kanal</label><div class="chips">${kanaele.map((ch, i) => `<label class="chip"><input type="radio" name="channel" value="${ch}" ${i === 0 ? "checked" : ""}><span>${esc(KANAL[ch].label)}</span></label>`).join("")}</div></div>
+        <div class="field"><label>Tag</label><div id="eigen-tage">${tagChips("scheduledFor", "", belegteTage(kanaele[0]))}</div></div>
+        <div class="field"><label for="e-kopf">Überschrift</label><input class="input" id="e-kopf" name="headline" maxlength="80" required placeholder="Kurz, sie steht im Bild"></div>
+        <div class="field"><label for="e-text">Text</label><textarea class="textarea" id="e-text" name="caption" rows="5" maxlength="2200"></textarea></div>
+        <p class="error" id="err-eigen" aria-live="assertive"></p>
+        <div class="actions" style="margin-top:14px"><button class="btn lg" type="submit">Einplanen</button></div>
+        <p class="hint">Das Bild entsteht in deinen Farben. Ein eigenes kannst du danach hochladen.</p>
+      </form>`);
+  }
+  async function bearbeitenSpeichern(form) {
+    const id = form.dataset.id; const btn = $("button[type=submit]", form);
+    beschaeftigt(btn, true, "Wird gespeichert …");
+    try {
+      const body = { headline: form.headline.value.trim() };
+      if (form.caption) body.caption = form.caption.value.trim();
+      const { post } = await api("PATCH", `/api/planned-posts/${id}`, body);
+      sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(id, "Gespeichert");
+    } catch (err) { $("#err-bearbeiten").textContent = err.message; } finally { beschaeftigt(btn, false); }
+  }
+  async function tagSpeichern(form) {
+    const id = form.dataset.id; const tag = form.tag?.value; const btn = $("button[type=submit]", form);
+    if (!tag) { $("#err-tag").textContent = "Bitte einen Tag wählen."; return; }
+    beschaeftigt(btn, true, "…");
+    try { const { post } = await api("POST", `/api/planned-posts/${id}/move`, { scheduledFor: tag }); sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(id, `Auf ${kurzDatum(tag)} verschoben`); }
+    catch (err) { $("#err-tag").textContent = err.message; } finally { beschaeftigt(btn, false); }
+  }
+  async function eigenSpeichern(form) {
+    const btn = $("button[type=submit]", form);
+    const body = { channel: form.channel.value, scheduledFor: form.scheduledFor?.value, headline: form.headline.value.trim(), caption: form.caption.value.trim() };
+    if (!body.scheduledFor) { $("#err-eigen").textContent = "Bitte einen Tag wählen."; return; }
+    beschaeftigt(btn, true, "Wird eingeplant …");
+    try { const { post } = await api("POST", "/api/planned-posts", body); sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(post.id, "Eigener Beitrag eingeplant"); }
+    catch (err) { $("#err-eigen").textContent = err.message; } finally { beschaeftigt(btn, false); }
+  }
+  async function bildHochladen(id, datei) {
+    if (!datei) return;
+    if (datei.size > 2.5 * 1024 * 1024) { $("#err-bearbeiten").textContent = "Bitte ein Bild bis 2,5 MB."; return; }
+    const dataUrl = await new Promise((f, r) => { const fr = new FileReader(); fr.onload = () => f(fr.result); fr.onerror = r; fr.readAsDataURL(datei); });
+    try { const { post } = await api("POST", `/api/planned-posts/${id}/image`, { image: dataUrl }); sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(id, "Eigenes Bild gesetzt"); }
+    catch (err) { $("#err-bearbeiten").textContent = err.message; }
+  }
+
   function sheetSchliessen() {
     const overlay = $("#sheet-overlay");
     overlay.hidden = true;
@@ -1536,6 +1662,10 @@
   document.addEventListener("dragend", () => { $$("#woche .post.is-over, #woche .post.is-dragging").forEach((el) => el.classList.remove("is-over", "is-dragging")); zieht = null; });
 
   /* ================= Ereignisse ================= */
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "bild-datei") { bildHochladen($("#f-bearbeiten").dataset.id, e.target.files[0]); return; }
+    if (e.target.name === "channel" && $("#f-eigen")) { $("#eigen-tage").innerHTML = tagChips("scheduledFor", "", belegteTage(e.target.value)); }
+  });
   document.addEventListener("submit", (e) => {
     const form = e.target;
     e.preventDefault();
@@ -1544,6 +1674,9 @@
     else if (form.id === "f-website") vorschauAbsenden(form, "website");
     else if (form.id === "f-beschreibung") vorschauAbsenden(form, "beschreibung");
     else if (form.id === "f-anders") andersAbsenden(form);
+    else if (form.id === "f-bearbeiten") bearbeitenSpeichern(form);
+    else if (form.id === "f-tag") tagSpeichern(form);
+    else if (form.id === "f-eigen") eigenSpeichern(form);
     else if (form.dataset.zeileForm) zeileSpeichern(form);
     else if (form.id === "f-jetzt") jetztPostenAbsenden(form);
   });
@@ -1643,9 +1776,20 @@
     const ab = t.closest("[data-ablehnen]");
     if (ab) { try { await api("POST", `/api/approvals/${ab.dataset.ablehnen}/reject`); toast("Abgelehnt."); await dashboardNachladen(); } catch (err) { toast(err.message, "bad"); } return; }
     const freiPlan = t.closest("[data-freigeben-plan]");
-    if (freiPlan) { beschaeftigt(freiPlan, true, "…"); try { const { post } = await api("POST", `/api/planned-posts/${freiPlan.dataset.freigebenPlan}/approve`); const i = S.status.posts.findIndex((p) => p.id === post.id); if (i >= 0) S.status.posts[i] = post; wocheAktualisieren(); toast("Freigegeben."); } catch (err) { beschaeftigt(freiPlan, false); toast(err.message, "bad"); } return; }
+    if (freiPlan) { beschaeftigt(freiPlan, true, "…"); try { const { post } = await api("POST", `/api/planned-posts/${freiPlan.dataset.freigebenPlan}/approve`); await postAktualisieren(post); rueckAnbieten(post.id, "Freigegeben"); } catch (err) { toast(err.message, "bad"); beschaeftigt(freiPlan, false); } return; }
+    const bearb = t.closest("[data-bearbeiten], [data-mehr]");
+    if (bearb) { bearbeitenBlatt(bearb.dataset.bearbeiten || bearb.dataset.mehr); return; }
+    const tagB = t.closest("[data-tag-blatt]");
+    if (tagB) { tagBlatt(tagB.dataset.tagBlatt); return; }
+    if (t.closest("#eigen-neu")) { eigenBlatt(); return; }
+    const unskip = t.closest("[data-unskip]");
+    if (unskip) { try { const { post } = await api("POST", `/api/planned-posts/${unskip.dataset.unskip}/unskip`); await postAktualisieren(post); rueckAnbieten(post.id, "Wird wieder gepostet"); } catch (err) { toast(err.message, "bad"); } return; }
+    const regen = t.closest("[data-regen]");
+    if (regen) { beschaeftigt(regen, true, "Wird geschrieben …"); try { const { post } = await api("POST", `/api/planned-posts/${regen.dataset.regen}/regenerate`); sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(post.id, "Neu geschrieben"); } catch (err) { $("#err-bearbeiten").textContent = err.message; beschaeftigt(regen, false); } return; }
+    const undo = t.closest("[data-undo]");
+    if (undo) { try { const { post } = await api("POST", `/api/planned-posts/${undo.dataset.undo}/undo`); $("#rueck")?.remove(); await postAktualisieren(post); toast("Rückgängig gemacht."); } catch (err) { toast(err.message, "bad"); } return; }
     const skipPlan = t.closest("[data-skip-plan]");
-    if (skipPlan) { try { const { post } = await api("POST", `/api/planned-posts/${skipPlan.dataset.skipPlan}/skip`); const i = S.status.posts.findIndex((p) => p.id === post.id); if (i >= 0) S.status.posts[i] = post; wocheAktualisieren(); toast("Übersprungen - an dem Tag geht nichts raus."); } catch (err) { toast(err.message, "bad"); } return; }
+    if (skipPlan) { try { const { post } = await api("POST", `/api/planned-posts/${skipPlan.dataset.skipPlan}/skip`); if (skipPlan.dataset.schliessen !== undefined) sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(post.id, `${kurzDatum(post.scheduledFor)} übersprungen`); } catch (err) { toast(err.message, "bad"); } return; }
     const mv = t.closest("[data-move]");
     if (mv) { verschieben(mv.dataset.id, mv.dataset.move); return; }
     if (t.closest("[data-replan]")) { try { await api("POST", "/api/start/replan"); pollStarten(); toast("Wird geplant …"); } catch (err) { toast(err.message, "bad"); } return; }

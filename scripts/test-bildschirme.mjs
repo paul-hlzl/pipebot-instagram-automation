@@ -82,7 +82,9 @@ for (const [breite, hoehe] of [[360, 780], [1440, 900]]) {
   await page.waitForSelector(".woche", { timeout: 20000 });
   await page.waitForTimeout(900);
   const b = await page.evaluate(() => {
-    const zeile = document.querySelector(".offen");
+    // Seit dem Wochenumbau steht die Pause-Zeile ("Automatik läuft · pausieren") als eigene
+    // .offen-Zeile davor; geprueft wird hier die Verbindungszeile.
+    const zeile = [...document.querySelectorAll(".offen")].find((z) => !z.querySelector("[data-pause]")) || null;
     const woche = document.querySelector(".woche");
     const kaesten = document.querySelectorAll(".notice");
     return {

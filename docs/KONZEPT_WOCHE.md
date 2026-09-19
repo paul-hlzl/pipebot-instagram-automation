@@ -1,6 +1,6 @@
-# Konzept: Der Kunde hat die Kontrolle über seine Woche (19.09.2026)
+# Der Kunde hat die Kontrolle über seine Woche (Konzept 19.09.2026, gebaut am selben Tag)
 
-Nur Konzept, nichts gebaut. Zeichnungen bei 360 px unter
+Freigegeben und gebaut - siehe Abschnitt 6 fuer den Stand. Zeichnungen bei 360 px unter
 `docs/easy-onboarding/konzept/` (M1 Woche, M2 Blatt, M3 Verschieben, M4 Rückgängig).
 
 ## 1. Bedienung: ein Prinzip für Handy und Desktop
@@ -104,8 +104,43 @@ Der Routine-Prompt braucht keine Änderung.
 
 ## 5. Später vielleicht (nicht bauen)
 
+- Uhrzeit je Beitrag (braucht eine Änderung an `get_planned_post` und damit an der Routine).
+
 - Mehrere Rückgängig-Schritte oder ein Verlauf je Beitrag.
 - Vorschau des Instagram-Rasters aus den geplanten Bildern.
 - Beitrag auf einen anderen Kanal kopieren.
 - Vorlagen für eigene Beiträge.
 - Wiederkehrende eigene Beiträge (jeden Freitag).
+
+## 6. Gebaut (19.09.2026)
+
+**Server** (`src/panel/woche-routes.ts`, nur diese Handlungen):
+
+| Handlung | Endpunkt | Setzt |
+| --- | --- | --- |
+| Doch posten | `POST /api/planned-posts/:id/unskip` | Zustand zurueck (edited bei Kundenarbeit, sonst planned) |
+| Anderer Tag | `POST /api/planned-posts/:id/move` | `scheduled_for`, origin kunde; belegte Tage werden verweigert |
+| Neu schreiben lassen | `POST /api/planned-posts/:id/regenerate` | Text (und Bild, ausser eigenes Bild), origin kunde; max. 3-mal |
+| Eigenes Bild | `POST /api/planned-posts/:id/image` | `image_url` (R2), `image_source` kunde |
+| Eigener Beitrag | `POST /api/planned-posts` | neue Zeile, origin kunde, Bild in Markenfarben |
+| Rueckgaengig | `POST /api/planned-posts/:id/undo` | einen Schritt zurueck (Tabelle `planned_post_undo`) |
+
+Bearbeiten (`PATCH /:id`), Ueberspringen und Freigeben gab es schon; sie sichern jetzt vor der
+Aenderung fuer Rueckgaengig. Rueckgaengig setzt die Herkunft nie auf `auto` zurueck - was der
+Kunde einmal angefasst hat, bleibt geschuetzt.
+
+**Oberflaeche:** Zustand oben rechts auf jeder Karte, zwei Handlungen sichtbar (Bearbeiten und
+Ueberspringen; im Freigabemodus Freigeben und Bearbeiten), Rest im Blatt hinter `···`. Kein
+Ziehen, keine Pfeile mehr. Tag als Chips, Eigener Beitrag als `+` am Ende der Woche, Pause als
+Zeile unter der Ueberschrift, Rueckgaengig als schwarze Zeile unten fuer acht Sekunden.
+Uebersprungene Beitraege bleiben in der Uebersicht sichtbar (gedaempft, "Doch posten").
+
+**Eine Abweichung vom Konzept, bewusst:** die **Uhrzeit je Beitrag ist nicht gebaut.** Die
+Routine bei claude.ai fragt stuendlich nur "gibt es fuer heute einen Beitrag" und veroeffentlicht
+zur Uhrzeit des Kunden (`customers.post_time`); eine Uhrzeit je Beitrag muesste sie kennen, und
+der Routine-Prompt darf in diesem Auftrag nicht veraendert werden. Steht unter "spaeter
+vielleicht", mit dem Hinweis, dass es eine Aenderung an `get_planned_post` braucht.
+
+**Nachweis:** `npm run test:woche` - jede Handlung im echten Browser bei 360 und 1440, inklusive
+Rueckgaengig, belegter Tage, eigenem Bild und eigenem Beitrag; `npm run test:schranke` - die
+sechs Schreibwege gegen Kundenarbeit.

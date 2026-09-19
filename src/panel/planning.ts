@@ -56,7 +56,7 @@ import { stalePostSkippedEmail } from "./emails.js";
 
 const LOOKAHEAD_DAYS = 7;
 
-type PlannableChannel = PublishChannel;
+export type PlannableChannel = PublishChannel;
 
 const CHANNEL_SCHEDULE: Record<PlannableChannel, PostingChannel> = {
   ig_feed: "instagram",
@@ -198,7 +198,7 @@ interface GeneratedPost {
  * der Text bezahlt, aber nirgends erfasst. Und der normale Tagesplan hat ueberhaupt nie gebucht,
  * dadurch fehlte in der Kostenuebersicht ausgerechnet der groesste Posten.
  */
-async function generatePost(
+export async function generatePost(
   row: CustomerRow,
   channel: PlannableChannel,
   pillar: ContentPillar | null,
