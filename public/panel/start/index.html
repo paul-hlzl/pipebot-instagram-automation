@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#ffffff">
+<title>Pipeflow</title>
+
+<!--
+  Easy Onboarding (19.09.2026) - eigener Pfad ${mount}/start/, eigene drei Dateien, kein Framework,
+  kein Build-Schritt. Das klassische Panel (../index.html) bleibt unveraendert daneben erreichbar.
+
+  Mount-agnostisch wie index.html: der Pfad endet auf /start (mit oder ohne Slash), alles davor ist
+  der Mount (/panel, /panel/sandbox oder leer unter app.pipeflow.at). <base> zeigt auf .../start/,
+  damit start.css/start.js relativ geladen werden; die Schriften liegen unter ${mount}/fonts/.
+-->
+<script>
+  (function () {
+    var path = location.pathname.replace(/\/+$/, "").replace(/\/start$/, "");
+    var base = document.createElement("base");
+    base.href = path + "/start/";
+    document.head.appendChild(base);
+    window.__PF_MOUNT = path;
+  })();
+</script>
+<link rel="preload" href="../fonts/Inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="../fonts/InstrumentSerif-normal-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="start.css?v=20260919i">
+<link rel="manifest" href="../manifest.webmanifest">
+</head>
+<body>
+
+<!-- Intro-Splash: unveraendert aus dem klassischen Panel uebernommen (einmal pro Browser-Sitzung). -->
+<div id="splash" aria-hidden="true">
+  <div class="splash-panel splash-left"></div>
+  <div class="splash-panel splash-right"></div>
+  <div class="splash-content">
+    <div class="splash-word">Pipeflow</div>
+    <div class="splash-sub">Powered by Pipeline AI Solutions</div>
+  </div>
+</div>
+<script>
+  (function () {
+    var SPLASH_EVERY_LOAD = false;
+    var splash = document.getElementById("splash");
+    if (!splash) return;
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var seen = false;
+    try { seen = sessionStorage.getItem("pf-splash") === "1"; } catch (e) { /* Privatmodus */ }
+    if (seen && !SPLASH_EVERY_LOAD) { splash.remove(); return; }
+    try { sessionStorage.setItem("pf-splash", "1"); } catch (e) { /* egal */ }
+    var holdMs = reduced ? 200 : 1100;
+    setTimeout(function () {
+      splash.classList.add("splash-done");
+      setTimeout(function () { splash.remove(); }, 320);
+    }, holdMs);
+  })();
+</script>
+
+<a class="skip-link" href="#stage">Zum Inhalt springen</a>
+<div id="sandbox-banner" class="sandbox-banner" hidden role="status">Testversion - keine echten Kunden, keine echten Instagram-/LinkedIn-Verbindungen. E-Mails werden hier nicht verschickt, Tagesgrenzen sind abgeschaltet.</div>
+
+<!-- Testlauf-Leiste: nur sichtbar, wenn die laufende Sitzung ein Testkunde ist
+     (publicState.customer.isTest). Bewusst schmal und grau - sie soll bei einer Vorfuehrung
+     nicht ins Bild springen, aber jederzeit erreichbar sein. -->
+<div id="testleiste" class="testleiste" hidden role="status">
+  <span class="testleiste-text" id="testleiste-text"></span>
+  <span class="testleiste-knoepfe">
+    <button type="button" class="link" id="test-neu">Neu starten</button>
+    <button type="button" class="link" id="test-ende" hidden>Beenden</button>
+  </span>
+</div>
+
+<!-- Marke: auf JEDEM Bildschirm links, gleiche Position, nie zentriert, nie gekuerzt.
+     Rechts steht ab dem Dashboard genau ein Zugang zum Konto - sonst nichts. -->
+<header class="top" id="top">
+  <a class="marke" href="./" data-go="home" aria-label="Pipeflow, powered by Pipeline AI Solutions">
+    <span class="marke-name">Pipeflow</span>
+    <span class="marke-sub">powered by Pipeline AI Solutions</span>
+  </a>
+  <!-- Markenlogo des Kunden, sobald die Website gelesen ist. Steht rechts neben dem
+       Pipeflow-Schriftzug, durch eine feine Linie getrennt, und bleibt leer, wenn keines
+       erkannt wurde (Auftrag 19.09.2026). -->
+  <!-- "Pipeflow ✕ Firma" (19.09.2026): das Logo, wenn eines gefunden wurde, sonst der Firmenname
+       als Text in der Markenfarbe - an derselben Stelle. Die Kopfzeile wirkt nie leer. -->
+  <span class="marke-kunde" id="marke-kunde" hidden>
+    <span class="marke-x" aria-hidden="true">✕</span>
+    <img id="marke-kunde-bild" alt="" width="0" height="0" hidden>
+    <span class="marke-kunde-name" id="marke-kunde-name" hidden></span>
+  </span>
+  <nav class="top-actions" id="top-actions" aria-label="Konto"></nav>
+</header>
+
+<main id="stage" class="stage" tabindex="-1" aria-live="polite"></main>
+
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<div id="sheet-overlay" class="sheet-overlay" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <button type="button" class="sheet-close" id="sheet-close" aria-label="Schließen">×</button>
+    <h2 class="sheet-title" id="sheet-title"></h2>
+    <div class="sheet-body" id="sheet-body"></div>
+  </div>
+</div>
+
+<script src="start.js?v=20260919i"></script>
+</body>
+</html>

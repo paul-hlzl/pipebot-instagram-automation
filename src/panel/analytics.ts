@@ -228,8 +228,13 @@ export function usageCostSummary(days = 30): { feature: string; count: number; t
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
   return db
     .prepare(
+      // Testlaeufe der Sandbox (status = 'test') zaehlen nicht in die Kostenuebersicht -
+      // die Zeilen bleiben stehen, damit man sie einzeln nachrechnen kann, aber sie gehoeren
+      // in keine Abrechnung. Siehe start-testmode.ts.
       `SELECT feature, COUNT(*) as count, COALESCE(SUM(estimated_cost_usd), 0) as totalUsd
-       FROM usage_costs WHERE created_at >= ? GROUP BY feature ORDER BY totalUsd DESC`,
+       FROM usage_costs WHERE created_at >= ?
+         AND customer_id NOT IN (SELECT id FROM customers WHERE status = 'test')
+       GROUP BY feature ORDER BY totalUsd DESC`,
     )
     .all(since) as { feature: string; count: number; totalUsd: number }[];
 }

@@ -336,7 +336,16 @@ function migrateColumns(table: string, columns: readonly (readonly [string, stri
   }
 }
 
+// Ueberschreibschutz (Auftrag 19.09.2026): `origin` sagt, ob eine Zeile von Pipeflow stammt
+// ('auto') oder ob der Kunde daran gearbeitet hat ('kunde'). Nichts setzt es je zurueck.
+// `image_source` dasselbe fuer das Bild. Bestehende Zeilen sind 'auto' - das ist wahr.
+migrateColumns("planned_posts", [
+  ["origin", "TEXT NOT NULL DEFAULT 'auto'"],
+  ["image_source", "TEXT NOT NULL DEFAULT 'auto'"],
+]);
 migrateColumns("pending_approvals", [
+  // Wird beim Einreichen aus planned_posts uebernommen (credentials.ts, submit...).
+  ["origin", "TEXT NOT NULL DEFAULT 'auto'"],
   // Exact ig_feed/ig_story/linkedin value from save_pending_approval's `channel` argument -
   // the pre-existing `provider` column collapses ig_feed/ig_story both to "instagram", which
   // loses exactly the distinction the panel UI and a later publish-approved-post run need.
@@ -358,6 +367,11 @@ migrateColumns("customers", [
   // Stillstands-Wache: Zeitpunkt der letzten Meldung an Paul, damit pro Stillstands-Phase genau
   // eine Mail rausgeht statt taeglich einer (siehe panel/standstill-watch.ts).
   ["standstill_alert_sent_at", "TEXT"],
+  // 19.09.2026: das auf der Website erkannte Logo. BEWUSST getrennt von `logo_url` - das ist
+  // der eigene Upload des Kunden und darf nie ueberschrieben werden. Die Kopfzeile zeigt den
+  // Upload, wenn es einen gibt, sonst dieses hier.
+  ["detected_logo_url", "TEXT"],
+  ["detected_logo_tile", "INTEGER NOT NULL DEFAULT 0"],
   ["accent_color", "TEXT"],
   ["watermark_text", "TEXT"],
   ["avoid_topics", "TEXT"],
@@ -651,6 +665,64 @@ for (const tabelle of ["planned_posts", "pending_approvals"]) {
 // Verhalten: naechster Onboarding-Schritt). NULL = altes Verhalten, unveraendert.
 migrateColumns("oauth_states", [["return_to", "TEXT"]]);
 
+// Easy Onboarding (19.09.2026, Sandbox-Auftrag) - alles additiv, NULL = bisheriges Verhalten:
+//   ui_mode   'easy' = der Kunde ist ueber den neuen Ein-Feld-Flow gekommen und landet unter
+//             ${mount}/start/ statt im klassischen Panel (siehe router.ts). NULL/'classic' =
+//             bestehende Kunden, sehen exakt weiter das, was sie kennen.
+//   plan_tier 'basic'/'pro' - nur die Struktur fuer spaetere Preisstufen (tiers.ts), keine
+//             Bezahlfunktion. NULL = basic.
+// start_previews: serverseitige, neustartfeste Zaehler fuer den Kostenschutz VOR der E-Mail-
+// Bestaetigung (start-quota.ts). Kein Fremdschluessel auf customers - ein Zaehler muss auch
+// dann noch zaehlen, wenn das unbestaetigte Konto spaeter geloescht wurde (sonst waere Loeschen
+// + neu anlegen ein Weg um den Deckel herum).
+migrateColumns("customers", [["ui_mode", "TEXT"], ["plan_tier", "TEXT"]]);
+// Einmal-Anmeldelink fuer Bildschirm 1 des Easy Onboardings ("bekannte Adresse -> Link per Mail"):
+// eigener, eine Stunde gueltiger Token statt des dauerhaften login_key_hash. Sonst koennte jeder,
+// der eine fremde E-Mail-Adresse eintippt, den gespeicherten Zugangslink des Kunden entwerten
+// (bei "Zugang verloren?" im klassischen Panel ist genau das das gewollte Verhalten, hier nicht).
+migrateColumns("customers", [["login_link_token_hash", "TEXT"], ["login_link_expires_at", "TEXT"]]);
+// Anmeldung ueber Google/Microsoft/Apple (Auftrag Abschnitt 4). auth_provider/auth_subject sind
+// die dauerhafte Zuordnung zum Anbieterkonto - die E-Mail-Adresse allein reicht nicht, weil sie
+// sich beim Anbieter aendern kann. NULL = Kunde kam ueber den E-Mail-Weg (alle bestehenden).
+migrateColumns("customers", [["auth_provider", "TEXT"], ["auth_subject", "TEXT"]]);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS customers_auth ON customers(auth_provider, auth_subject) WHERE auth_provider IS NOT NULL`);
+
+// Kurzlebiger Zustand eines laufenden Anmeldevorgangs. Eigene Tabelle statt oauth_states: dort
+// haengt ein Pflicht-Fremdschluessel auf customers, und beim Anmelden gibt es den Kunden noch
+// nicht (genau das ist der Unterschied zwischen "Kanal verbinden" und "Konto anlegen").
+db.exec(`
+CREATE TABLE IF NOT EXISTS auth_states (
+  state TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Kostenschutz (Auftrag Abschnitt 8): eine Domain, die schon analysiert wurde, wird eine Zeit
+-- lang aus dem Zwischenspeicher bedient statt neu analysiert. Speichert NUR das Ergebnis der
+-- Website-Analyse und die erkannten Markenfarben - nichts Kundenbezogenes.
+CREATE TABLE IF NOT EXISTS domain_cache (
+  domain TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`);
+db.exec(`
+CREATE TABLE IF NOT EXISTS start_previews (
+  id TEXT PRIMARY KEY,
+  ip TEXT NOT NULL,
+  domain TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL,
+  customer_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'preview',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS start_previews_ip ON start_previews(ip, created_at DESC);
+CREATE INDEX IF NOT EXISTS start_previews_domain ON start_previews(domain, created_at DESC);
+CREATE INDEX IF NOT EXISTS start_previews_customer ON start_previews(customer_id, kind);
+`);
+
 export interface CustomerRow {
   standstill_alert_sent_at: string | null;
   id: string;
@@ -720,6 +792,16 @@ export interface CustomerRow {
   video_zoom_direction: string;
   video_voice: string;
   video_voice_enabled: number;
+  /** Easy Onboarding: 'easy' | 'classic' | NULL (= classic). */
+  ui_mode: string | null;
+  /** Preisstufen-Struktur (tiers.ts): 'basic' | 'pro' | NULL (= basic). */
+  plan_tier: string | null;
+  login_link_token_hash: string | null;
+  login_link_expires_at: string | null;
+  /** 'google' | 'microsoft' | 'apple' | NULL (= ueber E-Mail angelegt). */
+  auth_provider: string | null;
+  /** Dauerhafte Kennung des Kontos beim Anbieter ("sub"). */
+  auth_subject: string | null;
 }
 
 export interface ConnectionRow {
@@ -856,6 +938,7 @@ export interface PendingApprovalRow {
   updated_at: string;
   format: string;
   branding_version_at_generation: string | null;
+  origin: string;
   video_url: string | null;
 }
 
@@ -888,6 +971,8 @@ export interface PlannedPostRow {
   updated_at: string;
   format: string;
   branding_version_at_generation: string | null;
+  origin: string;
+  image_source: string;
   video_url: string | null;
 }
 
@@ -941,4 +1026,5 @@ export function cleanupExpired(): void {
   db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
   db.prepare("DELETE FROM oauth_states WHERE expires_at < ?").run(now);
   db.prepare("DELETE FROM admin_sessions WHERE expires_at < ?").run(now);
+  db.prepare("DELETE FROM auth_states WHERE expires_at < ?").run(now);
 }

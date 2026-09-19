@@ -302,7 +302,7 @@ export async function generateImageUrl(
   headline: string,
   format: PostFormat = "feed",
   branding?: ImageBranding,
-): Promise<{ prompt: string; imageUrl: string; imageBase64: string; mimeType: string }> {
+): Promise<{ prompt: string; imageUrl: string; imageBase64: string; mimeType: string; costUsd: number }> {
   const trimmedHeadline = headline.trim();
   if (!trimmedHeadline) {
     throw new ToolError("headline darf nicht leer sein.");
@@ -310,6 +310,11 @@ export async function generateImageUrl(
 
   let backgroundBuffer: Buffer;
   let prompt: string;
+  // Was dieses Bild tatsaechlich gekostet hat: beim Farbverlauf nichts (lokal gerendert), sonst
+  // ein fal.ai-Aufruf. Frueher hat der Aufrufer (planning.ts) pauschal FAL_IMAGE_COST_USD
+  // gebucht - fuer Kunden mit Farbverlauf war die Kostenuebersicht damit systematisch zu hoch,
+  // und genau diese Kunden sind seit der Markenfarben-Uebernahme die Mehrheit.
+  let costUsd = 0;
   if (branding?.gradient && branding.accentColor && HEX_COLOR.test(branding.accentColor) && HEX_COLOR.test(branding.gradient.color2)) {
     // Farbverlauf-Kunde: kein fal.ai-Aufruf fuer den Hintergrund (siehe gradient.ts Dateikopf) -
     // spart sogar Kosten gegenueber dem Einzelfarben-Pfad, ausser den Slide-Bildkosten faellt hier
@@ -326,6 +331,7 @@ export async function generateImageUrl(
       "fal.ai image download",
     );
     backgroundBuffer = Buffer.from(data);
+    costUsd = FAL_IMAGE_COST_USD;
   }
 
   const fontOption = getFontOption(branding?.fontId ?? DEFAULT_FONT_ID);
@@ -339,5 +345,5 @@ export async function generateImageUrl(
     "R2 upload of finished image",
   );
 
-  return { prompt, imageUrl, imageBase64, mimeType: "image/jpeg" };
+  return { prompt, imageUrl, imageBase64, mimeType: "image/jpeg", costUsd };
 }

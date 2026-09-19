@@ -1,0 +1,638 @@
+/* ===========================================================================
+   Pipeflow „Start" — Easy Onboarding, helle Fassung (19.09.2026)
+   Designplan: docs/EASY_ONBOARDING_DESIGN.md
+   Ablauf-Vorbild und Farbstimmung: ads.openai.com, und damit zugleich der
+   Charakter des bestehenden Panels (das ebenfalls weiss ist). Die einzige
+   Farbe auf der Seite ist die Markenfarbe des Kunden - sie steckt in den
+   Beitragskarten, nicht im Interface.
+
+   Umschalten auf Dunkel heisst: nur den :root-Block unten tauschen. Jede
+   Regel darunter benutzt ausschliesslich diese Tokens, keine festen Farben -
+   deshalb ist --aktion/--aktion-text bewusst nach der ROLLE benannt
+   (Flaeche und Schrift der Hauptaktion), nicht nach dem Farbwert.
+   =========================================================================== */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("../fonts/Inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("../fonts/Inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/InstrumentSerif-normal-latin.woff2") format("woff2");
+}
+
+:root {
+  /* --- sechs benannte Werte, mehr hat das Interface nicht --- */
+  --grund:       #faf9f7;  /* Seitenhintergrund: ruhiges Papier, damit weisse Karten tragen */
+  --flaeche:     #fbfbfa;  /* Karten, Felder, alles Erhobene */
+  --linie:       #e5e5e2;  /* Trennlinien und Raender */
+  --text:        #0d0d0d;  /* Fliesstext und Ueberschriften */
+  --text-2:      #5d5d5d;  /* Sekundaertext, Beschriftungen */
+  --aktion:      #0d0d0d;  /* Flaeche der Hauptaktion: schwarze Pille */
+  --aktion-text: #ffffff;  /* Schrift darauf */
+  --wash:        #f2f2f0;  /* neutrale Hinterlegung, z. B. hinter einem Bild */
+  /* Einfallendes Licht: zwei sehr schwache Lichtkegel oben. Ohne erkannte Markenfarben ein
+     neutraler Grauton; sobald die Website Farben hergibt, setzt start.js diese beiden Werte
+     auf die Marke um - mit niedriger Deckkraft, damit es Licht bleibt und kein Hintergrund. */
+  /* Ohne erkannte Markenfarben bleibt es ein sehr schwaches Grau - dasselbe wie bisher. */
+  --licht-1: rgba(13, 13, 13, .05);
+  --licht-2: rgba(13, 13, 13, .03);
+  --licht-3: rgba(13, 13, 13, .02);
+  /* Zwei Signalfarben, ausschliesslich Bedeutung, nie Dekoration */
+  --gut:     #137a3f;
+  --schlecht:#b42318;
+
+  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --serif: "Instrument Serif", "Times New Roman", Georgia, serif;
+
+  --t-display: clamp(32px, 7vw, 46px);
+  --t-h2: 21px;
+  --t-body: 16px;
+  --t-small: 14px;
+  --t-micro: 12px;
+
+  --spalte: 560px;
+  --spalte-breit: 1080px;
+  --rand: 16px;
+  --tap: 44px;
+
+  --dauer: 320ms;
+  --kurve: cubic-bezier(.22, 1, .36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --dauer: 1ms; }
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; background: var(--grund); }
+body {
+  margin: 0; color: var(--text);
+  /* Die Lichtkegel haengen am SEITENANFANG, nicht am Fenster (kein background-attachment:
+     fixed): auf langen Seiten scrollt das Licht weg, statt ueber den Beitragskarten zu liegen,
+     und am Handy spart es das staendige Neuzeichnen. rgba(255,255,255,0) statt `transparent`,
+     weil Safari `transparent` als Schwarz interpoliert und dann ein grauer Schleier entsteht. */
+  background-color: var(--grund);
+  /* Drei Kegel statt zwei (19.09.2026): zwei oben wie bisher, dazu ein sehr weiter, sehr
+     schwacher weiter unten. Der dritte ist der Grund, warum die Farbe jetzt auch nach dem
+     ersten Bildschirm noch da ist, ohne dass irgendwo eine Flaeche entsteht. Die Karten
+     bleiben reinweiss - dadurch waechst ihr Abstand zum Grund mit, statt zu schrumpfen. */
+  background-image:
+    radial-gradient(120% 70% at 12% -2%, var(--licht-1), rgba(255, 255, 255, 0) 72%),
+    radial-gradient(95% 55% at 96% 2%, var(--licht-2), rgba(255, 255, 255, 0) 66%),
+    radial-gradient(140% 60% at 50% 100%, var(--licht-3), rgba(255, 255, 255, 0) 70%);
+  background-repeat: no-repeat;
+  background-size: 100% 1100px, 100% 900px, 100% 100%;
+  background-attachment: scroll, scroll, fixed;
+  font-family: var(--sans); font-size: var(--t-body); line-height: 1.5;
+  letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+img, svg { max-width: 100%; }
+img { height: auto; display: block; }
+h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.022em; text-wrap: balance; }
+h1 { font-size: var(--t-display); line-height: 1.06; }
+h2 { font-size: var(--t-h2); line-height: 1.2; }
+h3 { font-size: 17px; line-height: 1.3; }
+p { margin: 0; text-wrap: pretty; }
+a { color: inherit; }
+button { font: inherit; letter-spacing: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--aktion); outline-offset: 3px; border-radius: 4px; }
+.muted { color: var(--text-2); }
+.small { font-size: var(--t-small); }
+[hidden] { display: none !important; }
+
+/* --- Splash: unveraendert uebernommen, nur auf dunklem Grund --- */
+#splash { position: fixed; inset: 0; z-index: 300; pointer-events: none; }
+.splash-panel { position: absolute; top: 0; bottom: 0; width: 50.5%; background: var(--aktion); transition: transform var(--dauer) steps(7, end); }
+.splash-left { left: 0; }
+.splash-right { right: 0; }
+.splash-content { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: var(--aktion-text); transition: opacity 200ms; }
+.splash-word { font-family: var(--serif); font-size: clamp(34px, 9vw, 60px); letter-spacing: -.02em; }
+.splash-sub { font-size: var(--t-small); opacity: .65; margin-top: 6px; }
+#splash.splash-done .splash-left { transform: translateX(-100%); }
+#splash.splash-done .splash-right { transform: translateX(100%); }
+#splash.splash-done .splash-content { opacity: 0; }
+
+.skip-link { position: absolute; left: -999px; top: 8px; background: var(--aktion); color: var(--aktion-text); padding: 8px 12px; border-radius: 999px; z-index: 400; }
+.skip-link:focus { left: 12px; }
+.sandbox-banner { background: #fdf2e0; border-bottom: 1px solid #e8c468; color: #6b4e12; font-size: var(--t-small); text-align: center; padding: 8px var(--rand); }
+
+/* ---------------------------------------------------------------------------
+   Kopfzeile: auf JEDEM Bildschirm links die Wortmarke, darunter die Zeile
+   "powered by Pipeline AI Solutions". Rechts, erst ab Dashboard, ein einziger
+   Zugang zum Konto. Sonst nichts.
+   --------------------------------------------------------------------------- */
+.top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 18px var(--rand) 10px; max-width: var(--spalte-breit); margin: 0 auto;
+}
+/* 44 px, weil der Schriftzug ein Link auf den Start ist - gemessen waren es 42
+   (27 px Name + 4 + 11 px Zusatz). Die Schrift bleibt gleich, nur die Flaeche waechst. */
+.marke { text-decoration: none; display: flex; flex-direction: column; justify-content: center; min-height: 44px; line-height: 1; }
+.marke-name { font-family: var(--serif); font-size: 27px; letter-spacing: -0.01em; display: block; }
+.marke-sub { display: block; margin-top: 4px; font-size: 11px; letter-spacing: .04em; color: var(--text-2); white-space: nowrap; }
+.top-actions { display: flex; gap: 8px; align-items: center; padding-top: 4px; }
+
+/* --- Buehne --- */
+.stage { padding: 20px var(--rand) 96px; margin: 0 auto; max-width: var(--spalte); min-height: 60vh; }
+.stage.breit { max-width: var(--spalte-breit); }
+.stage:focus { outline: none; }
+.screen.enter { animation: auf var(--dauer) var(--kurve) both; }
+@keyframes auf { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.lede { margin-top: 14px; font-size: 17px; line-height: 1.55; color: var(--text-2); max-width: 46ch; }
+.lede strong { color: var(--text); font-weight: 500; }
+.hero { padding-top: 4vh; }
+.hero h1 { max-width: 15ch; }
+@media (min-width: 720px) { .hero { padding-top: 8vh; } }
+
+/* --- Felder --- */
+.field { margin-top: 26px; }
+.field label { display: block; font-size: var(--t-small); color: var(--text-2); margin-bottom: 8px; }
+.input, .textarea {
+  width: 100%; font: inherit; font-size: 16px; color: var(--text); background: #fff;
+  border: 1px solid var(--linie); border-radius: 12px; min-height: 54px; padding: 0 16px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.textarea { min-height: 128px; padding: 15px 16px; line-height: 1.55; resize: vertical; }
+.input:focus, .textarea:focus { border-color: var(--aktion); outline: none; box-shadow: 0 0 0 1px var(--aktion); }
+.input::placeholder, .textarea::placeholder { color: #9a9a9a; }
+.input[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--schlecht); box-shadow: 0 0 0 1px var(--schlecht); }
+.error { color: var(--schlecht); font-size: var(--t-small); margin-top: 8px; }
+.error:empty { display: none; }
+.hint { color: var(--text-2); font-size: var(--t-small); margin-top: 14px; line-height: 1.55; }
+
+/* Textfeld mit eingebautem KI-Knopf unten rechts (Bildschirm 2b) */
+.feld-mit-ki { position: relative; }
+.feld-mit-ki .textarea { padding-bottom: 58px; }
+.feld-mit-ki .ki-knopf { position: absolute; right: 10px; bottom: 10px; }
+
+/* --- Buttons: Pille, primaer weiss auf dunkel --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: var(--tap); padding: 0 22px; border-radius: 999px; border: 1px solid var(--aktion);
+  background: var(--aktion); color: var(--aktion-text); font-size: 15px; font-weight: 500; cursor: pointer;
+  text-decoration: none; white-space: nowrap; transition: opacity 120ms, transform 120ms, background 120ms;
+}
+.btn:hover { opacity: .9; }
+.btn:active { transform: scale(.985); }
+.btn[disabled], .btn.is-busy { opacity: .45; cursor: default; pointer-events: none; }
+.btn.secondary { background: transparent; color: var(--text); border-color: var(--linie); }
+.btn.secondary:hover { border-color: var(--text-2); opacity: 1; }
+.btn.lg { min-height: 54px; font-size: 16px; }
+.btn.sm { min-height: var(--tap); padding: 0 16px; font-size: 14px; }
+.link {
+  background: none; border: 0; padding: 12px 0; min-height: var(--tap); color: var(--text-2);
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 15px;
+  display: inline-flex; align-items: center; text-align: left;
+}
+.link:hover { color: var(--text); }
+.actions { margin-top: 26px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.actions .btn { width: 100%; }
+@media (min-width: 480px) { .actions .btn { width: auto; min-width: 240px; } }
+
+/* --- Bildschirm 1: Anmeldeknoepfe --- */
+.auth-liste { margin-top: 30px; display: grid; gap: 10px; }
+.auth-btn {
+  display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%;
+  min-height: 54px; padding: 0 16px; border-radius: 999px; cursor: pointer; font-size: 15px; font-weight: 500;
+  background: #fff; color: var(--text); border: 1px solid var(--linie); text-decoration: none;
+  white-space: nowrap; transition: border-color 120ms, background 120ms;
+}
+/* Bei 360 px muss „Mit Microsoft fortfahren" samt Hinweis in EINE Zeile passen. */
+@media (max-width: 400px) { .auth-btn { font-size: 14px; gap: 9px; padding: 0 13px; } }
+.auth-btn:hover { border-color: var(--text-2); background: var(--wash); }
+.auth-btn .logo { width: 20px; height: 20px; flex: none; }
+.auth-btn.kommt-noch { cursor: default; color: var(--text-2); }
+.auth-btn.kommt-noch:hover { border-color: var(--linie); background: var(--flaeche); }
+.auth-btn .bald { margin-left: auto; font-size: var(--t-micro); color: var(--text-2); font-weight: 400; white-space: nowrap; }
+/* Der E-Mail-Weg: gleiche Breite und Hoehe wie die Anbieter-Knoepfe, aber ohne Fuellung und in
+   der Sekundaerfarbe - sekundaer wird ueber Gestaltung gesagt, nicht ueber eine andere Breite. */
+.auth-btn.mail-weg { background: transparent; color: var(--text-2); font-weight: 400; }
+.auth-btn.mail-weg:hover { background: var(--wash); color: var(--text); border-color: var(--text-2); }
+.auth-schon { margin-top: 16px; font-size: var(--t-small); color: var(--text-2); line-height: 1.5; }
+.auth-link { font-size: var(--t-small); padding: 4px 0; min-height: var(--tap); color: var(--text); }
+.auth-eintrag { display: grid; gap: 6px; }
+.auth-notiz { font-size: var(--t-small); color: var(--text-2); padding: 0 4px; line-height: 1.45; }
+.auth-btn[disabled] { cursor: default; }
+.auth-trenner { margin: 22px 0 14px; display: flex; align-items: center; gap: 14px; color: var(--text-2); font-size: var(--t-small); }
+.auth-trenner::before, .auth-trenner::after { content: ""; height: 1px; background: var(--linie); flex: 1; }
+
+/* --- Karte „Weiter als …" --- */
+.konto-karte {
+  margin-top: 30px; width: 100%; display: flex; align-items: center; gap: 14px; text-align: left;
+  border: 1px solid var(--linie); border-radius: 16px; padding: 16px; background: #fff; cursor: pointer;
+  transition: border-color 120ms;
+}
+.konto-karte:hover { border-color: var(--text-2); }
+.konto-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--aktion); color: var(--aktion-text); display: grid; place-items: center; font-weight: 500; flex: none; }
+.konto-karte strong { display: block; font-weight: 500; }
+.konto-karte .pfeil { margin-left: auto; color: var(--text-2); }
+
+/* --- Bildschirm 3: Fortschritt --- */
+.steps { list-style: none; margin: 34px 0 0; padding: 0; display: grid; gap: 2px; }
+.step { display: grid; grid-template-columns: 26px 1fr; gap: 14px; align-items: start; padding: 14px 0; border-bottom: 1px solid var(--linie); }
+.step:last-child { border-bottom: 0; }
+.step-mark { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--linie); display: grid; place-items: center; margin-top: 2px; color: var(--aktion-text); font-size: 12px; }
+.step.is-done .step-mark { background: var(--aktion); border-color: var(--aktion); animation: pop var(--dauer) var(--kurve) both; }
+.step.is-active .step-mark { border-color: var(--aktion); }
+.step.is-active .step-mark::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--aktion); animation: puls 1.2s ease-in-out infinite; }
+.step.is-open { color: var(--text-2); }
+.step-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.step-sub { font-size: var(--t-small); color: var(--text-2); overflow-wrap: anywhere; }
+.step-farben { display: inline-flex; gap: 6px; align-items: center; margin-top: 2px; }
+.step-farbe { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--linie); }
+@keyframes pop { from { transform: scale(.5); } to { transform: scale(1); } }
+@keyframes puls { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+/* ---------------------------------------------------------------------------
+   Die Woche. Der Beitrag ist der Held: groesstes Element, einziger Rahmen,
+   einzige Farbe. Leere Tage gibt es nicht - was nicht geplant ist, steht nicht da.
+   --------------------------------------------------------------------------- */
+.woche { margin-top: 26px; display: grid; gap: 26px; }
+.tag { display: grid; gap: 12px; }
+.tag-kopf { display: flex; align-items: baseline; gap: 10px; }
+.tag-kopf strong { font-weight: 500; font-size: 15px; }
+.tag-kopf .muted { font-size: var(--t-small); }
+.tag-posts { display: grid; gap: 16px; }
+@media (min-width: 760px) {
+  .stage.breit .tag { grid-template-columns: 132px 1fr; align-items: start; }
+  .stage.breit .tag-kopf { flex-direction: column; gap: 2px; position: sticky; top: 14px; }
+  .stage.breit .tag-posts { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 18px; }
+}
+
+.post {
+  /* Reines Weiss, nicht die leicht getoente Flaeche: im oberen Lichtbereich wuerde eine
+     Beitragskarte sonst mit dem Hintergrund verschwimmen. */
+  border: 1px solid var(--linie); border-radius: 16px; overflow: hidden; background: #fff;
+  animation: auf var(--dauer) var(--kurve) both; display: grid; align-content: start;
+}
+.post-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 10px; font-size: var(--t-micro); font-weight: 500; }
+.chan { display: inline-flex; align-items: center; gap: 7px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.chan::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.chan.linkedin::before { border-radius: 2px; }
+.chan.ig_story::before { border-radius: 1px; width: 5px; height: 10px; }
+.status { color: var(--text-2); font-weight: 400; }
+.status.ok { color: var(--gut); }
+.media { position: relative; width: 100%; background: var(--wash); container-type: inline-size; }
+.media.feed { aspect-ratio: 4 / 5; }
+.media.story { aspect-ratio: 9 / 16; }
+.media img { width: 100%; height: 100%; object-fit: cover; }
+/* Platzhalter, solange das Bild noch fehlt: gebaut wie das echte Bild (Markenverlauf,
+   Schlagzeile in der Bildschrift, gedrehtes Wasserzeichen) - kein grauer Kasten. */
+.kachel { position: absolute; inset: 0; background: var(--kachel-bg, #0a0e1a); color: #fff; overflow: hidden; }
+.kachel-h { position: absolute; left: 11%; right: 21%; top: 50%; transform: translateY(-50%); font-weight: 700; font-size: clamp(20px, 8.5cqw, 42px); line-height: 1.12; text-wrap: balance; overflow-wrap: anywhere; }
+.kachel-wm { position: absolute; right: 4%; bottom: 5%; transform: rotate(-90deg); transform-origin: right bottom; font-weight: 700; font-size: clamp(13px, 5cqw, 24px); opacity: .26; white-space: nowrap; letter-spacing: -.02em; }
+.kachel-notiz { position: absolute; left: 10px; bottom: 10px; background: rgba(255,255,255,.92); backdrop-filter: blur(4px); color: var(--text); font-size: var(--t-micro); padding: 5px 9px; border-radius: 999px; }
+.skeleton { position: absolute; inset: 0; background: linear-gradient(100deg, var(--wash) 30%, #e8e8e5 50%, var(--wash) 70%); background-size: 200% 100%; animation: schimmer 1.6s linear infinite; display: grid; place-items: center; color: var(--text-2); font-size: var(--t-small); }
+@keyframes schimmer { to { background-position: -200% 0; } }
+.post-body { padding: 13px 14px 14px; display: grid; gap: 6px; }
+.post-h { font-size: 17px; font-weight: 500; }
+.post-c { color: var(--text-2); font-size: var(--t-small); line-height: 1.55; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.post.is-open .post-c { display: block; }
+.post-more { justify-self: start; padding: 11px 0; min-height: 44px; font-size: var(--t-small); }
+/* 44 px auch hier: der Textaufklapper war mit 32 px die einzige Flaeche unter der Grenze
+   (gemessen am 19.09.2026 im Durchgang). Die Schrift bleibt klein, nur die Flaeche waechst. */
+.post-actions { display: flex; flex-wrap: wrap; gap: 8px 10px; padding: 0 14px 14px; align-items: center; }
+.post-actions .link { padding: 6px 0; min-height: var(--tap); font-size: 14px; }
+.griff { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--t-micro); cursor: grab; touch-action: none; min-height: var(--tap); padding: 0 6px; border-radius: 8px; }
+.griff:active { cursor: grabbing; }
+.post.is-dragging { opacity: .4; }
+.post.is-over { outline: 2px dashed var(--aktion); outline-offset: 2px; }
+.order-btns { display: inline-flex; gap: 6px; }
+.order-btns button { min-width: var(--tap); min-height: var(--tap); border: 1px solid var(--linie); background: transparent; color: var(--text); border-radius: 999px; cursor: pointer; font-size: 15px; }
+.order-btns button[disabled] { opacity: .3; cursor: default; }
+
+.sticky-actions {
+  position: sticky; bottom: 0; margin-top: 30px; padding: 16px 0 max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--grund) 76%, rgba(255,255,255,0)); display: flex; flex-direction: column; gap: 4px; align-items: center;
+}
+.sticky-actions .btn { width: 100%; max-width: 420px; }
+.lauf-zeile { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: var(--t-small); margin-top: 16px; }
+.lauf-zeile::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--aktion); animation: puls 1.2s ease-in-out infinite; }
+
+/* --- Bildschirm 5: der Plan --- */
+.plan { margin-top: 24px; border-top: 1px solid var(--linie); }
+.zeile { border-bottom: 1px solid var(--linie); padding: 15px 0; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: start; }
+.zeile-k { font-size: var(--t-small); color: var(--text-2); grid-column: 1 / -1; }
+.zeile-v { line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.zeile-v .link { padding: 0; min-height: var(--tap); font-size: 15px; }
+.punkt { display: inline-block; width: 15px; height: 15px; border-radius: 50%; vertical-align: -2px; margin-right: 7px; border: 1px solid var(--linie); }
+.stift { justify-self: end; align-self: center; width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--linie); background: transparent; color: var(--text); cursor: pointer; display: grid; place-items: center; }
+.stift:hover { border-color: var(--text-2); }
+.stift svg { width: 16px; height: 16px; }
+.zeile-form { grid-column: 1 / -1; display: grid; gap: 12px; padding-top: 6px; animation: klappt var(--dauer) var(--kurve) both; }
+@keyframes klappt { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.zeile-form .input { min-height: 48px; }
+.zeile-form-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--linie); border-radius: 999px; padding: 7px 13px; font-size: var(--t-small); background: #fff; min-height: 38px; }
+.chip button { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-2); font-size: 17px; line-height: 1; min-width: 26px; min-height: 26px; }
+.chip.add { padding: 0; }
+.chip.add input { border: 0; background: transparent; font: inherit; font-size: 14px; padding: 7px 13px; min-width: 150px; outline: none; color: var(--text); }
+.chip.add:focus-within { border-color: var(--aktion); }
+.wahl { display: grid; gap: 8px; }
+.wahl label { display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 9px 13px; border: 1px solid var(--linie); border-radius: 12px; cursor: pointer; background: #fff; }
+.wahl label:has(input:checked) { border-color: var(--aktion); box-shadow: 0 0 0 1px var(--aktion); }
+.wahl input { width: 18px; height: 18px; accent-color: var(--aktion); margin: 0; flex: none; }
+.wahl small { color: var(--text-2); display: block; }
+.schalter { display: flex; align-items: center; gap: 12px; min-height: var(--tap); cursor: pointer; }
+.schalter input { appearance: none; width: 46px; height: 27px; border-radius: 999px; background: #d4d4d0; position: relative; transition: background 160ms; margin: 0; flex: none; cursor: pointer; }
+.schalter input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #fff; transition: transform 160ms; }
+.schalter input:checked { background: var(--gut); }
+.schalter input:checked::after { transform: translateX(19px); }
+.zeile-notiz { grid-column: 1 / -1; font-size: var(--t-small); color: var(--text-2); }
+
+/* --- Farbverlaufs-Picker (bestehendes System: Akzent + zweite Farbe + Richtung) --- */
+.picker { display: grid; gap: 14px; }
+.picker-vorschau { height: 78px; border-radius: 12px; border: 1px solid var(--linie); display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 17px; letter-spacing: -.02em; }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.swatch { width: var(--tap); height: var(--tap); border-radius: 50%; border: 2px solid var(--grund); box-shadow: 0 0 0 1px var(--linie); cursor: pointer; padding: 0; }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--aktion); }
+.swatch.eigene { position: relative; overflow: hidden; background: conic-gradient(#f66, #fc6, #6c6, #6cf, #66f, #c6f, #f66); }
+.swatch.eigene input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.picker-gruppe { display: grid; gap: 8px; }
+.picker-gruppe > span { font-size: var(--t-small); color: var(--text-2); }
+.richtung { display: flex; gap: 8px; flex-wrap: wrap; }
+.richtung button { min-height: var(--tap); padding: 0 16px; border-radius: 999px; border: 1px solid var(--linie); background: transparent; color: var(--text); cursor: pointer; font-size: 14px; }
+.richtung button[aria-pressed="true"] { border-color: var(--aktion); box-shadow: 0 0 0 1px var(--aktion); }
+
+/* --- Bildschirm 6: Verbinden --- */
+.connect-liste { margin-top: 24px; display: grid; gap: 18px; }
+.connect { border: 1px solid var(--linie); border-radius: 16px; padding: 16px; display: grid; gap: 10px; background: #fff; }
+.connect .btn { width: 100%; min-height: 54px; font-size: 16px; }
+.connect .logo { width: 22px; height: 22px; flex: none; }
+.connect-state { display: flex; align-items: center; gap: 8px; color: var(--gut); font-size: var(--t-small); }
+.connect-state.off { color: var(--text-2); }
+.connect .link { padding: 4px 0; min-height: var(--tap); font-size: 14px; }
+
+/* --- Dashboard --- */
+/* Titel links, "Jetzt posten" rechts auf einer Linie - auch am Handy, weil der Link schmal
+   genug ist. flex-wrap raus: umbrochen stand der Knopf frueher als eigener Block darunter
+   und wog damit mehr als die Woche. */
+.dash-kopf { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dash-kopf > div { min-width: 0; }
+.notice { margin-top: 18px; border: 1px solid var(--linie); border-left: 3px solid var(--text-2); border-radius: 12px; padding: 13px 15px; font-size: var(--t-small); display: grid; gap: 6px; background: #fff; }
+.notice.bad { border-left-color: var(--schlecht); }
+/* Erreichte Tagesgrenze: kein Fehler, also weder rot noch weiss wie eine Karte - ruhiges Grau. */
+.notice.ruhig { background: var(--wash); border-left-color: var(--text-2); }
+.notice.ok { border-left-color: var(--gut); }
+.notice .link { padding: 2px 0; min-height: var(--tap); font-size: 14px; }
+.abschnitt { margin-top: 34px; }
+.abschnitt-kopf { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.leer { border: 1px dashed var(--linie); border-radius: 16px; padding: 26px; color: var(--text-2); font-size: var(--t-small); text-align: center; margin-top: 12px; }
+.verlauf { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.verlauf li { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: center; border-bottom: 1px solid var(--linie); padding-bottom: 10px; }
+.verlauf img, .verlauf .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: var(--flaeche); }
+
+/* --- Sheet --- */
+.sheet-overlay { position: fixed; inset: 0; background: rgba(13,13,13,.35); z-index: 200; display: grid; align-items: end; }
+.sheet { background: #fff; border: 1px solid var(--linie); border-bottom: 0; border-radius: 20px 20px 0 0; padding: 22px var(--rand) max(22px, env(safe-area-inset-bottom)); max-height: 88vh; overflow: auto; position: relative; animation: hoch var(--dauer) var(--kurve) both; }
+@keyframes hoch { from { transform: translateY(26px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (min-width: 720px) { .sheet-overlay { align-items: center; justify-items: center; } .sheet { border-radius: 20px; border-bottom: 1px solid var(--linie); width: 480px; } }
+.sheet-close { position: absolute; right: 12px; top: 12px; width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--linie); background: transparent; color: var(--text); font-size: 20px; cursor: pointer; }
+.sheet-title { padding-right: 52px; }
+.sheet-body { margin-top: 12px; display: grid; gap: 14px; }
+
+/* --- Toasts --- */
+.toasts { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: grid; gap: 8px; z-index: 250; width: min(92vw, 420px); pointer-events: none; }
+.toast { background: var(--aktion); color: var(--aktion-text); padding: 12px 16px; border-radius: 12px; font-size: var(--t-small); animation: auf var(--dauer) var(--kurve) both; }
+.toast.bad { background: var(--schlecht); color: #ffffff; }
+
+.mitte { text-align: center; padding-top: 10vh; }
+.mitte .actions { align-items: center; }
+
+/* ---- Testlauf-Leiste (nur Sandbox, nur bei status='test') --------------------------------
+   Schmal, grau, oben angeheftet. Kein Rot, keine Warnfarbe: es ist kein Fehlerzustand,
+   sondern ein Betriebsmodus. Die Tippziele bleiben bei 44 px. */
+.testleiste {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; justify-content: space-between;
+  padding: 6px 16px; background: var(--wash); border-bottom: 1px solid var(--linie);
+  font-size: var(--t-small); color: var(--text-2);
+}
+.testleiste[hidden] { display: none; }
+.testleiste-text { font-weight: 500; color: var(--text); }
+.testleiste-knoepfe { display: flex; gap: 6px; }
+.testleiste .link { min-height: var(--tap); padding: 0 8px; font-size: 14px; }
+@media (max-width: 420px) { .testleiste-zusatz { display: none; } }
+
+/* ---- Farbwahl als halbhohes Blatt (nur Handy) -------------------------------------------
+   Vorher stand der Farbpicker im Fluss der Seite: 505 px hoch, beginnend bei 197 px. In einem
+   780 px hohen Fenster schob er genau das aus dem Bild, was er veraendert - die drei
+   Beitragsvorschauen darueber. Gemessen am 19.09.2026: Vorschau sichtbar = nein.
+   Jetzt faehrt er von unten hoch und laesst die obere Haelfte frei. Der Bereich ueber dem
+   Blatt bleibt UNGETOENT, sonst waere die Live-Vorschau zwar sichtbar, aber verfaelscht. */
+.sheet-overlay.halb { background: transparent; pointer-events: none; }
+.sheet-overlay.halb .sheet {
+  pointer-events: auto;
+  max-height: 56vh;
+  box-shadow: 0 -18px 40px rgba(13, 13, 13, .18);
+}
+.sheet-overlay.halb .sheet .zeile-form { display: block; }
+.sheet-overlay.halb .sheet .zeile-form-actions { position: sticky; bottom: 0; background: #fff; padding-top: 10px; margin-top: 4px; }
+/* Damit die Vorschaukacheln nicht unter dem Blatt verschwinden, bekommt die Seite unten Platz. */
+body.blatt-offen .stage { padding-bottom: 58vh; }
+/* Und die drei Vorschauen ruecken nebeneinander: einzeln untereinander sind sie am Handy
+   zusammen 1381 px hoch, in den freien Streifen ueber dem Blatt passt so keine einzige.
+   Nebeneinander sind sie klein, aber alle drei ganz zu sehen - und darum geht es hier:
+   sehen, wie sich die Farbe auf die Woche auswirkt, nicht einen Beitrag lesen. */
+body.blatt-offen #plan-vorschau { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+body.blatt-offen #plan-vorschau .post { border-radius: 10px; }
+body.blatt-offen #plan-vorschau .post-meta { display: none; }
+body.blatt-offen #plan-vorschau .kachel-h { font-size: 11px; line-height: 1.2; }
+body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
+@media (min-width: 720px) {
+  .sheet-overlay.halb { background: rgba(13,13,13,.35); pointer-events: auto; }
+  body.blatt-offen .stage { padding-bottom: 0; }
+  body.blatt-offen #plan-vorschau { display: flex; grid-template-columns: none; }
+  body.blatt-offen #plan-vorschau .post-meta { display: flex; }
+}
+
+/* ---- Layout A: Wochenstreifen auf dem Ergebnisbildschirm --------------------------------
+   Freigegeben am 19.09.2026. Ersetzt die Liste aus zehn grossen Karten (9,2 Bildschirmlaengen
+   am Handy) durch eine Tagesreihe plus den gewaehlten Tag in voller Groesse. */
+.streifen {
+  display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+  margin: 22px 0 4px; padding-bottom: 10px;
+  scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+}
+.tagkarte {
+  flex: 0 0 96px; scroll-snap-align: start; display: grid; gap: 6px;
+  background: none; border: 0; padding: 0; text-align: left; cursor: pointer;
+  min-height: var(--tap);
+}
+.tagname { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.tagkarte.ist-aktiv .tagname { color: var(--text); }
+.tagbild { display: block; aspect-ratio: 4 / 5; border-radius: 10px; overflow: hidden; background: var(--wash); position: relative; }
+.tagbild img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tagkarte.ist-aktiv .tagbild { outline: 2.5px solid var(--text); outline-offset: 2px; }
+.tagbild .kachel.mini { position: absolute; inset: 0; display: flex; align-items: center; padding: 10%; }
+.tagbild .kachel.mini .kachel-h { font-size: 9px; line-height: 1.15; }
+.tagzahl { font-size: 11px; color: var(--text-2); }
+.tagdetail { border-top: 1px solid var(--linie); padding-top: 14px; }
+.tagdetail-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.etikett { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--text-2); font-weight: 600; }
+
+@media (min-width: 720px) {
+  /* Am Schreibtisch passen alle Tage ohne Wischen nebeneinander, und der gewaehlte Tag zeigt
+     seine Beitraege in einer Reihe - Woche und Beweis auf einem Bildschirm. */
+  .streifen { gap: 14px; overflow-x: visible; }
+  .tagkarte { flex: 1 1 0; min-width: 0; }
+  .tagbild .kachel.mini .kachel-h { font-size: 11px; }
+}
+
+/* ---- Markenlogo des Kunden in der Kopfzeile ---------------------------------------------
+   Erscheint, sobald die Website gelesen ist. Bewusst klein und ohne Kasten: auffallen soll,
+   dass die Oberflaeche zum Kunden gehoert, nicht das Logo. Eine feine senkrechte Linie
+   trennt es vom Produktnamen, damit es nicht wie Teil von "Pipeflow" wirkt. */
+.marke-kunde {
+  display: flex; align-items: center; min-width: 0; gap: 10px;
+  /* margin-right:auto haelt das Logo am Produktnamen - .top verteilt sonst mit
+     space-between und schoebe es in die Bildschirmmitte. */
+  margin: 2px auto 0 14px; padding-left: 14px; border-left: 1px solid var(--linie);
+  animation: logo-auf .5s var(--kurve) both;
+}
+.marke-kunde[hidden] { display: none; }
+/* 32 px statt 26: eine breite Wortmarke wird darunter unleserlich - gemessen an der
+   Schriftmarke von Channoine, die bei 26 px nur noch ein Fleck war. Der Pipeflow-Schriftzug
+   daneben ist 27 px, damit steht beides gleichwertig ohne dass das Kundenlogo lauter wird. */
+.marke-kunde img { display: block; height: 32px; width: auto; max-width: 168px; object-fit: contain; }
+.marke-kunde img[hidden], .marke-kunde-name[hidden] { display: none; }
+/* Das ✕ ist Verbindung, nicht Gewicht: klein und grau. */
+.marke-x { font-size: 12px; color: var(--text-2); line-height: 1; }
+/* Der Name als Text: gleich hoch wie der Pipeflow-Schriftzug wirkt, aber in Grotesk und in der
+   Markenfarbe. Lange Namen werden mit Auslassung gekappt, bevor sie die Kopfzeile sprengen. */
+.marke-kunde-name {
+  font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* App-Kachel mit eigenem Hintergrund: runde Ecken, sonst klebt ein Quadrat auf dem Papier. */
+.marke-kunde.kachel-logo img { border-radius: 7px; height: 28px; max-width: 28px; }
+@keyframes logo-auf { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@media (max-width: 420px) {
+  /* Am Handy reicht die Breite neben "powered by Pipeline AI Solutions" nicht: schon
+     "Channoine Mayr" wurde zu "Channoi…" (gemessen: 77 px Platz). Deshalb rueckt die Marke
+     des Kunden in eine zweite Zeile unter den Schriftzug, ueber die volle Breite - lesbar
+     bis rund 30 Zeichen, danach Auslassung. Die Kopfzeile wird dafuer 28 px hoeher, nur hier. */
+  .top { flex-wrap: wrap; gap: 2px 12px; }
+  .top-actions { order: 2; }
+  .marke-kunde { order: 3; flex-basis: 100%; margin: 2px 0 0; padding-left: 0; border-left: 0; gap: 8px; }
+  .marke-kunde img { height: 26px; max-width: 160px; }
+  .marke-kunde-name { font-size: 16px; max-width: 260px; }
+}
+
+/* ---- Ladebildschirm: echte Zwischenergebnisse statt Schrittliste ------------------------
+   Kein Kasten, kein Rahmen, keine Haekchen. Was schon da ist, steht in voller Schrift; was
+   noch kommt, ist gar nicht da. Der Kunde liest seine Marke entstehen, nicht einen Fortschritt. */
+.lade-liste { margin-top: 26px; display: grid; gap: 20px; }
+.lade-zeile { display: grid; gap: 4px; animation: lade-auf .45s var(--kurve) both; }
+.lade-was { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); font-weight: 600; }
+.lade-wert { font-size: 17px; line-height: 1.35; }
+.lade-zeile.ist-dran .lade-wert { color: var(--text-2); }
+.lade-farben { display: flex; align-items: center; gap: 8px; }
+.lade-punkt { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(13,13,13,.08); }
+.lade-hex { font-size: 14px; color: var(--text-2); letter-spacing: .02em; }
+/* Die Themen sind Fliesstext, keine Pillen: Pillen waeren wieder Kaesten. Bewusst KEIN
+   Flexbox mit Trennzeichen per ::before - beim Umbruch rutschte der Punkt an den Zeilenanfang
+   und die Liste sah aus wie Aufzaehlungspunkte. */
+.lade-themen { display: block; font-size: 15px; line-height: 1.5; }
+.lade-trenner { color: var(--text-2); }
+.lade-kopfzeilen { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.lade-kopfzeilen li { font-size: 16px; line-height: 1.3; animation: lade-auf .4s var(--kurve) both; }
+@keyframes lade-auf { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lade-zeile, .lade-kopfzeilen li { animation: none; } }
+/* Der Pfad der gerade gelesenen Unterseite: gleiche Zeile, ruhiger als die Zahl. */
+.lade-pfad { color: var(--text-2); }
+
+/* ---- Kanäle als Kanäle (Entwurf A1, freigegeben 19.09.2026) -----------------------------
+   Eine Zeile je Kanal, das Zeichen in der Farbe des Kanals, rechts der Knopf in derselben
+   Farbe. Nur Haarlinien, keine Kästen. Die Masse sind bewusst gleich: 44 px Zeichen, 44 px
+   Knopfhöhe, 16 px Innenabstand oben und unten - damit nichts schwerer wirkt als der Rest. */
+.kanal-liste { margin-top: 22px; }
+.kanal {
+  display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 14px;
+  padding: 16px 0; border-bottom: 1px solid var(--linie);
+}
+.kanal-block:first-child .kanal { border-top: 1px solid var(--linie); }
+.kanal-zeichen { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; }
+.kanal-zeichen .logo { width: 22px; height: 22px; color: #fff; }
+.kanal-text { min-width: 0; }
+.kanal-text b { display: block; font-size: 17px; font-weight: 600; line-height: 1.2; }
+.kanal-text span { display: block; font-size: 13px; color: var(--text-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kanal-knopf {
+  border: 0; border-radius: 999px; padding: 0 18px; min-height: 44px; display: inline-flex; align-items: center;
+  font-size: 15px; font-weight: 600; color: #fff; text-decoration: none; cursor: pointer; white-space: nowrap;
+}
+.kanal-knopf.ist-aus { background: var(--wash); color: var(--text-2); cursor: default; }
+.kanal-ok { font-size: 14px; color: var(--text-2); white-space: nowrap; }
+.kanal-ok .link { font-size: 14px; }
+/* Die Rueckmeldung steht UNTER der Zeile, nicht darin - sonst waere eine Zeile hoeher. */
+.kanal-notiz { margin: -6px 0 10px; font-size: 13px; color: var(--gut); }
+.kanal-notiz.ist-schlecht { color: var(--schlecht); }
+/* Der Weg weiter wiegt weniger als die Kanäle: Textlink, nicht Knopf. */
+.weiter-link {
+  display: flex; align-items: center; justify-content: center; width: 100%; margin-top: 26px; padding: 0; border: 0; background: none;
+  font-size: 15px; color: var(--text-2); text-decoration: underline; text-underline-offset: 3px;
+  min-height: var(--tap); cursor: pointer; font-family: inherit;
+}
+@media (max-width: 400px) {
+  .kanal { gap: 12px; }
+  .kanal-knopf { padding: 0 14px; font-size: 14px; }
+}
+
+/* ---- Offene Punkte als eine Zeile (Entwurf B1) ------------------------------------------
+   Kein Rahmen, kein Kasten, keine Erklärung. Die Woche beginnt direkt darunter. */
+.offen { margin-top: 10px; font-size: 14px; line-height: 1.7; color: var(--text-2); }
+.offen a, .offen .link { color: var(--text); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; padding: 0; }
+.offen-pkt { margin: 0 7px; opacity: .45; }
+.offen.ist-pausiert { color: var(--schlecht); }
+.offen.ist-pausiert .link { color: var(--schlecht); }
+/* "Jetzt posten" tritt hinter die Woche zurück: Textlink oben rechts statt gefülltem Knopf. */
+.kopf-link {
+  background: none; border: 0; padding: 0 0 0 12px; font-family: inherit; font-size: 14px;
+  color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+  white-space: nowrap; min-height: var(--tap); align-self: flex-start;
+}
+
+/* ---- Die Woche in der Hand des Kunden (Konzept 19.09.2026) --------------------------------- */
+.zust { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: none; }
+.zust i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: #c9c6bf; }
+.zust.frei i { background: var(--gut); } .zust.bearb i { background: var(--text); } .zust.eigen i { background: var(--aktion-marke, #a36629); }
+.post.ist-uebersprungen { opacity: .55; }
+.post-actions .link.leise { color: var(--text-2); }
+.post-actions .link.mehr { margin-left: auto; text-decoration: none; font-size: 20px; line-height: 1; color: var(--text-2); letter-spacing: 1px; }
+.eigen-plus { display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 10px 2px; margin-top: 4px; font: inherit; font-size: 14px; color: var(--text-2); cursor: pointer; min-height: var(--tap); }
+.eigen-plus b { width: 32px; height: 32px; border-radius: 50%; border: 1.5px dashed #b8b5ae; display: grid; place-items: center; font-weight: 400; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chip span { display: inline-block; border: 1px solid var(--linie); border-radius: 999px; padding: 9px 13px; font-size: 14px; background: #fff; min-height: 40px; line-height: 20px; cursor: pointer; }
+.chip input:checked + span { background: var(--text); color: #fff; border-color: var(--text); }
+.chip input:focus-visible + span { outline: 2px solid var(--text); outline-offset: 2px; }
+.chip.ist-belegt span { color: var(--text-2); background: var(--wash); cursor: default; }
+.bildzeile { display: flex; align-items: center; gap: 12px; }
+.bild-klein { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; flex: 0 0 64px; background: var(--wash); display: block; }
+.bild-klein.leer { border: 1px dashed var(--linie); }
+.bild-wahl { margin-left: auto; cursor: pointer; font-size: 13px; color: var(--text-2); text-decoration: underline; min-height: var(--tap); display: inline-flex; align-items: center; }
+.leise-reihe { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+.leise-reihe .link { font-size: 13px; color: var(--text-2); }
+.rueck { position: fixed; left: 16px; right: 16px; bottom: 18px; z-index: 250; background: var(--text); color: #fff; border-radius: 12px; padding: 10px 14px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; animation: hoch var(--dauer) var(--kurve) both; }
+.rueck-knopf { background: none; border: 0; color: #fff; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: var(--tap); padding: 0 4px; }
+@media (min-width: 720px) { .rueck { left: auto; right: 24px; width: 380px; } }
+

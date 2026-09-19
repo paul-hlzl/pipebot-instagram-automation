@@ -98,6 +98,12 @@ export interface WebsiteSuggestion {
   about: string;
   tone: "sachlich" | "locker" | "inspirierend" | "humorvoll";
   hashtags: string[];
+  /** Easy Onboarding (19.09.2026): Firmenname, wie er auf der Seite steht - leer, wenn nicht
+   *  erkennbar. Das klassische Onboarding ignoriert das Feld (dort tippt der Kunde den Namen). */
+  company: string;
+  /** Easy Onboarding: 2-3 Themen (Content-Saeulen), aus demselben Aufruf - kein zweiter,
+   *  teurerer Web-Suche-Aufruf (suggestPillarsWithSearch) noetig, bevor der Kunde etwas sieht. */
+  pillars: { title: string; description: string }[];
   /** Geschaetzte Kosten dieses einen Aufrufs - landet in usage_costs und begruendet damit das
    *  Limit auf /api/analyze-website mit echten Zahlen statt mit einer Annahme. */
   costUsd?: number | null;
@@ -111,74 +117,204 @@ const VALID_TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
  * color reliably out of arbitrary CSS/inline styles isn't feasible, so the existing color
  * picker stays untouched and is the only source of truth for that.
  */
-export async function suggestFromWebsite(input: { title: string; description: string; bodyText: string }): Promise<WebsiteSuggestion> {
+/**
+ * Gemeinsamer Aufruf fuer beide Haelften der Website-Analyse (19.09.2026).
+ *
+ * Frueher war das EIN Aufruf, der Profil und Themen zusammen lieferte. Gemessen dauerte die
+ * Analyse damit 17,5 von 26 Sekunden, und die Ausgabelaenge war der Grund: 8-10 Themen mit je
+ * einem Beschreibungssatz sind rund 1.100 Token, und Token kommen der Reihe nach. Jetzt laufen
+ * zwei kleinere Aufrufe parallel, und der Kunde wartet nur auf den laengeren.
+ */
+async function analyseAufruf(system: string, user: string, maxTokens: number): Promise<{ obj: Record<string, unknown>; costUsd: number | null }> {
   const { anthropicApiKey, anthropicModel } = getConfig();
-  if (!anthropicApiKey) {
-    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  if (!anthropicApiKey) throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  const { data } = await withRetry(
+    () =>
+      axios.post<AnthropicResponse>(
+        ANTHROPIC_ENDPOINT,
+        { model: anthropicModel, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] },
+        { headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, timeout: INTERAKTIV_TIMEOUT_MS },
+      ),
+    INTERAKTIV_VERSUCHE,
+    "Anthropic analyze-website",
+  );
+  const text = data.content?.find((c) => c.type === "text")?.text?.trim();
+  if (!text) throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim());
+  } catch {
+    throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
   }
+  return {
+    obj: (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>,
+    costUsd: estimateCostUsd(anthropicModel, data.usage),
+  };
+}
 
+function seitenText(input: { title: string; description: string; bodyText: string }, unterseiten: { pfad: string; text: string }[]): string {
+  const unten = unterseiten.length
+    ? `\n\n${unterseiten.map((u) => `--- Unterseite ${u.pfad} ---\n${u.text}`).join("\n\n")}`
+    : "";
+  return (
+    `Titel der Seite: ${input.title || "(keiner)"}\n` +
+    `Meta-Beschreibung: ${input.description || "(keine)"}\n` +
+    `Text von der Startseite:\n${input.bodyText || "(kein Text gefunden)"}` +
+    unten
+  );
+}
+
+export type WebsiteProfil = Omit<WebsiteSuggestion, "pillars">;
+
+/** Erste Haelfte: wer ist das, was macht die Firma, wie klingt sie. Kurze Ausgabe, schnell. */
+export async function profilVonWebsite(
+  input: { title: string; description: string; bodyText: string },
+  unterseiten: { pfad: string; text: string }[] = [],
+): Promise<WebsiteProfil> {
   const system =
     "Du hilfst Kleinunternehmern, ihr Profil für automatisch generierte Social-Media-Beiträge auszufüllen, " +
     "basierend auf dem Text ihrer eigenen Website. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - kein " +
     "einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: " +
     '{"industry": "kurze Branche, 2-4 Wörter", "about": "2-3 Sätze auf Deutsch: Zielgruppe, Themen, Nutzen - ' +
     'direkt und konkret, kein Marketing-Geschwafel", "tone": "genau eines von sachlich, locker, inspirierend, ' +
-    'humorvoll", "hashtags": ["3 bis 5 Schlagwörter ohne Raute, kleingeschrieben, je ein Wort ohne Leerzeichen"]}. ' +
-    "Schlage NIEMALS eine Farbe vor, das ist nicht Teil deiner Aufgabe. Mach eine plausible Bestapproximation, " +
-    "auch wenn der Text wenig hergibt - liefere nie leere Felder ohne Versuch.";
-  const user = `Titel der Seite: ${input.title || "(keiner)"}\nMeta-Beschreibung: ${input.description || "(keine)"}\nText von der Startseite:\n${input.bodyText || "(kein Text gefunden)"}`;
+    'humorvoll", "hashtags": ["3 bis 5 Schlagwörter ohne Raute, kleingeschrieben, je ein Wort ohne Leerzeichen"], ' +
+    '"company": "Name des Unternehmens, wie er auf der Seite steht (ohne Rechtsform-Zusätze wie GmbH nur, wenn sie dort auch fehlen) - leerer String, wenn nicht erkennbar"}. ' +
+    "Schlage NIEMALS eine Farbe vor und nenne KEINE Themen, das ist nicht deine Aufgabe. Mach eine plausible " +
+    "Bestapproximation, auch wenn der Text wenig hergibt - liefere nie leere Felder ohne Versuch.";
+  const { obj, costUsd } = await analyseAufruf(system, seitenText(input, unterseiten), 500);
+  const tone = VALID_TONES.includes(String(obj.tone)) ? (obj.tone as WebsiteSuggestion["tone"]) : "sachlich";
+  return {
+    industry: typeof obj.industry === "string" ? obj.industry.trim().slice(0, 120) : "",
+    about: typeof obj.about === "string" ? obj.about.trim().slice(0, 600) : "",
+    tone,
+    hashtags: Array.isArray(obj.hashtags) ? obj.hashtags.map((h) => String(h).replace(/^#/, "").trim().toLowerCase()).filter(Boolean).slice(0, 5) : [],
+    company: typeof obj.company === "string" ? obj.company.trim().slice(0, 120) : "",
+    costUsd,
+  };
+}
+
+/** Zweite Haelfte: die Themen. Laengere Ausgabe, deshalb der Aufruf, der die Dauer bestimmt. */
+export async function themenVonWebsite(
+  input: { title: string; description: string; bodyText: string },
+  unterseiten: { pfad: string; text: string }[] = [],
+): Promise<{ pillars: { title: string; description: string }[]; costUsd: number | null }> {
+  const system =
+    "Du findest Themen für regelmäßige Social-Media-Beiträge eines Kleinunternehmens, basierend auf dem Text " +
+    "seiner Website. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - kein einleitender Satz, kein " +
+    "Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: " +
+    '{"pillars": [{"title": "Thema in 1-3 Wörtern", "description": "ein Satz, worum es bei diesem Thema in Beiträgen geht"}]} ' +
+    "mit 8 bis 10 Themen. Die Themen müssen sich DEUTLICH voneinander unterscheiden - verschiedene Angebote, " +
+    "Produktgruppen, Anlässe, Zielgruppen, Arbeitsweisen, Haltungen. Nimm NICHT dreimal denselben Gedanken in " +
+    "anderen Worten. Schöpfe ausdrücklich aus den Unterseiten, nicht nur aus der Startseite: auf einer " +
+    "Startseite steht meist nur der lauteste Aufruf, die Substanz liegt in den Unterseiten. " +
+    "Schreibe auf Deutsch und ausschliesslich in lateinischer Schrift.";
+  const { obj, costUsd } = await analyseAufruf(system, seitenText(input, unterseiten), 1200);
+  const pillars = Array.isArray(obj.pillars)
+    ? obj.pillars
+        .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
+        .map((p) => ({
+          title: typeof p.title === "string" ? p.title.trim().slice(0, 60) : "",
+          description: typeof p.description === "string" ? p.description.trim().slice(0, 300) : "",
+        }))
+        .filter((p) => p.title)
+        // 19.09.2026: hier stand einmal .slice(0, 3) und hat die angeforderten 8-10 Themen
+        // wieder auf drei gestutzt - der eigentliche Grund fuer die wiederholten Beitraege.
+        .slice(0, 10)
+    : [];
+  return { pillars, costUsd };
+}
+
+/**
+ * Beides zusammen, parallel. Die Schnittstelle bleibt fuer alle bisherigen Aufrufer gleich -
+ * nur dass jetzt zwei Aufrufe nebeneinander laufen statt einer hintereinander.
+ */
+export async function suggestFromWebsite(
+  input: { title: string; description: string; bodyText: string },
+  unterseiten: { pfad: string; text: string }[] = [],
+): Promise<WebsiteSuggestion> {
+  const [profil, themen] = await Promise.all([
+    profilVonWebsite(input, unterseiten),
+    themenVonWebsite(input, unterseiten),
+  ]);
+  const beide = profil.costUsd == null && themen.costUsd == null ? null : (profil.costUsd ?? 0) + (themen.costUsd ?? 0);
+  return { ...profil, pillars: themen.pillars, costUsd: beide };
+}
+
+export interface AdjustmentWish {
+  about?: string;
+  tone?: WebsiteSuggestion["tone"];
+  avoidTopics?: string;
+  /** Neue Themenliste, nur wenn der Wunsch die Themen betrifft - sonst leer (Themen bleiben). */
+  pillars: { title: string; description: string }[];
+  costUsd: number | null;
+}
+
+/**
+ * Easy Onboarding, "Anders machen": EIN Freitextfeld ("lockerer, keine Preise nennen, mehr über
+ * das Team") wird auf die bestehenden Profilfelder abgebildet - Beschreibung, Tonalität,
+ * "vermeiden" und Themen. Es gibt bewusst kein neues Feld dafür: der Wunsch landet in genau den
+ * Feldern, die auch das klassische Panel und die Vorausplanung schon lesen.
+ */
+export async function interpretAdjustmentWish(input: {
+  wish: string;
+  company: string;
+  industry: string;
+  about: string;
+  tone: string;
+  avoidTopics: string;
+  pillars: { title: string; description?: string | null }[];
+}): Promise<AdjustmentWish> {
+  const { anthropicApiKey, anthropicModel } = getConfig();
+  if (!anthropicApiKey) {
+    throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
+  }
+  const system =
+    "Ein Kleinunternehmer hat eine automatisch erstellte Wochenvorschau seiner Social-Media-Beiträge gesehen und sagt in " +
+    "eigenen Worten, was anders sein soll. Übersetze diesen Wunsch in Änderungen an seinem Profil. Antworte AUSSCHLIESSLICH " +
+    "mit einem JSON-Objekt - kein einleitender Satz, kein Markdown-Codeblock - nach genau diesem Schema: " +
+    '{"about": "die überarbeitete Unternehmensbeschreibung (2-3 Sätze, Deutsch) oder null, wenn der Wunsch sie nicht berührt", ' +
+    '"tone": "genau eines von sachlich, locker, inspirierend, humorvoll - oder null, wenn unverändert", ' +
+    '"avoidTopics": "kommagetrennt, was in Beiträgen NICHT vorkommen soll (bestehende Einträge beibehalten und ergänzen) - oder null", ' +
+    '"pillars": [{"title": "Thema", "description": "ein Satz"}] - die NEUE komplette Themenliste (2-4 Themen), nur wenn der Wunsch die Themen betrifft, sonst leeres Array}. ' +
+    "Ändere nur, was der Wunsch tatsächlich verlangt.";
+  const user =
+    `Firma: ${input.company || "(unbekannt)"}\nBranche: ${input.industry || "(unbekannt)"}\n` +
+    `Bisherige Beschreibung: ${input.about || "(keine)"}\nBisherige Tonalität: ${input.tone || "sachlich"}\n` +
+    `Bisher vermeiden: ${input.avoidTopics || "(nichts)"}\n` +
+    `Bisherige Themen: ${input.pillars.map((p) => p.title + (p.description ? ` (${p.description})` : "")).join("; ") || "(keine)"}\n\n` +
+    `Wunsch des Kunden: ${input.wish}`;
 
   const { data } = await withRetry(
     () =>
       axios.post<AnthropicResponse>(
         ANTHROPIC_ENDPOINT,
-        {
-          model: anthropicModel,
-          max_tokens: 500,
-          system,
-          messages: [{ role: "user", content: user }],
-        },
-        {
-          headers: {
-            "x-api-key": anthropicApiKey,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          timeout: INTERAKTIV_TIMEOUT_MS,
-        },
+        { model: anthropicModel, max_tokens: 600, system, messages: [{ role: "user", content: user }] },
+        { headers: { "x-api-key": anthropicApiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" }, timeout: INTERAKTIV_TIMEOUT_MS },
       ),
     INTERAKTIV_VERSUCHE,
-    "Anthropic analyze-website",
+    "Anthropic adjustment-wish",
   );
-
   const text = data.content?.find((c) => c.type === "text")?.text?.trim();
-  if (!text) {
-    throw new ToolError("Die KI hat keinen Vorschlag geliefert.");
-  }
-
+  if (!text) throw new ToolError("Die KI hat keine Antwort geliefert.");
   let parsed: unknown;
   try {
-    // The model should never wrap in a code fence per the system prompt, but strip one
-    // defensively in case it does anyway.
-    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
-    parsed = JSON.parse(cleaned);
+    parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim());
   } catch {
     throw new ToolError("Die Antwort der KI konnte nicht gelesen werden.");
   }
   const obj = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
-  const tone = VALID_TONES.includes(String(obj.tone)) ? (obj.tone as WebsiteSuggestion["tone"]) : "sachlich";
-  const hashtags = Array.isArray(obj.hashtags)
-    ? obj.hashtags
-        .map((h) => String(h).replace(/^#/, "").trim().toLowerCase())
-        .filter(Boolean)
-        .slice(0, 5)
+  const pillars = Array.isArray(obj.pillars)
+    ? obj.pillars
+        .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
+        .map((p) => ({ title: typeof p.title === "string" ? p.title.trim().slice(0, 60) : "", description: typeof p.description === "string" ? p.description.trim().slice(0, 300) : "" }))
+        .filter((p) => p.title)
+        .slice(0, 4)
     : [];
-
   return {
-    industry: typeof obj.industry === "string" ? obj.industry.trim().slice(0, 120) : "",
-    about: typeof obj.about === "string" ? obj.about.trim().slice(0, 600) : "",
-    tone,
-    hashtags,
+    about: typeof obj.about === "string" && obj.about.trim() ? obj.about.trim().slice(0, 2000) : undefined,
+    tone: VALID_TONES.includes(String(obj.tone)) ? (obj.tone as WebsiteSuggestion["tone"]) : undefined,
+    avoidTopics: typeof obj.avoidTopics === "string" && obj.avoidTopics.trim() ? obj.avoidTopics.trim().slice(0, 500) : undefined,
+    pillars,
     costUsd: estimateCostUsd(anthropicModel, data.usage),
   };
 }
@@ -310,6 +446,8 @@ export async function generatePlannedPostContent(input: {
   styleSamples: string[];
   /** Set only on the one retry after a hard-constraint violation - names what went wrong so the model avoids repeating it. */
   avoidNote?: string;
+  /** Aufhaenger, die in DERSELBEN Woche schon vergeben sind (19.09.2026). */
+  vergebeneAufhaenger?: string[];
 }): Promise<PlannedPostContent> {
   const { anthropicApiKey, anthropicModel } = getConfig();
   if (!anthropicApiKey) {
@@ -327,6 +465,13 @@ export async function generatePlannedPostContent(input: {
     : "";
 
   const system =
+    // Die Sprachvorgabe steht ZUERST und nennt Sprache UND Schriftsystem. Vorher stand sie
+    // mitten im Block als Halbsatz; bei channoine-mayr.at kam trotzdem ein Beitrag auf Russisch
+    // heraus. Der Prompt allein garantiert nichts - die Garantie liefert die Pruefung in
+    // planning.ts (sprache.ts) -, aber er senkt die Trefferquote und kostet nichts extra.
+    `SPRACHE: Schreibe headline und caption vollständig auf ${languageName}, jedes einzelne Wort. ` +
+    "Verwende ausschliesslich lateinische Schrift - niemals kyrillische, griechische, arabische, " +
+    "hebräische, chinesische, japanische oder koreanische Zeichen, auch nicht in einzelnen Wörtern. " +
     `Du schreibst einen einzelnen Social-Media-Beitrag (${input.channel === "linkedin" ? "LinkedIn" : "Instagram"}) für ein ` +
     "Kleinunternehmen, im Rahmen einer automatischen Vorausplanung. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt - " +
     'kein einleitender Satz, kein Markdown-Codeblock, kein Text davor oder danach - nach genau diesem Schema: ' +
@@ -353,6 +498,12 @@ export async function generatePlannedPostContent(input: {
         // auf die Headline festgelegt, wie bei publish_generated_story tatsaechlich validiert.
         ? `Baue JEDES der folgenden Elemente in die Headline ein - Instagram Stories haben keine Caption, es gibt keinen anderen Platz dafür: ${input.requiredElements.join(", ")}. `
         : `Baue JEDES der folgenden Elemente irgendwo ein (Headline oder Caption): ${input.requiredElements.join(", ")}. `
+      : "") +
+    (input.vergebeneAufhaenger?.length
+      ? `Für dieselbe Woche sind diese Überschriften schon vergeben: ${input.vergebeneAufhaenger.map((a) => `"${a}"`).join(", ")}. ` +
+        "Nimm einen ANDEREN Aufhänger: ein anderes Angebot, einen anderen Anlass, eine andere Zielgruppe oder eine andere " +
+        "Beobachtung. Beginne die Überschrift auch nicht mit demselben Wort wie eine der genannten. Es geht nicht darum, " +
+        "dasselbe anders zu formulieren, sondern etwas anderes zu sagen. "
       : "") +
     (input.avoidNote ? `WICHTIG, vorheriger Versuch war ungültig: ${input.avoidNote} - korrigiere das jetzt.` : "");
 

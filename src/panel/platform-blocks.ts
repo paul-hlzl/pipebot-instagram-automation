@@ -53,11 +53,33 @@ const IG_RESTRICTED_ACTIVITY: PlatformBlock = {
  * (axios-Fehler, ToolError, aufbereiteter Graph-Text aus errors.ts), und alle Wege enthalten am
  * Ende dieselben eindeutigen Kennungen. Reine Funktion - ohne Datenbank, damit testbar.
  */
+/**
+ * 19.09.2026: ein entwerteter Token ist ebenfalls ein Zustand, der sich nie von selbst aendert.
+ * Bei @pipeflow_solution blieb er zwei Tage lang unbemerkt, weil nur das Log ihn sah: die
+ * Verbindung stand weiter als "ok" in der Datenbank, keine Warnung ging raus, und die Routine
+ * versuchte es stuendlich neu (102 Fehlerzeilen an einem Tag). Ein Ausfall, den nur das Log
+ * sieht, ist kein erkannter Ausfall.
+ *
+ * Erkannt wird am aufbereiteten Text aus errors.ts (isAuthFailure), der an jeder Stelle gleich
+ * beginnt, sowie an den Rohmeldungen von Meta, falls ein Fehler einmal unaufbereitet ankommt.
+ */
+const IG_TOKEN_INVALID: PlatformBlock = {
+  code: "IG_TOKEN_INVALID",
+  reason:
+    "Die Verbindung zu Instagram ist ungültig geworden - meist nach einer Passwortänderung oder " +
+    "einer Sicherheitsabmeldung bei Instagram. Bitte im Panel einmal neu verbinden, danach geht es weiter.",
+};
+
 export function detectPlatformBlock(error: unknown): PlatformBlock | null {
   const text = error instanceof Error ? error.message : String(error ?? "");
   if (!text) return null;
 
   if (text.includes("RESTRICTED_MEMBER") || text.includes("65608")) return RESTRICTED_MEMBER;
   if (text.includes("subcode=2207051") || text.includes("We restrict certain activity")) return IG_RESTRICTED_ACTIVITY;
+  if (
+    text.includes("Instagram-Authentifizierung fehlgeschlagen") ||
+    text.includes("session has been invalidated") ||
+    text.includes("Error validating access token")
+  ) return IG_TOKEN_INVALID;
   return null;
 }

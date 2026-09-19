@@ -1,3 +1,4 @@
+import { ToolError } from "../errors.js";
 /**
  * Schnittstelle zwischen Kunden-Panel und MCP-Tools.
  * MCP-Tools holen sich Tokens NUR über diese Datei – nie direkt aus der DB.
@@ -794,7 +795,9 @@ export interface ContentPillar {
   weight: number;
 }
 
-const MAX_PILLARS = 6;
+// 19.09.2026 von 6 auf 12: die Website-Analyse liefert seither 8-10 Themen statt 3, damit
+// zehn Beitraege einer Woche zehn verschiedene Aufhaenger bekommen koennen.
+const MAX_PILLARS = 12;
 
 /** Active content pillars for a customer, oldest first. Empty array = feature unused (fallback to `about`). */
 export function listContentPillars(customerId: string): ContentPillar[] {
@@ -1232,6 +1235,7 @@ export function expireStalePostRequests(): PostRequest[] {
 
 export interface PendingApproval {
   id: string;
+  origin: "auto" | "kunde";
   customerId: string;
   provider: string;
   /** ig_feed/ig_story/linkedin - the exact channel from save_pending_approval. Falls back to
@@ -1264,6 +1268,7 @@ export interface PendingApproval {
 function toPendingApproval(r: PendingApprovalRow): PendingApproval {
   return {
     id: r.id,
+    origin: r.origin === "kunde" ? "kunde" : "auto",
     customerId: r.customer_id,
     provider: r.provider,
     channel: r.channel ?? r.provider,
@@ -1465,7 +1470,8 @@ export function markPendingApprovalPublished(id: string): boolean {
 export function overwritePendingApprovalContent(id: string, fields: { headline: string; caption: string; imageUrl: string }): PendingApproval | null {
   const now = nowIso();
   const result = db
-    .prepare("UPDATE pending_approvals SET headline = ?, caption = ?, image_url = ?, updated_at = ?, branding_version_at_generation = ? WHERE id = ? AND status = 'approved'")
+    // AND origin = 'auto': Kundenarbeit wird auch im Freigabe-Tor nie neu geschrieben.
+    .prepare("UPDATE pending_approvals SET headline = ?, caption = ?, image_url = ?, updated_at = ?, branding_version_at_generation = ? WHERE id = ? AND status = 'approved' AND origin = 'auto'")
     .run(fields.headline, fields.caption, fields.imageUrl, now, now, id);
   if (result.changes === 0) return null;
   return toPendingApproval(db.prepare("SELECT * FROM pending_approvals WHERE id = ?").get(id) as PendingApprovalRow);
@@ -1502,6 +1508,18 @@ export interface PlannedPost {
    *  see planning.ts's isBrandingStale, which treats that as "unknown age, assume stale" once the
    *  customer has ANY recorded branding change. */
   brandingVersionAtGeneration: string | null;
+  /** 'auto' = von Pipeflow, 'kunde' = der Kunde hat daran gearbeitet (19.09.2026). */
+  origin: "auto" | "kunde";
+  imageSource: "auto" | "kunde";
+}
+
+/**
+ * DIE Regel des Ueberschreibschutzes, an genau einer Stelle: nachtraeglich neu geschrieben werden
+ * darf nur, was Pipeflow selbst geschrieben hat und was noch niemand angefasst hat. Alles andere
+ * - bearbeitet, freigegeben, eigener Beitrag - ist unantastbar. Reine Funktion, testbar.
+ */
+export function darfNeuGeschriebenWerden(p: Pick<PlannedPost, "status" | "origin">): boolean {
+  return p.origin !== "kunde" && p.status === "planned";
 }
 
 function toPlannedPost(r: PlannedPostRow): PlannedPost {
@@ -1520,6 +1538,8 @@ function toPlannedPost(r: PlannedPostRow): PlannedPost {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     brandingVersionAtGeneration: r.branding_version_at_generation,
+    origin: r.origin === "kunde" ? "kunde" : "auto",
+    imageSource: r.image_source === "kunde" ? "kunde" : "auto",
   };
 }
 
@@ -1601,7 +1621,8 @@ export function updatePlannedPostText(id: string, fields: { headline?: string; c
   const headline = fields.headline !== undefined ? fields.headline : row.headline;
   const caption = fields.caption !== undefined ? fields.caption : row.caption;
   const nextStatus = row.status === "planned" ? "edited" : row.status;
-  db.prepare("UPDATE planned_posts SET headline = ?, caption = ?, status = ?, updated_at = ?, branding_version_at_generation = ? WHERE id = ?").run(
+  // Ab hier ist die Zeile Kundenarbeit - fuer immer (Ueberschreibschutz).
+  db.prepare("UPDATE planned_posts SET headline = ?, caption = ?, status = ?, origin = 'kunde', updated_at = ?, branding_version_at_generation = ? WHERE id = ?").run(
     headline,
     caption,
     nextStatus,
@@ -1664,8 +1685,11 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
   // already found another open entry for this customer/channel/day, e.g. filed earlier the same
   // day via the K4-K8 spontaneous path) - the slot is covered either way, and leaving this
   // planned_post at 'planned' would make K3b retry it every single run, forever.
+  // Herkunft wandert mit: das Freigabe-Tor (getFreshApprovedPendingPosts) darf Kundenarbeit
+  // genauso wenig neu schreiben wie die Planung.
+  if (approval) db.prepare("UPDATE pending_approvals SET origin = ? WHERE id = ?").run(plan.origin, approval.id);
   markPlannedPostStatus(plan.id, "submitted");
-  return approval;
+  return approval ? { ...approval, origin: plan.origin } : approval;
 }
 
 /**
@@ -1673,6 +1697,57 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
  * regenerate_count. Caller (the router) is responsible for checking PLANNED_POST_MAX_REGENERATE
  * against the current count BEFORE calling generation - this function only records the result.
  */
+/**
+ * Easy Onboarding: Bild NACHTRAGEN bei einer Zeile, die vor der E-Mail-Bestaetigung bewusst ohne
+ * Bild angelegt wurde (Kostenschutz, planning.ts). Anders als updatePlannedPostImage zaehlt das
+ * NICHT als "Neu erstellen" des Kunden (regenerate_count bleibt) - es ist die erste Erstellung.
+ */
+export function setPlannedPostImage(id: string, imageUrl: string, accentColorUsed: string | undefined): PlannedPost | null {
+  // Ein vom Kunden hochgeladenes Bild wird von keinem Farbwechsel und keinem Nachtrag ersetzt.
+  const eigenes = db.prepare("SELECT image_source FROM planned_posts WHERE id = ?").get(id) as { image_source: string } | undefined;
+  if (eigenes?.image_source === "kunde") return null;
+  const result = db
+    .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = COALESCE(?, accent_color_used), updated_at = ? WHERE id = ?")
+    .run(imageUrl, accentColorUsed ?? null, nowIso(), id);
+  if (result.changes === 0) return null;
+  return getPlannedPost(id);
+}
+
+/** Alle Zeilen eines Kunden im Vorschaufenster, die noch kein Bild haben (Easy Onboarding). */
+export function listPlannedPostsWithoutImage(customerId: string, fromDate: string, toDate: string): PlannedPost[] {
+  const rows = db
+    .prepare(
+      "SELECT * FROM planned_posts WHERE customer_id = ? AND image_url IS NULL AND scheduled_for >= ? AND scheduled_for <= ? AND status IN ('planned','edited','approved') ORDER BY scheduled_for, channel",
+    )
+    .all(customerId, fromDate, toDate) as PlannedPostRow[];
+  return rows.map(toPlannedPost);
+}
+
+/**
+ * Easy Onboarding, Dashboard: Reihenfolge der naechsten Tage per Drag-and-drop - INNERHALB eines
+ * Kanals werden die vorhandenen Termine (scheduled_for) in neuer Reihenfolge auf die Zeilen
+ * verteilt. Es entsteht nie ein zweiter Beitrag fuer denselben Kanal/Tag und nie ein neuer
+ * Termin: die Routine (get_planned_post nach customer/channel/date) findet weiterhin genau eine
+ * Zeile je Slot. Nur noch nicht eingereichte/veroeffentlichte Zeilen ('planned','edited',
+ * 'approved') duerfen tauschen; taucht eine andere in `ids` auf, wird abgelehnt (null).
+ */
+export function reorderPlannedPosts(customerId: string, channel: string, ids: string[]): PlannedPost[] | null {
+  const rows = db
+    .prepare("SELECT * FROM planned_posts WHERE customer_id = ? AND channel = ? AND id IN (" + ids.map(() => "?").join(",") + ")")
+    .all(customerId, channel, ...ids) as PlannedPostRow[];
+  if (rows.length !== ids.length || new Set(ids).size !== ids.length) return null;
+  if (rows.some((r) => !["planned", "edited", "approved"].includes(r.status))) return null;
+  const dates = rows.map((r) => r.scheduled_for).sort();
+  const now = nowIso();
+  const update = db.prepare("UPDATE planned_posts SET scheduled_for = ?, origin = 'kunde', updated_at = ? WHERE id = ?");
+  db.transaction(() => {
+    // Zwei Schritte, weil die Zwischenzustaende sonst auf denselben Tag fallen koennten.
+    ids.forEach((id, i) => update.run(`tmp-${i}-${dates[i]}`, now, id));
+    ids.forEach((id, i) => update.run(dates[i], now, id));
+  })();
+  return ids.map((id) => getPlannedPost(id)).filter((p): p is PlannedPost => Boolean(p));
+}
+
 export function updatePlannedPostImage(id: string, imageUrl: string, accentColorUsed: string): PlannedPost | null {
   const result = db
     .prepare("UPDATE planned_posts SET image_url = ?, accent_color_used = ?, regenerate_count = regenerate_count + 1, updated_at = ? WHERE id = ?")
@@ -1710,13 +1785,25 @@ export function countRegenerableBrandingPlannedPosts(customerId: string): { elig
  * Does not touch regenerate_count (that budget is specifically for the customer's own "Mit
  * dieser Farbe neu erstellen" button, a separate feature/limit).
  */
-export function overwritePlannedPostContent(id: string, fields: { headline: string; caption: string; imageUrl: string; accentColorUsed?: string | null }): PlannedPost | null {
+export function overwritePlannedPostContent(id: string, fields: { headline: string; caption: string; imageUrl: string | null; accentColorUsed?: string | null }): PlannedPost | null {
+  // Die Schranke (19.09.2026). Jeder Weg, der eine Zeile nachtraeglich neu schreibt, muss hier
+  // durch - Branding-Neugenerierung, naechtliche Auffrischung, Sicherheitsnetz vor dem Posten,
+  // und alles, was spaeter dazukommt. Bearbeitetes, Freigegebenes und Eigenes wirft hier.
+  // Bis heute setzte diese Funktion ausserdem jeden Beitrag auf 'planned' zurueck und loeschte
+  // damit nebenbei "bearbeitet" und "freigegeben" - der Zustand bleibt jetzt stehen.
+  const vorher = db.prepare("SELECT status, origin FROM planned_posts WHERE id = ?").get(id) as { status: string; origin: string } | undefined;
+  if (!vorher) return null;
+  if (!darfNeuGeschriebenWerden({ status: vorher.status, origin: vorher.origin === "kunde" ? "kunde" : "auto" })) {
+    throw new ToolError(`Beitrag ${id} ist unantastbar (${vorher.status}, ${vorher.origin}) und wird nicht neu geschrieben.`);
+  }
   const now = nowIso();
+  // Leerer String = "bewusst ohne Bild" (Easy Onboarding vor der Bestaetigung) -> NULL, damit
+  // listPlannedPostsWithoutImage die Zeile spaeter findet und das Bild nachtraegt.
   const result = db
     .prepare(
-      "UPDATE planned_posts SET headline = ?, caption = ?, image_url = ?, accent_color_used = ?, status = 'planned', updated_at = ?, branding_version_at_generation = ? WHERE id = ?",
+      "UPDATE planned_posts SET headline = ?, caption = ?, image_url = ?, accent_color_used = ?, updated_at = ?, branding_version_at_generation = ? WHERE id = ? AND origin = 'auto' AND status = 'planned'",
     )
-    .run(fields.headline, fields.caption, fields.imageUrl, fields.accentColorUsed ?? null, now, now, id);
+    .run(fields.headline, fields.caption, fields.imageUrl || null, fields.accentColorUsed ?? null, now, now, id);
   if (result.changes === 0) return null;
   return getPlannedPost(id);
 }

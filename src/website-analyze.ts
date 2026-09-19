@@ -26,7 +26,9 @@ interface PageText {
  * CSS (colors especially - see website-analyze design notes: scraping a color from CSS/inline
  * styles is unreliable, the existing color picker stays the source of truth for that).
  */
-export function extractPageText(html: string): PageText {
+/** `maxBodyChars` seit 19.09.2026: die Startseite bekommt weiter 2000 Zeichen, eine mitgelesene
+ *  Unterseite ihr eigenes Budget (siehe start-analysis.ts). Ohne Angabe unveraendert 2000. */
+export function extractPageText(html: string, opts: { maxBodyChars?: number } = {}): PageText {
   const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   const title = titleMatch ? decodeHtmlEntities(titleMatch[1]).replace(/\s+/g, " ").trim().slice(0, 200) : "";
 
@@ -41,7 +43,7 @@ export function extractPageText(html: string): PageText {
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ");
-  const bodyText = decodeHtmlEntities(stripped).replace(/\s+/g, " ").trim().slice(0, 2000);
+  const bodyText = decodeHtmlEntities(stripped).replace(/\s+/g, " ").trim().slice(0, opts.maxBodyChars ?? 2000);
 
   return { title, description, bodyText };
 }

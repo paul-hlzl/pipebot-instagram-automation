@@ -68,6 +68,13 @@ import { FONT_OPTIONS, DEFAULT_FONT_ID } from "../fonts.js";
 import { suggestGradientPartners } from "../gradient.js";
 import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
+import { registerStartRoutes } from "./start-routes.js";
+import { registerTestmodeRoutes, testmodusMoeglich } from "./start-testmode.js";
+import { registerWocheRoutes, registerWocheBildRoute, merken } from "./woche-routes.js";
+import { limitsAusgeschaltet } from "./start-quota.js";
+import { runBackfillJob } from "./start-jobs.js";
+import { featuresForTier, normalizeTier } from "./tiers.js";
+import { reorderPlannedPosts } from "./credentials.js";
 
 const VERSION: string = (() => {
   try {
@@ -160,13 +167,19 @@ function startSession(res: Response, customerId: string, req: Request = res.req 
   res.setHeader("Set-Cookie", `${COOKIE}=${token}; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`);
 }
 
+function endSession(res: Response, req: Request = res.req as Request): void {
+  const token = readCookie(req, COOKIE);
+  if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
+  res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+}
+
 function currentCustomer(req: Request): CustomerRow | undefined {
   const token = readCookie(req, COOKIE);
   if (!token) return undefined;
   return db
     .prepare(
       `SELECT c.* FROM sessions s JOIN customers c ON c.id = s.customer_id
-       WHERE s.token_hash = ? AND s.expires_at > ? AND c.status = 'active'`,
+       WHERE s.token_hash = ? AND s.expires_at > ? AND c.status IN ('active', 'test')`,
     )
     .get(sha256(token), nowIso()) as CustomerRow | undefined;
 }
@@ -499,6 +512,19 @@ function publicState(c: CustomerRow) {
       activeThemeId: c.active_theme_id,
       hasLogo: Boolean(c.logo_url),
       skippedProviders: (c.skipped_providers ?? "").split(",").filter(Boolean),
+      // Easy Onboarding: welche Oberflaeche dieser Kunde sieht und welche Funktionen seine
+      // Preisstufe freischaltet (tiers.ts). Bestehende Kunden: 'classic' / basic, keine Wirkung.
+      uiMode: c.ui_mode === "easy" ? "easy" : "classic",
+      // Testlauf der Sandbox (start-testmode.ts): die Oberflaeche zeigt daraufhin die Testleiste.
+      isTest: (c as { status?: string }).status === "test",
+      // Markenlogo fuer die Kopfzeile (19.09.2026): eigener Upload schlaegt erkanntes Logo.
+      brandLogo: Boolean(c.logo_url || (c as { detected_logo_url?: string | null }).detected_logo_url),
+      brandLogoTile: Boolean((c as { detected_logo_tile?: number }).detected_logo_tile) && !c.logo_url,
+      // Easy Onboarding: ueber welchen Weg das Konto entstanden ist. Steuert im neuen Panel, ob
+      // der E-Mail-Bestaetigungs-Hinweis ueberhaupt in Frage kommt (Auftrag Abschnitt 5).
+      authProvider: c.auth_provider ?? null,
+      planTier: normalizeTier(c.plan_tier),
+      features: featuresForTier(c.plan_tier),
     },
     connections: rows.map((r) => ({
       provider: r.provider,
@@ -518,6 +544,7 @@ function publicState(c: CustomerRow) {
 
 const backTo = (res: Response, params: Record<string, string>): void =>
   res.redirect(303, `${mountFor(res.req as Request)}/?${new URLSearchParams(params)}`);
+const backToPanel = backTo;
 
 type Handler = (req: Request, res: Response) => Promise<void> | void;
 const safe = (fn: Handler) => async (req: Request, res: Response, next: NextFunction) => {
@@ -640,6 +667,38 @@ export function createPanelRouter(): Router {
     }),
   );
 
+  /**
+   * Das Logo fuer die Kopfzeile. Zeigt den eigenen Upload des Kunden, wenn es einen gibt,
+   * sonst das auf seiner Website erkannte. Eigene Route statt /api/logo, damit das
+   * Upload-Verhalten (inklusive Loeschen) unveraendert bleibt.
+   */
+  router.get(
+    "/api/brand-logo",
+    safe(async (req, res) => {
+      const c = currentCustomer(req);
+      if (!c) {
+        res.status(401).end();
+        return;
+      }
+      const row = db.prepare("SELECT logo_url, detected_logo_url FROM customers WHERE id = ?").get(c.id) as
+        | { logo_url: string | null; detected_logo_url: string | null }
+        | undefined;
+      const datei = row?.logo_url || row?.detected_logo_url;
+      if (!datei) {
+        res.status(404).end();
+        return;
+      }
+      try {
+        await fsPromises.access(datei);
+      } catch {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.sendFile(datei);
+    }),
+  );
+
   router.delete(
     "/api/logo",
     safe(async (req, res) => {
@@ -656,6 +715,10 @@ export function createPanelRouter(): Router {
       res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
     }),
   );
+
+  // Eigenes Beitragsbild: braucht einen groesseren Koerper als 50 KB und muss darum - wie die
+  // Sprachaufnahme oben - VOR dem globalen Parser stehen.
+  registerWocheBildRoute(router, { currentCustomer, rateLimited });
 
   router.use(express.json({ limit: "50kb" }));
 
@@ -700,9 +763,24 @@ export function createPanelRouter(): Router {
   // 250-KB-Einzeldatei war nicht mehr sinnvoll wartbar). Statisch aus demselben publicDir, damit
   // beide Mount-Pfade (/panel und /panel/sandbox) ohne Sonderfall funktionieren - express.static
   // laesst alles durch, was keine Datei ist, die API-Routen darunter bleiben also unberuehrt.
+  // Easy Onboarding: VOR express.static, sonst wuerde "/start" (ohne Slash) von serve-static auf
+  // "/start/" umgeleitet - hinter dem Sandbox-Proxy (der /sandbox abschneidet) zeigte diese
+  // Umleitung auf den falschen Pfad.
+  router.get(["/start", "/start/"], (_req, res) => res.sendFile(path.join(publicDir, "start/index.html")));
   router.use(express.static(publicDir, { index: false, maxAge: "5m" }));
 
-  router.get("/", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+  // Easy Onboarding (19.09.2026): eigener Pfad ${mount}/start/ fuer die neue Oberflaeche. Wer ueber
+  // den neuen Flow gekommen ist (ui_mode = 'easy'), landet auch bei "/" dort - bestehende Kunden
+  // (ui_mode NULL) sehen unveraendert das klassische Panel. ?classic=1 erreicht es immer, auch
+  // fuer Easy-Kunden (Verlauf, Farbthemen, Wochentagsplanung bleiben dort erreichbar).
+  router.get("/", (req, res) => {
+    const c = currentCustomer(req);
+    if (c && c.ui_mode === "easy" && req.query.classic === undefined) {
+      res.redirect(302, `${mountFor(req)}/start/${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`);
+      return;
+    }
+    res.sendFile(path.join(publicDir, "index.html"));
+  });
 
   // Keine Auth noetig (wie /health am Server-Root) - liefert bewusst nichts Sensibles, nur
   // ob die DB erreichbar ist und welche Version laeuft.
@@ -732,6 +810,9 @@ export function createPanelRouter(): Router {
       // Dauerhafte Staging-Testadresse (/panel/sandbox) - steuert nur den Testversion-Banner und
       // die Demo-Hinweistexte im Frontend, nie in Produktion gesetzt.
       sandbox: process.env.PANEL_SANDBOX === "true",
+      testmodeAvailable: testmodusMoeglich(),
+      // Nur zur Anzeige und fuer die Testreihe: sagt, ob die Tagesgrenzen gerade greifen.
+      previewLimitsOff: limitsAusgeschaltet(),
     });
   });
 
@@ -1032,6 +1113,12 @@ export function createPanelRouter(): Router {
     res.json(publicState(c));
   });
 
+  registerStartRoutes(router, { currentCustomer, startSession, publicState, clientIp, mountFor, baseUrlFor, hostOf, rateLimited, trialDays });
+  // Nur wirksam, wenn PANEL_SANDBOX=true UND PANEL_TEST_KEY gesetzt sind - sonst faellt der
+  // Einstieg auf 404 durch (siehe start-testmode.ts).
+  registerTestmodeRoutes(router, { currentCustomer, startSession, endSession, publicState, clientIp, mountFor, rateLimited, trialDays });
+  registerWocheRoutes(router, { currentCustomer, rateLimited });
+
   router.post("/api/signup", safe(async (req, res) => {
     if (rateLimited(`signup:${clientIp(req)}`, 5, 3_600_000)) {
       res.status(429).json({ error: "Zu viele Versuche. Bitte in einer Stunde erneut probieren." });
@@ -1283,6 +1370,13 @@ export function createPanelRouter(): Router {
     db.prepare("UPDATE customers SET email_verified = 1, email_verify_token_hash = NULL, updated_at = ? WHERE id = ?").run(nowIso(), c.id);
     startSession(res, c.id);
     console.log(`[panel] ${c.id} (${c.company}) hat die E-Mail-Adresse bestätigt.`);
+    if (c.ui_mode === "easy") {
+      // Easy Onboarding: die vor der Bestaetigung bewusst ohne Bild angelegten Beitraege bekommen
+      // ihre Bilder jetzt - im Hintergrund, der Kunde sieht sie im Dashboard eintrudeln.
+      runBackfillJob(c.id);
+      res.redirect(303, `${mountFor(req)}/start/?verified=1`);
+      return;
+    }
     res.redirect(303, `${mountFor(req)}/?verified=1`);
   });
 
@@ -1316,16 +1410,22 @@ export function createPanelRouter(): Router {
     // ausgesperrt hat, sucht dann am falschen Ende. Eigener Fehlercode dafuer.
     if (!key) return backTo(res, { error: "login" });
     if (rateLimited(`login:${clientIp(req)}`, 20, 3_600_000)) return backTo(res, { error: "login-limit" });
-    const c = db.prepare("SELECT * FROM customers WHERE login_key_hash = ? AND status = 'active'").get(sha256(key)) as CustomerRow | undefined;
-    if (!c) return backTo(res, { error: "login" });
+    let c = db.prepare("SELECT * FROM customers WHERE login_key_hash = ? AND status = 'active'").get(sha256(key)) as CustomerRow | undefined;
+    if (!c) {
+      // Easy Onboarding: Einmal-Anmeldelink aus Bildschirm 1 (eine Stunde gueltig, genau einmal).
+      const einmal = db
+        .prepare("SELECT * FROM customers WHERE login_link_token_hash = ? AND login_link_expires_at > ? AND status = 'active'")
+        .get(sha256(key), nowIso()) as CustomerRow | undefined;
+      if (!einmal) return backTo(res, { error: "login" });
+      db.prepare("UPDATE customers SET login_link_token_hash = NULL, login_link_expires_at = NULL, updated_at = ? WHERE id = ?").run(nowIso(), einmal.id);
+      c = einmal;
+    }
     startSession(res, c.id);
     res.redirect(303, `${mountFor(req)}/`);
   });
 
   router.post("/api/logout", (req, res) => {
-    const token = readCookie(req, COOKIE);
-    if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
-    res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    endSession(res, req);
     res.json({ ok: true });
   });
 
@@ -1462,6 +1562,7 @@ export function createPanelRouter(): Router {
         res.status(400).json({ error: err instanceof ToolError ? err.message : "Der Text konnte nicht gespeichert werden - bitte prüfen Sie ihn noch einmal." });
         return;
       }
+      merken(plan.id, "Bearbeitet");
       const updated = updatePlannedPostText(plan.id, { headline, caption });
       res.json({ post: updated });
     }),
@@ -1515,6 +1616,28 @@ export function createPanelRouter(): Router {
     }),
   );
 
+  // Easy Onboarding, Dashboard: Reihenfolge der naechsten Tage per Drag-and-drop - tauscht nur
+  // die vorhandenen Termine innerhalb eines Kanals (siehe reorderPlannedPosts), nie mehr.
+  router.post("/api/planned-posts/reorder", (req, res) => {
+    const c = currentCustomer(req);
+    if (!c) {
+      res.status(401).json({ error: "Nicht angemeldet" });
+      return;
+    }
+    const channel = str(req.body?.channel, 20);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown): x is string => typeof x === "string").slice(0, 31) : [];
+    if (!["ig_feed", "ig_story", "linkedin"].includes(channel) || ids.length < 2) {
+      res.status(400).json({ error: "Bitte mindestens zwei Beiträge desselben Kanals angeben." });
+      return;
+    }
+    const posts = reorderPlannedPosts(c.id, channel, ids);
+    if (!posts) {
+      res.status(400).json({ error: "Diese Beiträge lassen sich nicht mehr umsortieren (schon eingereicht oder veröffentlicht)." });
+      return;
+    }
+    res.json({ posts });
+  });
+
   // "Diesen Beitrag überspringen" - Kundenwunsch, kein Fehler: die Routine (K0) laesst diesen
   // Kanal/Tag dann aus, ohne spontan zu ersetzen.
   router.post("/api/planned-posts/:id/skip", (req, res) => {
@@ -1532,6 +1655,7 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Dieser Beitrag wurde bereits veröffentlicht." });
       return;
     }
+    merken(plan.id, "Übersprungen");
     res.json({ post: markPlannedPostStatus(plan.id, "rejected") });
   });
 
@@ -1555,6 +1679,7 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Dieser Beitrag kann nicht mehr freigegeben werden." });
       return;
     }
+    merken(plan.id, "Freigegeben");
     const updated = markPlannedPostStatus(plan.id, "approved");
     triggerRoutineNow("planned-post-approve");
     res.json({ post: updated });
@@ -1955,7 +2080,7 @@ export function createPanelRouter(): Router {
     // Nachtrag 3: return=settings (von der Einstellungsgruppe "Verknüpfungen" aus verlinkt) merkt
     // sich das Panel hier, damit /callback weiss, wohin die Rueckkehr gehoert - Erst-Onboarding
     // (kein return-Parameter) verhaelt sich exakt wie bisher.
-    const returnTo = req.query.return === "settings" ? "settings" : null;
+    const returnTo = req.query.return === "settings" ? "settings" : req.query.return === "start" ? "start" : null;
     db.prepare("INSERT INTO oauth_states (state, customer_id, provider, expires_at, return_to) VALUES (?, ?, ?, ?, ?)")
       .run(state, c.id, provider.id, new Date(Date.now() + 15 * 60_000).toISOString(), returnTo);
     res.redirect(302, provider.authorizeUrl(state, redirectUri(provider.id, req)));
@@ -1964,7 +2089,7 @@ export function createPanelRouter(): Router {
   // Schritt 2 OAuth: Rückkehr von der Plattform
   router.get("/callback/:provider", async (req, res) => {
     const provider = getProvider(String(req.params.provider));
-    if (!provider) return backTo(res, { error: "failed" });
+    if (!provider) return backToPanel(res, { error: "failed" });
     const pid = provider.id;
 
     const state = str(req.query.state, 100);
@@ -1976,6 +2101,12 @@ export function createPanelRouter(): Router {
     // Abbruch oder Fehler - sonst landet ein "Neu verbinden" aus den Einstellungen bei einem
     // abgebrochenen Login wieder im Erst-Onboarding statt zurueck in "Verknüpfungen".
     const returnParam: Record<string, string> = stored?.return_to ? { return: stored.return_to } : {};
+    // Easy Onboarding: kam der Kunde von ${mount}/start/, geht es dorthin zurueck - mit denselben
+    // Parametern (connected/error/provider), die die neue Oberflaeche genauso auswertet.
+    const backTo = (r: Response, params: Record<string, string>): void =>
+      stored?.return_to === "start"
+        ? r.redirect(303, `${mountFor(req)}/start/?${new URLSearchParams(params)}`)
+        : backToPanel(r, params);
 
     if (req.query.error) return backTo(res, { error: "cancelled", provider: pid, ...returnParam });
     if (!stored || stored.provider !== pid || new Date(stored.expires_at).getTime() < Date.now()) {
