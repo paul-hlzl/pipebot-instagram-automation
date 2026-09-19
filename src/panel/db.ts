@@ -336,7 +336,16 @@ function migrateColumns(table: string, columns: readonly (readonly [string, stri
   }
 }
 
+// Ueberschreibschutz (Auftrag 19.09.2026): `origin` sagt, ob eine Zeile von Pipeflow stammt
+// ('auto') oder ob der Kunde daran gearbeitet hat ('kunde'). Nichts setzt es je zurueck.
+// `image_source` dasselbe fuer das Bild. Bestehende Zeilen sind 'auto' - das ist wahr.
+migrateColumns("planned_posts", [
+  ["origin", "TEXT NOT NULL DEFAULT 'auto'"],
+  ["image_source", "TEXT NOT NULL DEFAULT 'auto'"],
+]);
 migrateColumns("pending_approvals", [
+  // Wird beim Einreichen aus planned_posts uebernommen (credentials.ts, submit...).
+  ["origin", "TEXT NOT NULL DEFAULT 'auto'"],
   // Exact ig_feed/ig_story/linkedin value from save_pending_approval's `channel` argument -
   // the pre-existing `provider` column collapses ig_feed/ig_story both to "instagram", which
   // loses exactly the distinction the panel UI and a later publish-approved-post run need.
@@ -929,6 +938,7 @@ export interface PendingApprovalRow {
   updated_at: string;
   format: string;
   branding_version_at_generation: string | null;
+  origin: string;
   video_url: string | null;
 }
 
@@ -961,6 +971,8 @@ export interface PlannedPostRow {
   updated_at: string;
   format: string;
   branding_version_at_generation: string | null;
+  origin: string;
+  image_source: string;
   video_url: string | null;
 }
 

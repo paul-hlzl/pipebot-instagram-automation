@@ -43,6 +43,7 @@ import {
 } from "./credentials.js";
 import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./schedule.js";
 import { wochenfarbe } from "./brand-colors.js";
+import { darfNeuGeschriebenWerden } from "./credentials.js";
 import { sprachFehler } from "./sprache.js";
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
@@ -379,7 +380,9 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
   const today = viennaDateStr();
   const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
   const targetStatuses = includeEdited ? ["planned", "edited"] : ["planned"];
-  const candidates = listPlannedPosts(row.id, today, to).filter((p) => targetStatuses.includes(p.status));
+  // Ueberschreibschutz: Kundenarbeit ist auch mit includeEdited unantastbar - 'edited' ist seit
+  // 19.09.2026 immer Kundenarbeit (origin = 'kunde'), also faellt includeEdited faktisch weg.
+  const candidates = listPlannedPosts(row.id, today, to).filter((p) => targetStatuses.includes(p.status) && darfNeuGeschriebenWerden(p));
   const pillars = listContentPillars(row.id);
 
   let updated = 0;
@@ -623,7 +626,7 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
 export async function recolorPlannedPosts(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
   const today = viennaDateStr();
   const to = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
-  const rows = listPlannedPosts(row.id, today, to).filter((p) => p.headline && p.imageUrl && ["planned", "edited", "approved"].includes(p.status));
+  const rows = listPlannedPosts(row.id, today, to).filter((p) => p.headline && p.imageUrl && ["planned", "edited", "approved"].includes(p.status) && p.imageSource !== "kunde");
   if (!rows.length) return { filled: 0, failed: 0 };
   const branding = resolveImageBranding(row.id);
   let filled = 0;
@@ -835,7 +838,7 @@ export async function refreshStalePlannedPosts(row: CustomerRow, pillars: Conten
 
   for (const plan of listPlannedPosts(row.id, von, bis)) {
     const grund = plannedPostStaleReason(plan, row.branding_last_changed_at, jetzt);
-    if (!grund) continue;
+    if (!grund || !darfNeuGeschriebenWerden(plan)) continue;
     const channel = plan.channel as PlannableChannel;
     if (!(channel in CHANNEL_SCHEDULE)) continue;
     try {
@@ -892,12 +895,19 @@ export async function ensureFreshPlannedPost(plan: PlannedPost): Promise<Planned
     const result = await backfillMissingImages(row);
     const refreshed = result.filled ? getPlannedPostByChannelDate(plan.customerId, plan.channel, plan.scheduledFor) : null;
     if (!refreshed?.imageUrl) {
+      // Kundenarbeit wird nicht still uebersprungen: sie geht so raus, wie sie ist; ein Kanal,
+      // der ein Bild verlangt, meldet das laut, statt dass der Text verloren geht.
+      if (plan.origin === "kunde") return plan;
       markPlannedPostStatus(plan.id, "rejected");
       logPlanningError(row.id, plan.channel, plan.scheduledFor, "Beitrag ohne Bild konnte nicht nachgezogen werden - übersprungen, Routine generiert selbst.");
       return null;
     }
     plan = refreshed;
   }
+  // Die Luecke vom 19.09.2026: hier liefen bearbeitete und freigegebene Beitraege durch und
+  // wurden bei geaenderter Farbe kurz vor dem Posten komplett neu geschrieben. Jetzt endet der
+  // Weg fuer alles, was nicht unveraenderte Pipeflow-Arbeit ist.
+  if (!darfNeuGeschriebenWerden(plan)) return plan;
   if (!isBrandingStale(plan.brandingVersionAtGeneration, row.branding_last_changed_at)) return plan;
 
   try {
@@ -944,7 +954,8 @@ export async function getFreshApprovedPendingPosts(): Promise<PendingApproval[]>
       customerCache.set(approval.customerId, getCustomerRowById(approval.customerId));
     }
     const row = customerCache.get(approval.customerId);
-    if (!row || !isBrandingStale(approval.brandingVersionAtGeneration, row.branding_last_changed_at)) {
+    // Kundenarbeit (origin 'kunde') wird im Freigabe-Tor nie neu geschrieben - sie geht so raus.
+    if (!row || approval.origin === "kunde" || !isBrandingStale(approval.brandingVersionAtGeneration, row.branding_last_changed_at)) {
       fresh.push(approval);
       continue;
     }

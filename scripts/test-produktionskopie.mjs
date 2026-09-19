@@ -28,7 +28,13 @@ Object.assign(env, {
   PANEL_PUBLIC_DIR: "/root/mcp-sandbox/public/panel", PANEL_MAIL_DRY_RUN: "1",
   PANEL_BASE_URL: BASE,
 });
-const vorher = JSON.parse(fs.readFileSync(`${S}/schema-vorher.json`, "utf8"));
+// Die Kopie entsteht HIER, konsistent ueber die Sicherungsschnittstelle, Quelle nur lesend -
+// und das Schema davor wird ebenfalls hier festgehalten, damit der Lauf fuer sich steht.
+for (const f of [KOPIE, `${KOPIE}-wal`, `${KOPIE}-shm`]) { try { fs.unlinkSync(f); } catch { /* neu */ } }
+await new Database("/root/mcp-server/data/panel.db", { readonly: true }).backup(KOPIE);
+const vorher = (() => { const q = new Database(KOPIE, { readonly: true }); const out = {}; for (const t of q.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name)) out[t] = q.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name); q.close(); return out; })();
+const kundenVorher = (() => { const q = new Database(KOPIE, { readonly: true }); const n = { k: q.prepare("SELECT COUNT(*) n FROM customers").get().n, p: q.prepare("SELECT COUNT(*) n FROM planned_posts").get().n }; q.close(); return n; })();
+console.log(`Kopie angelegt: ${kundenVorher.k} Kunden, ${kundenVorher.p} geplante Beitraege`);
 
 const kind = spawn("node", ["/root/mcp-sandbox/dist/index.js"], { cwd: "/root/mcp-sandbox", env, stdio: ["ignore", "pipe", "pipe"] });
 let log = "";
@@ -52,8 +58,8 @@ try {
   }
   ok("Keine Tabelle und keine Spalte ist verschwunden", entfernt === 0, `${entfernt} entfernt`);
   ok("Nur Ergaenzungen", dazu.length > 0, dazu.join(", "));
-  ok("Alle 6 Kunden sind weiterhin da, keiner ist 'test'", db.prepare("SELECT COUNT(*) n FROM customers WHERE status='active'").get().n === 6 && db.prepare("SELECT COUNT(*) n FROM customers WHERE status='test'").get().n === 0);
-  ok("Alle 174 geplanten Beitraege unveraendert vorhanden", db.prepare("SELECT COUNT(*) n FROM planned_posts").get().n === 174);
+  ok(`Alle ${kundenVorher.k} Kunden sind weiterhin da, keiner ist 'test'`, db.prepare("SELECT COUNT(*) n FROM customers").get().n === kundenVorher.k && db.prepare("SELECT COUNT(*) n FROM customers WHERE status='test'").get().n === 0);
+  ok(`Alle ${kundenVorher.p} geplanten Beitraege unveraendert vorhanden, alle als Pipeflow-Arbeit (origin auto)`, db.prepare("SELECT COUNT(*) n FROM planned_posts").get().n === kundenVorher.p && db.prepare("SELECT COUNT(*) n FROM planned_posts WHERE origin='auto'").get().n === kundenVorher.p);
 
   console.log("\nProduktionsverhalten der Grenzen");
   const prov = await (await fetch(`${BASE}/panel/api/providers`)).json();
@@ -61,6 +67,7 @@ try {
 
   console.log("\nJeder bestehende Kunde: Anmeldung, Zustand, Woche");
   const kunden = db.prepare("SELECT id, company, ui_mode FROM customers WHERE status='active' ORDER BY created_at").all();
+  ok("Produktion selbst ist unangetastet (Datei nicht neuer als die Kopie)", fs.statSync("/root/mcp-server/data/panel.db").mtimeMs <= fs.statSync(KOPIE).mtimeMs + 1000);
   const sessions = {};
   for (const k of kunden) {
     const tok = "kopie" + crypto.randomBytes(8).toString("hex");
