@@ -42,6 +42,7 @@ import {
   type PublishChannel,
 } from "./credentials.js";
 import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./schedule.js";
+import { wochenfarbe } from "./brand-colors.js";
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
 import { anthropicAvailable, generatePlannedPostContent } from "../anthropic.js";
@@ -72,6 +73,71 @@ const CHANNEL_SCHEDULE: Record<PlannableChannel, PostingChannel> = {
  * unauffaelliger. Angelegt ist die Grenze grosszuegig (rund 60 Zeichen, gemessene Ueberschriften
  * liegen im Median bei 35), sie soll nur echte Ausreisser abfangen.
  */
+/* ------------------------- Keine zwei Beitraege mit demselben Aufhaenger -------------------
+ * Auftrag vom 19.09.2026. Vorher entstanden zehn Beitraege in zehn getrennten Aufrufen, von
+ * denen keiner wusste, was die anderen neun sagen - bei channoine-mayr.at begannen neun von
+ * zehn Ueberschriften mit "Dein" oder "Deine", zwei teilten 60 Prozent ihrer Woerter.
+ *
+ * Die Sperre wirkt an zwei Stellen: der Prompt bekommt die schon vergebenen Ueberschriften
+ * mit (anthropic.ts, vergebeneAufhaenger), und hier wird das Ergebnis nachgeprueft. Faellt es
+ * durch, greift dieselbe Ein-Neuversuch-Regel wie bei Sperrwoertern.
+ */
+const FUELLWOERTER = new Set(["dein", "deine", "deinen", "deinem", "deiner", "dich", "der", "die", "das", "den", "dem", "und", "oder", "mit", "ohne", "fuer", "für", "von", "aus", "ein", "eine", "einen", "ist", "sind", "wir", "uns", "unser", "unsere", "sie", "ihr", "ihre", "mehr", "jetzt", "hier", "auch", "bei", "zum", "zur"]);
+
+function aufhaengerWorte(text: string): Set<string> {
+  return new Set(
+    (text.toLowerCase().match(/[a-zäöüß]+/g) ?? []).filter((w) => w.length > 3 && !FUELLWOERTER.has(w)),
+  );
+}
+
+function erstesWort(text: string): string {
+  return (text.toLowerCase().match(/[a-zäöüß]+/) ?? [""])[0];
+}
+
+/** Aehnlichkeit zweier Ueberschriften ueber gemeinsame Inhaltswoerter (Jaccard). */
+export function aufhaengerAehnlichkeit(a: string, b: string): number {
+  const wa = aufhaengerWorte(a);
+  const wb = aufhaengerWorte(b);
+  if (!wa.size || !wb.size) return 0;
+  let gemeinsam = 0;
+  for (const w of wa) if (wb.has(w)) gemeinsam++;
+  return gemeinsam / (wa.size + wb.size - gemeinsam);
+}
+
+/** Ab hier gelten zwei Ueberschriften als derselbe Aufhaenger. 0,3 statt eines strengeren
+ *  Werts, weil "Dein Weg zu Beauty-Erfolg" und "Dein Weg zur Beauty Unternehmerin" bei 0,33
+ *  liegen - genau die Art Wiederholung, um die es geht. */
+const AEHNLICH_GRENZE = 0.3;
+/** So oft darf dasselbe Anfangswort in einer Woche vorkommen. */
+const ANFANGSWORT_MAX = 2;
+
+/** Die ersten zwei Woerter, klein und ohne Satzzeichen. "Deine Haut verdient Analyse" und
+ *  "Deine Haut verdient Perfektion" teilen sie - das ist derselbe Aufhaenger, egal wie das
+ *  Wortmass ausfaellt. */
+function anfangsPaar(text: string): string {
+  return (text.toLowerCase().match(/[a-zäöüß]+/g) ?? []).slice(0, 2).join(" ");
+}
+
+export function aufhaengerKollision(headline: string, vergeben: string[]): string | null {
+  const paar = anfangsPaar(headline);
+  for (const alt of vergeben) {
+    if (paar && paar.includes(" ") && anfangsPaar(alt) === paar) {
+      return `Die Überschrift "${headline}" beginnt genauso wie die schon geplante "${alt}".`;
+    }
+  }
+  for (const alt of vergeben) {
+    const wert = aufhaengerAehnlichkeit(headline, alt);
+    if (wert >= AEHNLICH_GRENZE) {
+      return `Die Überschrift "${headline}" sagt dasselbe wie die schon geplante "${alt}" (${Math.round(wert * 100)} % gemeinsame Wörter).`;
+    }
+  }
+  const anfang = erstesWort(headline);
+  if (anfang && vergeben.filter((a) => erstesWort(a) === anfang).length >= ANFANGSWORT_MAX) {
+    return `Schon ${ANFANGSWORT_MAX} Überschriften dieser Woche beginnen mit "${anfang}" - diese auch.`;
+  }
+  return null;
+}
+
 function assertHeadlineRenderable(row: CustomerRow, channel: PlannableChannel, headline: string): void {
   const font = getFontOption(row.font_choice ?? DEFAULT_FONT_ID);
   const layout = headlineLayoutForFormat(headline, CHANNEL_IMAGE_FORMAT[channel], font);
@@ -95,6 +161,9 @@ function checkTextsFor(channel: PlannableChannel, headline: string, caption: str
 
 interface PlanOneResult {
   planned: boolean;
+  /** Die geschriebene Ueberschrift - die Wochenplanung sammelt sie, damit der naechste
+   *  Beitrag einen anderen Aufhaenger bekommt (19.09.2026). */
+  headline: string;
 }
 
 interface GeneratedPost {
@@ -125,7 +194,17 @@ async function generatePost(
   channel: PlannableChannel,
   pillar: ContentPillar | null,
   feature = "planned-post",
-  opts: { withImage?: boolean } = {},
+  opts: {
+    withImage?: boolean;
+    farbSchluessel?: string;
+    /** Liefert die AKTUELL vergebenen Aufhaenger - als Funktion, nicht als Kopie: bei
+     *  paralleler Planung aendert sich die Liste waehrend der Generierung. */
+    vergebenJetzt?: () => string[];
+    /** Prueft UND belegt in einem Schritt. Gibt eine Begruendung zurueck, wenn die Ueberschrift
+     *  einen schon vergebenen Aufhaenger wiederholt, sonst null. Der Aufruf ist synchron und
+     *  damit unteilbar - genau das schliesst das Rennen zwischen gleichzeitigen Beitraegen. */
+    reservieren?: (headline: string) => string | null;
+  } = {},
 ): Promise<GeneratedPost> {
   const styleSamples = await getStyleSamples(row.id);
   const bannedWords = splitCommaList(row.banned_words);
@@ -147,28 +226,51 @@ async function generatePost(
     requiredElements,
     customHashtags,
     styleSamples: styleSamples.samples.map((s) => s.caption).filter((c): c is string => Boolean(c)).slice(0, 5),
+    vergebeneAufhaenger: opts.vergebenJetzt?.().slice(-12),
   };
 
   let content = await generatePlannedPostContent(baseInput);
   let costUsd = content.costUsd;
+  let belegt = false;
   logUsageCost(row.id, feature, content.costUsd);
   try {
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertHeadlineRenderable(row, channel, content.headline);
+    if (opts.reservieren) {
+      const problem = opts.reservieren(content.headline);
+      if (problem) throw new ToolError(`${problem} Nimm einen anderen Aufhänger - ein anderes Angebot, einen anderen Anlass, eine andere Zielgruppe -, nicht dieselbe Aussage in neuen Worten.`);
+      belegt = true;
+    }
   } catch (err) {
     // One retry, feeding back exactly what was wrong - same "retry ONCE, don't retry forever
     // and don't give up after one attempt either" policy as K7 in the routine.
     const avoidNote = err instanceof Error ? err.message : String(err);
-    content = await generatePlannedPostContent({ ...baseInput, avoidNote });
+    content = await generatePlannedPostContent({ ...baseInput, avoidNote, vergebeneAufhaenger: opts.vergebenJetzt?.().slice(-12) });
     costUsd = costUsd != null && content.costUsd != null ? costUsd + content.costUsd : content.costUsd ?? costUsd;
     logUsageCost(row.id, feature, content.costUsd);
     assertNoBannedWords(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertRequiredElements(row.id, ...checkTextsFor(channel, content.headline, content.caption));
     assertHeadlineRenderable(row, channel, content.headline);
+    // Nach dem zweiten Versuch wird die Aehnlichkeit NICHT mehr erzwungen: lieber ein etwas
+    // aehnlicher Beitrag als ein fehlender Tag in der Woche (Auftrag: keine leeren Tage).
+    if (opts.reservieren && !belegt) {
+      const problem = opts.reservieren(content.headline);
+      if (problem) console.warn(`[planning] ${row.id}: "${content.headline}" bleibt trotz Neuversuch nah an einem anderen Beitrag - ${problem}`);
+      belegt = true;
+    }
   }
 
-  const branding = resolveImageBranding(row.id);
+  const roh = resolveImageBranding(row.id);
+  // Abwechslung innerhalb der Markenfarbe (19.09.2026): jeder Beitrag der Woche bekommt eine
+  // eigene Stufe derselben Farbe. Ohne Farbverlauf (also ohne erkannte Markenfarben) bleibt
+  // alles wie bisher - dort erzeugt fal.ai das Bild und es gibt nichts zu variieren.
+  const branding = roh.gradient && roh.accentColor && opts.farbSchluessel
+    ? (() => {
+        const v = wochenfarbe(roh.accentColor, roh.gradient.color2, opts.farbSchluessel);
+        return { ...roh, accentColor: v.accentColor, gradient: { color2: v.color2, direction: v.direction } };
+      })()
+    : roh;
   // Easy Onboarding (Kostenschutz): vor der E-Mail-Bestaetigung nur fuer die ersten Slots ein
   // echtes Bild - der Text ist billig, das Bild nicht. Zeilen ohne Bild bekommen es spaeter ueber
   // backfillMissingImages (nach der Bestaetigung) nachgetragen.
@@ -183,8 +285,21 @@ async function generatePost(
   return { headline: content.headline, caption: content.caption, imageUrl: generated.imageUrl, accentColorUsed: branding.accentColor, costUsd };
 }
 
-async function planOnePost(row: CustomerRow, channel: PlannableChannel, scheduledFor: string, pillar: ContentPillar | null, withImage = true, feature = "planned-post"): Promise<PlanOneResult> {
-  const generated = await generatePost(row, channel, pillar, feature, { withImage });
+async function planOnePost(
+  row: CustomerRow,
+  channel: PlannableChannel,
+  scheduledFor: string,
+  pillar: ContentPillar | null,
+  withImage = true,
+  feature = "planned-post",
+  aufhaenger?: { jetzt: () => string[]; reservieren: (h: string) => string | null },
+): Promise<PlanOneResult> {
+  const generated = await generatePost(row, channel, pillar, feature, {
+    withImage,
+    farbSchluessel: `${scheduledFor}|${channel}`,
+    vergebenJetzt: aufhaenger?.jetzt,
+    reservieren: aufhaenger?.reservieren,
+  });
   createPlannedPost({
     customerId: row.id,
     channel,
@@ -195,7 +310,7 @@ async function planOnePost(row: CustomerRow, channel: PlannableChannel, schedule
     pillarTitle: pillar?.title,
     accentColorUsed: generated.accentColorUsed,
   });
-  return { planned: true };
+  return { planned: true, headline: generated.headline };
 }
 
 export interface BrandingRegenResult {
@@ -248,7 +363,7 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
       const pillar = plan.pillarTitle ? pillars.find((p) => p.title === plan.pillarTitle) ?? { id: "", title: plan.pillarTitle, description: null, weight: 1 } : null;
       try {
         const withImage = opts.keepImageless ? Boolean(plan.imageUrl) : true;
-        const generated = await generatePost(row, channel, pillar, "planned-post-branding-regen", { withImage });
+        const generated = await generatePost(row, channel, pillar, "planned-post-branding-regen", { withImage, farbSchluessel: `${plan.scheduledFor}|${channel}` });
         overwritePlannedPostContent(plan.id, {
           headline: generated.headline,
           caption: generated.caption,
@@ -423,11 +538,31 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
   let planned = 0;
   let errors = 0;
   let next = 0;
+  // Gemeinsame Liste aller Ueberschriften dieser Woche. Jeder Slot liest sie beim Start und
+  // traegt sein Ergebnis ein. Bei mehreren Arbeitern sieht ein spaeter Slot nicht zwingend
+  // ALLE frueheren - aber die grosse Mehrheit, und das genuegt: die Wiederholung entstand
+  // dadurch, dass gar nichts bekannt war, nicht dadurch, dass zwei gleichzeitig liefen.
+  const vergeben: string[] = listPlannedPosts(row.id, viennaDateStr(), viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000)))
+    .map((p) => p.headline)
+    .filter((h): h is string => Boolean(h));
+  // Pruefen und Belegen in EINEM synchronen Schritt. JavaScript unterbricht eine Funktion nicht
+  // mittendrin, also kann zwischen Pruefung und Eintrag kein zweiter Beitrag dazwischenfunken.
+  // Genau das ist vorher passiert: bei drei gleichzeitigen Laeufen sahen zwei dieselbe alte
+  // Liste und schrieben beide "Energie statt Erschoepfung".
+  const aufhaenger = {
+    jetzt: () => vergeben,
+    reservieren: (headline: string): string | null => {
+      const problem = aufhaengerKollision(headline, vergeben);
+      if (problem) return problem;
+      vergeben.push(headline);
+      return null;
+    },
+  };
   const worker = async (): Promise<void> => {
     while (next < slots.length) {
       const slot = slots[next++];
       try {
-        await planOnePost(row, slot.channel, slot.dateStr, slot.pillar, slot.withImage, feature);
+        await planOnePost(row, slot.channel, slot.dateStr, slot.pillar, slot.withImage, feature, aufhaenger);
         planned++;
       } catch (err) {
         errors++;
@@ -503,9 +638,17 @@ export async function backfillMissingImages(row: CustomerRow, opts: { concurrenc
     while (next < rows.length) {
       const plan = rows[next++];
       try {
-        const generated = await generateImageUrl(plan.headline as string, CHANNEL_IMAGE_FORMAT[plan.channel as PlannableChannel], branding);
+        // Dieselbe Farbstufe wie beim ersten Rendern - der Schluessel ist Datum und Kanal,
+        // also bekommt ein nachgetragenes Bild genau die Farbe, die es haette haben sollen.
+        const b = branding.gradient && branding.accentColor
+          ? (() => {
+              const v = wochenfarbe(branding.accentColor as string, branding.gradient!.color2, `${plan.scheduledFor}|${plan.channel}`);
+              return { ...branding, accentColor: v.accentColor, gradient: { color2: v.color2, direction: v.direction } };
+            })()
+          : branding;
+        const generated = await generateImageUrl(plan.headline as string, CHANNEL_IMAGE_FORMAT[plan.channel as PlannableChannel], b);
         logUsageCost(row.id, "planned-post-bild-nachtrag", generated.costUsd);
-        setPlannedPostImage(plan.id, generated.imageUrl, branding.accentColor);
+        setPlannedPostImage(plan.id, generated.imageUrl, b.accentColor);
         filled++;
       } catch (err) {
         failed++;

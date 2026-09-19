@@ -156,6 +156,7 @@
     stage.innerHTML = `<div class="screen${wechsel ? " enter" : ""}">${html ? html() : ""}</div>`;
     kopfzeile();
     testleiste();
+    farbBlattSetzen();
     if (["website", "beschreibung"].includes(S.screen) && S.turnstileSiteKey && S.customer && !S.customer.authProvider) renderTurnstile();
     if (["arbeitet", "ergebnis", "dashboard"].includes(S.screen)) pollStarten(); else pollStoppen();
     if (S.screen === "dashboard") dashboardNachladen();
@@ -218,6 +219,50 @@
     location.href = MOUNT + "/start/";
   }
 
+  /**
+   * Der Farbpicker am Handy: als halbhohes Blatt von unten statt im Seitenfluss (Ansage vom
+   * 19.09.2026). Grund ist gemessen - inline schob er die Beitragsvorschauen aus dem Bild,
+   * also genau das, was er live veraendert. Am Schreibtisch bleibt alles wie bisher inline,
+   * dort ist Platz genug.
+   */
+  const SCHMAL = () => window.matchMedia("(max-width: 719px)").matches;
+
+  function farbBlattSetzen() {
+    const overlay = $("#sheet-overlay");
+    if (!overlay) return;
+    const soll = S.editing === "farbe" && SCHMAL();
+    if (!soll) {
+      if (overlay.classList.contains("halb")) {
+        overlay.classList.remove("halb");
+        overlay.hidden = true;
+        $("#sheet-body").innerHTML = "";
+        document.body.classList.remove("blatt-offen");
+      }
+      return;
+    }
+    const form = $('[data-zeile-form="farbe"]');
+    if (!form) return;
+    $("#sheet-title").textContent = "Farbe";
+    const body = $("#sheet-body");
+    body.innerHTML = "";
+    body.appendChild(form);
+    overlay.classList.add("halb");
+    overlay.hidden = false;
+    document.body.classList.add("blatt-offen");
+    // Die Vorschaukacheln in den freien Streifen ueber dem Blatt holen - sonst sieht man beim
+    // Schieben am Regler nicht, was passiert, und genau dafuer ist das Blatt da.
+    // scrollIntoView taugt hier nicht: es setzt die Kacheln an den Fensterrand, wo Testleiste
+    // und Markenkopf kleben. Deshalb der Versatz von Hand, und erst im naechsten Frame, wenn
+    // das Blatt seine Hoehe hat.
+    requestAnimationFrame(() => {
+      const kacheln = $("#plan-vorschau");
+      if (!kacheln) return;
+      const kopf = ($("#testleiste")?.offsetHeight || 0) + ($("#top")?.offsetHeight || 0) + 8;
+      const ziel = window.scrollY + kacheln.getBoundingClientRect().top - kopf;
+      window.scrollTo({ top: Math.max(0, ziel), behavior: "auto" });
+    });
+  }
+
   function go(screen, opts = {}) {
     S.screen = screen;
     S.editing = null;
@@ -238,8 +283,8 @@
     const liste = S.authProviders.length ? S.authProviders : [{ id: "google", name: "Google", available: false, note: "Wird gerade eingerichtet." }];
     return `
       <section class="hero">
-        <h1>Deine Beiträge. Jede Woche. Automatisch.</h1>
-        <p class="lede">Pipeflow liest deine Website, erkennt deine Themen und deine Farben und plant die nächste Woche für Instagram und LinkedIn. Du gibst nur noch frei.</p>
+        <h1>Aus deiner Website wird deine nächste Woche.</h1>
+        <p class="lede">Wir lesen deine Website, erkennen Themen und Farben und legen dir sieben Tage Instagram und LinkedIn vor. Veröffentlicht wird nur, was du freigibst.</p>
         <div class="auth-liste">
           ${liste.map((p) => p.available
             ? `<a class="auth-btn" href="${esc(MOUNT)}/auth/${esc(p.id)}">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} fortfahren</a>`
@@ -264,7 +309,7 @@
              keinen Unterschied: dieselben Anbieter-Knoepfe, nur der E-Mail-Weg legt drueben
              kein Konto an (modus=anmelden, siehe start-routes.ts). -->
         <p class="auth-schon">Schon ein Konto? <button type="button" class="link auth-link" data-go="anmelden">Hier anmelden</button></p>
-        <p class="hint">Mit dem Fortfahren stimmst du zu, dass Pipeline AI Solutions deine Angaben speichert, um Beiträge für dich vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
+        <p class="hint">Mit dem Fortfahren erlaubst du Pipeline AI Solutions, deine Angaben zu speichern und daraus Beiträge vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
       </section>`;
   }
 
@@ -275,7 +320,7 @@
         <!-- "Willkommen zurück" gehoert dem Bildschirm, auf dem wir den Kunden bereits erkannt
              haben (gueltige Sitzung). Hier wissen wir noch nicht, wer kommt - also die Handlung. -->
         <h1>Anmelden</h1>
-        <p class="lede">Melde dich so an, wie du dein Konto angelegt hast. Es entsteht dabei nichts Neues.</p>
+        <p class="lede">Nimm den Weg, mit dem du dein Konto angelegt hast.</p>
         ${liste.length ? `<div class="auth-liste">
           ${liste.map((p) => `<a class="auth-btn" href="${esc(MOUNT)}/auth/${esc(p.id)}">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} anmelden</a>`).join("")}
         </div>
@@ -287,7 +332,7 @@
             <p class="error" id="err-email" aria-live="assertive"></p>
           </div>
           <div class="actions"><button class="btn lg" type="submit">Anmeldelink schicken</button></div>
-          <p class="auth-schon">Noch kein Konto? <button type="button" class="link auth-link" data-go="konto">Hier geht's los</button></p>
+          <p class="auth-schon">Noch kein Konto? <button type="button" class="link auth-link" data-go="konto">Hier anlegen</button></p>
         </form>
       </section>`;
   }
@@ -295,8 +340,8 @@
   function emailHtml() {
     return `
       <section class="hero">
-        <h1>Mit E-Mail fortfahren</h1>
-        <p class="lede">Wir erkennen selbst, ob wir dich schon kennen.</p>
+        <h1>Deine E-Mail-Adresse</h1>
+        <p class="lede">Kennen wir die Adresse schon, schicken wir dir einen Anmeldelink. Sonst geht es direkt weiter.</p>
         <form id="f-email" novalidate>
           <div class="field">
             <label for="email">E-Mail-Adresse</label>
@@ -304,7 +349,7 @@
             <p class="error" id="err-email" aria-live="assertive"></p>
           </div>
           <div class="actions"><button class="btn lg" type="submit">Weiter</button></div>
-          <button type="button" class="link" data-go="konto">Zurück zu Google, Microsoft und Apple</button>
+          <button type="button" class="link" data-go="konto">Zurück zu den Anmeldewegen</button>
         </form>
       </section>`;
   }
@@ -312,10 +357,10 @@
   function gesendetHtml() {
     return `
       <section class="hero">
-        <h1>Willkommen zurück</h1>
+        <h1>Schau in dein Postfach</h1>
         <p class="lede">${S.mailGeschickt
-          ? `Wir haben dir einen Anmeldelink an <strong>${esc(S.email)}</strong> geschickt. Er gilt eine Stunde.`
-          : `Für <strong>${esc(S.email)}</strong> gibt es schon ein Konto. In der letzten Stunde wurden bereits Anmeldelinks verschickt - bitte schau ins Postfach.`}</p>
+          ? `Wir haben dir einen Anmeldelink an <strong>${esc(S.email)}</strong> geschickt. Er gilt eine Stunde und lässt sich einmal verwenden.`
+          : `An <strong>${esc(S.email)}</strong> haben wir in der letzten Stunde schon einen Anmeldelink geschickt. Bitte nimm den, ein neuer kommt erst danach.`}</p>
         ${S.sandbox ? `<p class="hint">Testversion: Hier wird keine E-Mail verschickt, der Link steht nur im Server-Log.</p>` : ""}
         <div class="actions"><button type="button" class="link" data-go="email">Andere E-Mail-Adresse verwenden</button></div>
       </section>`;
@@ -355,8 +400,8 @@
   function websiteHtml() {
     return `
       <section class="hero">
-        <h1>So könnte deine nächste Woche aussehen</h1>
-        <p class="lede">Gib deine Website ein. Wir lesen sie, erkennen Themen und Farben und planen die nächsten sieben Tage.</p>
+        <h1>Deine Website genügt.</h1>
+        <p class="lede">Wir lesen sie einmal, erkennen Themen und Farben und planen daraus die nächsten sieben Tage.</p>
         <form id="f-website" novalidate>
           <div class="field">
             <label for="website">Website-Adresse</label>
@@ -376,7 +421,7 @@
     return `
       <section class="hero">
         <h1>Was macht dein Unternehmen?</h1>
-        <p class="lede">Ein, zwei Sätze reichen. Wenn es holprig klingt: „Mit KI verbessern" macht einen sauberen Absatz daraus, den du weiter bearbeiten kannst.</p>
+        <p class="lede">Ein, zwei Sätze reichen. Stichworte auch - der Knopf darunter macht einen sauberen Absatz daraus.</p>
         <form id="f-beschreibung" novalidate>
           <div class="field feld-mit-ki">
             <label for="description">Beschreibung</label>
@@ -394,11 +439,18 @@
   }
 
   /* ================= Bildschirm 3: es arbeitet ================= */
+  /** Bilder aus erkannten Markenfarben werden lokal gerendert und kosten nichts - dann gibt es
+   *  keinen Deckel und die ganze Woche bekommt sofort Bilder (Ansage vom 19.09.2026). Der
+   *  Deckel greift nur, wenn kein Farbverlauf gefunden wurde und jedes Bild echtes Geld kostet. */
+  function bilderKostenlos() {
+    const c = S.customer;
+    return Boolean(c && c.gradientEnabled && c.accentColor);
+  }
   function erwarteteBilder() {
     const st = S.status;
     if (!st) return 0;
     const gesamt = Math.max(st.job?.total || 0, st.posts.length);
-    if (S.customer?.emailVerified) return gesamt;
+    if (S.customer?.emailVerified || bilderKostenlos()) return gesamt;
     return Math.min(st.summary?.limits?.imagesUnverified ?? 3, gesamt);
   }
 
@@ -416,7 +468,7 @@
     const schritt = (zustand, titel, unter) => `<li class="step is-${zustand}"><span class="step-mark" aria-hidden="true">${zustand === "done" ? "✓" : ""}</span><span class="step-text"><span>${titel}</span>${unter ? `<span class="step-sub">${unter}</span>` : ""}</span></li>`;
     const farbPunkte = gefunden?.colors
       ? `<span class="step-farben"><span class="step-farbe" style="background:${esc(gefunden.colors.accentColor)}"></span><span class="step-farbe" style="background:${esc(gefunden.colors.gradientColor2)}"></span>${esc(gefunden.colors.accentColor)}</span>`
-      : nachLesen ? "Keine eigenen Farben gefunden - wir nehmen unser Standardthema." : "";
+      : nachLesen ? "Keine eigenen Farben gefunden - wir nehmen unsere Standardfarben." : "";
     return `
       <section>
         <h1>${S.website ? `Wir lesen ${esc(S.website.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))}` : "Wir lesen deine Angaben"}</h1>
@@ -461,7 +513,7 @@
     const wm = (c && (c.watermarkText || c.company)) || "";
     const medien = p.imageUrl
       ? `<img src="${esc(p.imageUrl)}" alt="Beitragsbild: ${esc(p.headline || "")}" loading="lazy">`
-      : `<div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div><span class="kachel-notiz">${c?.emailVerified ? "Bild wird gerade erstellt" : "Bild folgt nach der Bestätigung"}</span>`;
+      : `<div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div><span class="kachel-notiz">${c?.emailVerified || bilderKostenlos() ? "Bild wird gerade erstellt" : "Bild folgt nach der Bestätigung"}</span>`;
     const statusText = { edited: "von dir bearbeitet", approved: "freigegeben", submitted: "in der Freigabe", published: "veröffentlicht", channel_disconnected: "Kanal getrennt" }[p.status] || "";
     const sortierbar = opts.dashboard && ["planned", "edited", "approved"].includes(p.status);
     const aktionen = opts.dashboard ? `
@@ -488,12 +540,12 @@
     const laeuft = st?.job && !["done", "error", "idle"].includes(st.job.phase);
     const offen = laeuft && st.job.total ? Math.max(0, st.job.total - st.job.done) : 0;
     const satz = themen.length >= 2
-      ? `Wir haben diese Beiträge rund um <strong>${esc(themen[0])}</strong> und <strong>${esc(themen[1])}</strong> erstellt - zwei Themen, die ${quelle} besonders hervorstachen.`
+      ? `Diese Beiträge drehen sich um <strong>${esc(themen[0])}</strong> und <strong>${esc(themen[1])}</strong>, die zwei Themen, die ${quelle} am deutlichsten sind.`
       : themen.length === 1
-        ? `Wir haben diese Beiträge rund um <strong>${esc(themen[0])}</strong> erstellt - das Thema, das ${quelle} am stärksten hervorstach.`
+        ? `Diese Beiträge drehen sich um <strong>${esc(themen[0])}</strong>, das Thema, das ${quelle} am deutlichsten ist.`
         : `Wir haben diese Beiträge aus dem abgeleitet, was ${quelle} steht.`;
     const farbSatz = sum.colors?.gradientEnabled && sum.colors.accentColor
-      ? ` Die Farben stammen von deiner Website.`
+      ? ` Die Farben kommen ebenfalls von dort.`
       : "";
     return `
       <section>
@@ -515,7 +567,7 @@
     return `
       <section class="hero">
         <h1>Was soll anders sein?</h1>
-        <p class="lede">Sag es in deinen Worten. Wir übersetzen das in Beschreibung, Tonalität und Themen und schreiben die Woche neu.</p>
+        <p class="lede">Sag es in deinen Worten. Wir schreiben die offenen Beiträge damit neu.</p>
         <form id="f-anders" novalidate>
           <div class="field">
             <label for="wish">Dein Wunsch</label>
@@ -633,7 +685,7 @@
     return `
       <section>
         <h1>Dein Plan</h1>
-        <p class="lede">Alles aus deiner Website abgeleitet. Jede Zeile lässt sich mit dem Stift ändern.</p>
+        <p class="lede">Alles aus deiner Website abgeleitet. Jede Zeile kannst du ändern.</p>
         ${posts.length ? `<div class="tag-posts" id="plan-vorschau" style="margin-top:22px">${posts.map((p) => vorschauKachelHtml(p)).join("")}</div>` : ""}
         ${planZeilenHtml()}
         <div class="actions" style="margin-top:30px"><button type="button" class="btn lg" id="btn-plan-uebernehmen">Plan übernehmen</button></div>
@@ -679,9 +731,9 @@
     return `
       <section>
         <h1>Kanäle verbinden</h1>
-        <p class="lede">Damit Pipeflow für dich veröffentlichen kann. Jeder Kanal einzeln, jeder überspringbar.</p>
+        <p class="lede">Damit Pipeflow veröffentlichen kann. Jeden Kanal kannst du auch später verbinden.</p>
         <div class="connect-liste">${liste.map((p) => verbindenKarteHtml(p, true)).join("")}</div>
-        <div class="actions" style="margin-top:30px"><button type="button" class="btn lg" id="btn-zum-dashboard">Zum Dashboard</button></div>
+        <div class="actions" style="margin-top:30px"><button type="button" class="btn lg" id="btn-zum-dashboard">Zur Übersicht</button></div>
       </section>`;
   }
 
@@ -702,7 +754,7 @@
           <button type="button" class="btn" id="btn-jetzt-posten">Jetzt posten</button>
         </div>
         ${S.notice ? noticeHtml() : ""}
-        ${!c.emailVerified && !c.authProvider ? `<div class="notice" role="status"><strong>Bitte bestätige deine E-Mail-Adresse.</strong> Wir haben einen Link an ${esc(c.email)} geschickt. Erst danach wird veröffentlicht${st?.posts?.some((p) => !p.imageUrl) ? " und die restlichen Bilder werden erstellt" : ""}.<span><button type="button" class="link" id="verify-neu">Bestätigungsmail erneut senden</button></span></div>` : ""}
+        ${!c.emailVerified && !c.authProvider ? `<div class="notice" role="status"><strong>Bitte bestätige deine E-Mail-Adresse.</strong> Wir haben einen Link an ${esc(c.email)} geschickt. Erst danach veröffentlichen wir${st?.posts?.some((p) => !p.imageUrl) ? " und erstellen die restlichen Bilder" : ""}.<span><button type="button" class="link" id="verify-neu">Bestätigungsmail erneut senden</button></span></div>` : ""}
         ${fehlend.map((p) => `<div class="notice" role="status">${esc(p.name)} ist noch nicht verbunden - dort kann noch nichts veröffentlicht werden.<span><a class="btn secondary sm" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start" style="justify-self:start">${esc(p.name)} verbinden</a></span></div>`).join("")}
         ${c.customerPaused ? `<div class="notice bad">Deine Veröffentlichung ist pausiert.<span><button type="button" class="link" data-pause="0">Fortsetzen</button></span></div>` : ""}
         ${laeuft ? `<p class="lauf-zeile">${st.job.kind === "backfill" || st.job.kind === "recolor" ? "Bilder werden erstellt" : "Beiträge werden erstellt"}${st.job.total ? ` - ${st.job.done} von ${st.job.total}` : ""} …</p>` : ""}
@@ -734,7 +786,7 @@
     return `
       <section>
         <h1>Einstellungen</h1>
-        <p class="lede">Dein Plan, deine Kanäle, dein Verlauf. Alles Weitere bleibt im klassischen Panel.</p>
+        <p class="lede">Dein Plan, deine Kanäle, deine veröffentlichten Beiträge. Alles Weitere findest du im klassischen Panel.</p>
         ${S.notice ? noticeHtml() : ""}
         ${planZeilenHtml()}
         <div class="zeile" id="zeile-anders"><span class="zeile-k">Ausrichtung ändern</span><div class="zeile-v"><span class="muted">In eigenen Worten sagen, was anders sein soll - wir schreiben die offenen Beiträge neu.</span></div><button type="button" class="stift" data-go="anders" aria-label="Ausrichtung ändern">${STIFT}</button></div>
@@ -1063,7 +1115,18 @@
       </form>`;
     $("#sheet-overlay").hidden = false;
   }
-  function sheetSchliessen() { $("#sheet-overlay").hidden = true; }
+  function sheetSchliessen() {
+    const overlay = $("#sheet-overlay");
+    overlay.hidden = true;
+    // War es das Farbblatt, muss auch die Zeile wieder zugehen - sonst bleibt sie offen
+    // zurueck und das Blatt springt beim naechsten Rendern wieder hoch.
+    if (overlay.classList.contains("halb")) {
+      overlay.classList.remove("halb");
+      document.body.classList.remove("blatt-offen");
+      $("#sheet-body").innerHTML = "";
+      if (S.editing === "farbe") { S.editing = null; render(); }
+    }
+  }
 
   async function jetztPostenAbsenden(form) {
     const kanaele = $$("input[name=ch]:checked", form).map((i) => i.value);

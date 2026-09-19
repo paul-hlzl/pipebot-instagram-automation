@@ -430,3 +430,59 @@ export async function extractBrandColorsFromHtml(html: string, basisUrl: string,
     candidates: gruppen.slice(0, 6).map((g) => ({ hex: g.hex, score: Math.round(g.score * 100) / 100, from: g.from })),
   };
 }
+
+/* ------------------------- Abwechslung innerhalb der Markenfarbe -------------------------
+ * Auftrag vom 19.09.2026: eine Woche in zehnmal exakt demselben Braun wirkt wie ein
+ * Druckfehler, nicht wie eine Handschrift. Echte Marken variieren innerhalb ihrer Palette.
+ *
+ * Aus der EINEN erkannten Markenfarbe werden vier Abstufungen abgeleitet - unterschiedlich in
+ * Helligkeit und Saettigung, gleicher Farbton - dazu wechselnde Verlaufsrichtungen. Die Marke
+ * bleibt in jedem Bild erkennbar, aber keine zwei Tage sehen gleich aus. Kostet nichts, weil
+ * die Verlaeufe ohnehin lokal gerendert werden (siehe gradient.ts).
+ *
+ * Die Variante wird NICHT gewuerfelt, sondern aus Datum und Kanal abgeleitet. Damit bekommt
+ * derselbe Beitrag beim Neurendern (Farbwechsel im Plan, backfillMissingImages) wieder genau
+ * seine Farbe, ohne dass irgendwo ein Index gespeichert werden muesste.
+ */
+export type VerlaufsRichtung = "diagonal" | "horizontal" | "vertical";
+
+/** Helligkeit/Saettigung je Stufe, relativ zur erkannten Markenfarbe. */
+const STUFEN: { dl: number; ds: number; richtung: VerlaufsRichtung }[] = [
+  { dl: 0.0, ds: 0.0, richtung: "diagonal" },
+  { dl: -0.07, ds: 0.06, richtung: "vertical" },
+  { dl: 0.06, ds: -0.05, richtung: "diagonal" },
+  { dl: -0.13, ds: -0.03, richtung: "horizontal" },
+];
+
+function verschieben(hex: string, dl: number, ds: number): string {
+  const [h, s, l] = rgbToHsl(...hexToRgb(hex));
+  return hslToHex(h, Math.min(0.95, Math.max(0.12, s + ds)), Math.min(0.72, Math.max(0.12, l + dl)));
+}
+
+/** Stabile kleine Zahl aus einem Text - kein Zufall, damit dasselbe Bild dieselbe Farbe behaelt. */
+function streuwert(text: string): number {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+export interface Wochenfarbe {
+  accentColor: string;
+  color2: string;
+  direction: VerlaufsRichtung;
+  stufe: number;
+}
+
+/**
+ * Die Farbstufe fuer einen bestimmten Beitrag. `schluessel` ist alles, was den Beitrag
+ * eindeutig macht und sich nicht mehr aendert - in der Praxis Datum + Kanal.
+ */
+export function wochenfarbe(accentColor: string, color2: string, schluessel: string): Wochenfarbe {
+  const stufe = streuwert(schluessel) % STUFEN.length;
+  const { dl, ds, richtung } = STUFEN[stufe];
+  // Der Kontrast zu weisser Schrift muss in JEDER Stufe halten - eine aufgehellte Variante
+  // koennte sonst unter 4,5:1 rutschen und die Headline unlesbar machen.
+  const accent = ensureReadableWithWhite(verschieben(accentColor, dl, ds));
+  const partner = ensureReadableWithWhite(verschieben(color2, dl, ds));
+  return { accentColor: accent, color2: partner, direction: richtung, stufe };
+}

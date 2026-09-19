@@ -415,3 +415,35 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .testleiste-knoepfe { display: flex; gap: 6px; }
 .testleiste .link { min-height: var(--tap); padding: 0 8px; font-size: 14px; }
 @media (max-width: 420px) { .testleiste-zusatz { display: none; } }
+
+/* ---- Farbwahl als halbhohes Blatt (nur Handy) -------------------------------------------
+   Vorher stand der Farbpicker im Fluss der Seite: 505 px hoch, beginnend bei 197 px. In einem
+   780 px hohen Fenster schob er genau das aus dem Bild, was er veraendert - die drei
+   Beitragsvorschauen darueber. Gemessen am 19.09.2026: Vorschau sichtbar = nein.
+   Jetzt faehrt er von unten hoch und laesst die obere Haelfte frei. Der Bereich ueber dem
+   Blatt bleibt UNGETOENT, sonst waere die Live-Vorschau zwar sichtbar, aber verfaelscht. */
+.sheet-overlay.halb { background: transparent; pointer-events: none; }
+.sheet-overlay.halb .sheet {
+  pointer-events: auto;
+  max-height: 56vh;
+  box-shadow: 0 -18px 40px rgba(13, 13, 13, .18);
+}
+.sheet-overlay.halb .sheet .zeile-form { display: block; }
+.sheet-overlay.halb .sheet .zeile-form-actions { position: sticky; bottom: 0; background: #fff; padding-top: 10px; margin-top: 4px; }
+/* Damit die Vorschaukacheln nicht unter dem Blatt verschwinden, bekommt die Seite unten Platz. */
+body.blatt-offen .stage { padding-bottom: 58vh; }
+/* Und die drei Vorschauen ruecken nebeneinander: einzeln untereinander sind sie am Handy
+   zusammen 1381 px hoch, in den freien Streifen ueber dem Blatt passt so keine einzige.
+   Nebeneinander sind sie klein, aber alle drei ganz zu sehen - und darum geht es hier:
+   sehen, wie sich die Farbe auf die Woche auswirkt, nicht einen Beitrag lesen. */
+body.blatt-offen #plan-vorschau { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+body.blatt-offen #plan-vorschau .post { border-radius: 10px; }
+body.blatt-offen #plan-vorschau .post-meta { display: none; }
+body.blatt-offen #plan-vorschau .kachel-h { font-size: 11px; line-height: 1.2; }
+body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
+@media (min-width: 720px) {
+  .sheet-overlay.halb { background: rgba(13,13,13,.35); pointer-events: auto; }
+  body.blatt-offen .stage { padding-bottom: 0; }
+  body.blatt-offen #plan-vorschau { display: flex; grid-template-columns: none; }
+  body.blatt-offen #plan-vorschau .post-meta { display: flex; }
+}

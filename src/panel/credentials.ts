@@ -794,7 +794,9 @@ export interface ContentPillar {
   weight: number;
 }
 
-const MAX_PILLARS = 6;
+// 19.09.2026 von 6 auf 12: die Website-Analyse liefert seither 8-10 Themen statt 3, damit
+// zehn Beitraege einer Woche zehn verschiedene Aufhaenger bekommen koennen.
+const MAX_PILLARS = 12;
 
 /** Active content pillars for a customer, oldest first. Empty array = feature unused (fallback to `about`). */
 export function listContentPillars(customerId: string): ContentPillar[] {

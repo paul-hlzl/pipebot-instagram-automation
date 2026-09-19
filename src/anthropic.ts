@@ -117,7 +117,11 @@ const VALID_TONES = ["sachlich", "locker", "inspirierend", "humorvoll"];
  * color reliably out of arbitrary CSS/inline styles isn't feasible, so the existing color
  * picker stays untouched and is the only source of truth for that.
  */
-export async function suggestFromWebsite(input: { title: string; description: string; bodyText: string }): Promise<WebsiteSuggestion> {
+export async function suggestFromWebsite(
+  input: { title: string; description: string; bodyText: string },
+  /** Seit 19.09.2026: mitgelesene Unterseiten. Ohne sie verhaelt sich die Funktion wie bisher. */
+  unterseiten: { pfad: string; text: string }[] = [],
+): Promise<WebsiteSuggestion> {
   const { anthropicApiKey, anthropicModel } = getConfig();
   if (!anthropicApiKey) {
     throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
@@ -131,11 +135,22 @@ export async function suggestFromWebsite(input: { title: string; description: st
     'direkt und konkret, kein Marketing-Geschwafel", "tone": "genau eines von sachlich, locker, inspirierend, ' +
     'humorvoll", "hashtags": ["3 bis 5 Schlagwörter ohne Raute, kleingeschrieben, je ein Wort ohne Leerzeichen"], ' +
     '"company": "Name des Unternehmens, wie er auf der Seite steht (ohne Rechtsform-Zusätze wie GmbH nur, wenn sie dort auch fehlen) - leerer String, wenn nicht erkennbar", ' +
-    '"pillars": [{"title": "Thema in 1-3 Wörtern", "description": "ein Satz, worum es bei diesem Thema in Beiträgen geht"}] mit genau 3 Themen, ' +
-    "die auf der Website besonders hervorstechen und sich für regelmäßige Social-Media-Beiträge eignen}. " +
+    '"pillars": [{"title": "Thema in 1-3 Wörtern", "description": "ein Satz, worum es bei diesem Thema in Beiträgen geht"}] mit ' +
+    "8 bis 10 Themen, die auf der Website vorkommen und sich für regelmäßige Social-Media-Beiträge eignen. " +
+    "Die Themen müssen sich DEUTLICH voneinander unterscheiden - verschiedene Angebote, Produktgruppen, " +
+    "Anlässe, Zielgruppen, Arbeitsweisen, Haltungen. Nimm NICHT dreimal denselben Gedanken in anderen Worten. " +
+    "Schöpfe dafür ausdrücklich aus den Unterseiten, nicht nur aus der Startseite: auf einer Startseite steht " +
+    "meist nur der lauteste Aufruf, die Substanz liegt in den Unterseiten}. " +
     "Schlage NIEMALS eine Farbe vor, das ist nicht Teil deiner Aufgabe. Mach eine plausible Bestapproximation, " +
     "auch wenn der Text wenig hergibt - liefere nie leere Felder ohne Versuch.";
-  const user = `Titel der Seite: ${input.title || "(keiner)"}\nMeta-Beschreibung: ${input.description || "(keine)"}\nText von der Startseite:\n${input.bodyText || "(kein Text gefunden)"}`;
+  const unterseitenText = unterseiten.length
+    ? `\n\n${unterseiten.map((u) => `--- Unterseite ${u.pfad} ---\n${u.text}`).join("\n\n")}`
+    : "";
+  const user =
+    `Titel der Seite: ${input.title || "(keiner)"}\n` +
+    `Meta-Beschreibung: ${input.description || "(keine)"}\n` +
+    `Text von der Startseite:\n${input.bodyText || "(kein Text gefunden)"}` +
+    unterseitenText;
 
   const { data } = await withRetry(
     () =>
@@ -143,7 +158,8 @@ export async function suggestFromWebsite(input: { title: string; description: st
         ANTHROPIC_ENDPOINT,
         {
           model: anthropicModel,
-          max_tokens: 500,
+          // 8-10 Themen statt 3 brauchen mehr Platz; 500 haette die Antwort abgeschnitten.
+          max_tokens: 1400,
           system,
           messages: [{ role: "user", content: user }],
         },
@@ -191,7 +207,10 @@ export async function suggestFromWebsite(input: { title: string; description: st
           description: typeof p.description === "string" ? p.description.trim().slice(0, 300) : "",
         }))
         .filter((p) => p.title)
-        .slice(0, 3)
+        // 19.09.2026: war .slice(0, 3) und hat damit die 8-10 angeforderten Themen wieder auf
+        // drei gestutzt - zehn Beitraege aus drei Themen waren der eigentliche Grund fuer die
+        // Wiederholungen. MAX_PILLARS in credentials.ts deckelt danach auf 12.
+        .slice(0, 10)
     : [];
 
   return {
@@ -411,6 +430,8 @@ export async function generatePlannedPostContent(input: {
   styleSamples: string[];
   /** Set only on the one retry after a hard-constraint violation - names what went wrong so the model avoids repeating it. */
   avoidNote?: string;
+  /** Aufhaenger, die in DERSELBEN Woche schon vergeben sind (19.09.2026). */
+  vergebeneAufhaenger?: string[];
 }): Promise<PlannedPostContent> {
   const { anthropicApiKey, anthropicModel } = getConfig();
   if (!anthropicApiKey) {
@@ -454,6 +475,12 @@ export async function generatePlannedPostContent(input: {
         // auf die Headline festgelegt, wie bei publish_generated_story tatsaechlich validiert.
         ? `Baue JEDES der folgenden Elemente in die Headline ein - Instagram Stories haben keine Caption, es gibt keinen anderen Platz dafür: ${input.requiredElements.join(", ")}. `
         : `Baue JEDES der folgenden Elemente irgendwo ein (Headline oder Caption): ${input.requiredElements.join(", ")}. `
+      : "") +
+    (input.vergebeneAufhaenger?.length
+      ? `Für dieselbe Woche sind diese Überschriften schon vergeben: ${input.vergebeneAufhaenger.map((a) => `"${a}"`).join(", ")}. ` +
+        "Nimm einen ANDEREN Aufhänger: ein anderes Angebot, einen anderen Anlass, eine andere Zielgruppe oder eine andere " +
+        "Beobachtung. Beginne die Überschrift auch nicht mit demselben Wort wie eine der genannten. Es geht nicht darum, " +
+        "dasselbe anders zu formulieren, sondern etwas anderes zu sagen. "
       : "") +
     (input.avoidNote ? `WICHTIG, vorheriger Versuch war ungültig: ${input.avoidNote} - korrigiere das jetzt.` : "");
 

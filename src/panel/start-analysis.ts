@@ -40,6 +40,85 @@ function cacheSchreiben(domain: string, daten: DomainAnalysis): void {
     .run(domain, JSON.stringify(daten), nowIso());
 }
 
+/* ---------------------------------- Unterseiten ---------------------------------------- */
+
+/** Wie viele Unterseiten hoechstens in die Analyse einfliessen (Ansage vom 19.09.2026). */
+const UNTERSEITEN_MAX = Number(process.env.PANEL_ANALYSE_UNTERSEITEN) > 0 ? Number(process.env.PANEL_ANALYSE_UNTERSEITEN) : 5;
+/** Wie viele Kandidaten dafuer ueberhaupt geholt werden - man muss sie lesen, um zu wissen,
+ *  welche die groessten sind. Kostet kein KI-Geld, nur ein paar Sekunden, alle parallel. */
+const KANDIDATEN_MAX = 10;
+/** Zeichen je Unterseite. Deckelt den Eingabetext und damit die Kosten. */
+const ZEICHEN_JE_SEITE = 3000;
+
+/**
+ * Pfade, die nie Inhalt tragen: Feeds, die WordPress-Schnittstelle, Anhaenge, Rechtstexte,
+ * Warenkorb und Konto. Gemessen an channoine-mayr.at machte `/wp-json/` allein 360.000 Zeichen
+ * aus - reiner JSON-Ballast, der die Analyse teuer und schlechter gemacht haette.
+ */
+const PFAD_SPERRE = /\/(feed|comments|wp-json|wp-admin|wp-content|wp-includes|cart|checkout|warenkorb|kasse|mein-konto|my-account|impressum|datenschutz|agb|privacy|terms)(\/|$)/i;
+const DATEI_SPERRE = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|json|xml|pdf|zip|mp4|webm|woff2?|ttf)$/i;
+
+/** Interne Links aus dem Quelltext, entdoppelt, ohne Anker und Abfrageteil. */
+export function interneLinks(html: string, basis: string): string[] {
+  let heim: URL;
+  try {
+    heim = new URL(basis);
+  } catch {
+    return [];
+  }
+  const gefunden = new Set<string>();
+  for (const treffer of html.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)) {
+    let u: URL;
+    try {
+      u = new URL(treffer[1], heim);
+    } catch {
+      continue;
+    }
+    if (u.protocol !== "https:" && u.protocol !== "http:") continue;
+    if (u.hostname.replace(/^www\./, "") !== heim.hostname.replace(/^www\./, "")) continue;
+    u.hash = "";
+    u.search = "";
+    const pfad = u.pathname.replace(/\/+$/, "") || "/";
+    if (pfad === "/" || pfad === heim.pathname.replace(/\/+$/, "")) continue;
+    if (PFAD_SPERRE.test(`${pfad}/`) || DATEI_SPERRE.test(pfad)) continue;
+    u.pathname = pfad;
+    gefunden.add(u.toString());
+    if (gefunden.size >= 40) break;
+  }
+  return [...gefunden];
+}
+
+export interface Unterseite {
+  pfad: string;
+  text: string;
+}
+
+/**
+ * Holt bis zu KANDIDATEN_MAX Unterseiten parallel und gibt die UNTERSEITEN_MAX textreichsten
+ * zurueck. Eine Seite, die nicht laedt, faellt still weg - eine kaputte Unterseite darf die
+ * Vorschau nie scheitern lassen.
+ */
+export async function unterseitenLesen(startHtml: string, basis: string): Promise<Unterseite[]> {
+  const kandidaten = interneLinks(startHtml, basis).slice(0, KANDIDATEN_MAX);
+  if (!kandidaten.length) return [];
+  const geholt = await Promise.all(
+    kandidaten.map(async (url) => {
+      try {
+        const html = await fetchTextSafely(url, 6000);
+        const seite = extractPageText(html, { maxBodyChars: ZEICHEN_JE_SEITE });
+        const text = [seite.title, seite.description, seite.bodyText].filter(Boolean).join(" ").trim();
+        return text.length >= 200 ? { pfad: new URL(url).pathname, text } : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return geholt
+    .filter((x): x is Unterseite => x !== null)
+    .sort((a, b) => b.text.length - a.text.length)
+    .slice(0, UNTERSEITEN_MAX);
+}
+
 /**
  * Website EINMAL laden und daraus beides gewinnen: den Text fuer die KI-Analyse und die
  * Markenfarben. Zweiter Aufruf derselben Domain kommt aus dem Zwischenspeicher (Abschnitt 8).
@@ -60,12 +139,16 @@ export async function analysiereWebsite(website: string): Promise<{ analyse: Dom
   if (!seite.title && !seite.description && !seite.bodyText) {
     throw new ToolError("Auf dieser Seite konnte kein Text gefunden werden.");
   }
-  // Farben und Text parallel: die Farberkennung laedt Stylesheets/Logo, die Analyse haengt am
-  // Anthropic-Aufruf - nacheinander waeren das zwei Wartezeiten statt einer.
-  const [suggestion, colors] = await Promise.all([
-    suggestFromWebsite(seite),
+  // Farben und Unterseiten parallel holen, danach erst die KI fragen. Die Unterseiten sind der
+  // Grund, warum ueberhaupt genug Stoff fuer zehn verschiedene Aufhaenger zusammenkommt: die
+  // Startseite allein trug bei channoine-mayr.at 1.873 von 42.031 Zeichen, also 4,5 Prozent,
+  // und die inhaltsreichste Seite (Produkte, Wirkstoffe) war nie dabei.
+  const [colors, unterseiten] = await Promise.all([
     extractBrandColorsFromHtml(html, url).catch(() => null),
+    unterseitenLesen(html, url).catch(() => [] as Unterseite[]),
   ]);
+  const suggestion = await suggestFromWebsite(seite, unterseiten);
+  console.log(`[start] ${domain}: Startseite + ${unterseiten.length} Unterseite(n) gelesen (${unterseiten.map((u) => u.pfad).join(", ") || "keine"})`);
   const analyse: DomainAnalysis = { suggestion, colors };
   cacheSchreiben(domain, analyse);
   return { analyse, ausCache: false };

@@ -93,10 +93,21 @@ export function runPreviewJob(customerId: string, opts: { website: string | null
       cached: ausCache,
     };
     job.phase = "writing";
+    // Bilderbudget ERST HIER entscheiden, nicht schon beim Eintreffen der Anfrage
+    // (Ansage vom 19.09.2026). Vorher wurde gedeckelt, bevor irgendwer wusste, ob die Bilder
+    // ueberhaupt etwas kosten: mit erkannten Markenfarben rendert der Server den Verlauf
+    // selbst und ruft fal.ai gar nicht auf, dann ist ein Deckel sinnlos und der Hinweis
+    // "Bild folgt nach der Bestaetigung" schlicht falsch. Ohne Farben laeuft jedes Bild ueber
+    // fal.ai und kostet Geld - dort gilt der Deckel unveraendert weiter.
+    const kostenlos = Boolean(frisch?.gradient_enabled && frisch.accent_color && frisch.gradient_color2);
+    const imageBudget = kostenlos ? undefined : opts.imageBudget;
+    if (opts.imageBudget != null && kostenlos) {
+      console.log(`[start] ${customerId}: Markenfarben erkannt, Bilder werden lokal gerendert - kein Bilderdeckel.`);
+    }
     const result = await planCustomerWeek(frisch ?? row, {
       concurrency: 3,
       feature: "easy-onboarding-preview",
-      imageBudget: opts.imageBudget,
+      imageBudget,
       postBudget: opts.postBudget,
       onProgress: (p) => {
         job.total = p.total;
