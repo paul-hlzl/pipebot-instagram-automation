@@ -114,10 +114,17 @@ try {
     ok("Der dauerhafte Zugangslink des Kunden bleibt unangetastet", danach.login_key_hash === tok.login_key_hash);
   }
 
-  console.log("\nKostenschutz (serverseitig, ohne echte Generierung):");
+  console.log("\nKostenschutz: in der Sandbox bewusst abgeschaltet (Auftrag vom 19.09.2026):");
   const quotaMail = `quota-${Date.now()}@example.invalid`;
   let quotaCookie = "";
   {
+    // Die Entscheidungslogik der Deckel wird unveraendert geprueft, nur eben dort, wo sie lebt:
+    // npm run test:start-quota (14 Pruefungen, inklusive der Zusicherung, dass der Schalter
+    // ausschliesslich bei PANEL_SANDBOX=true greift). Hier wird geprueft, dass die SANDBOX sie
+    // tatsaechlich ignoriert - und dass die Wege drumherum weiter dichthalten.
+    const cfg = (await call("GET", "/api/providers")).json;
+    ok("Sandbox meldet abgeschaltete Tagesgrenzen", cfg.sandbox === true && cfg.previewLimitsOff === true, JSON.stringify({ sandbox: cfg.sandbox, off: cfg.previewLimitsOff }));
+
     const konto = await call("POST", "/api/start/email", { body: { email: quotaMail } });
     quotaCookie = cookieOf(konto.res);
     quotaId = db.prepare("SELECT id FROM customers WHERE email = ?").get(quotaMail)?.id ?? null;
@@ -125,38 +132,35 @@ try {
     ok("Vorschau ohne Anmeldung -> 401", (await call("POST", "/api/start/preview", { body: { website: "x.example" } })).res.status === 401);
     ok("Ohne Website und ohne Beschreibung -> 400", (await call("POST", "/api/start/preview", { cookie: quotaCookie, body: {} })).res.status === 400);
 
-    seedPreview("203.0.113.9", "a.example"); seedPreview("203.0.113.9", "b.example"); seedPreview("203.0.113.9", "c.example");
-    const ip = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "d.example" }, headers: { "x-forwarded-for": "203.0.113.9" } });
-    ok("3 Vorschauen von derselben IP in 24 h -> 429 (Grund ip)", ip.res.status === 429 && ip.json.reason === "ip", ip.text.slice(0, 90));
-    // Eine erreichte Grenze soll die Oberflaeche ruhig anzeigen koennen, nicht rot: dafuer
-    // braucht sie `limit` als Unterscheidung und `retryAt` fuer die echte Uhrzeit.
-    ok("Grenze ist als Grenze gekennzeichnet, nicht als Fehler", ip.json.limit === true);
-    ok("Grenze nennt den Zeitpunkt, ab dem wieder etwas frei ist", typeof ip.json.retryAt === "string" && Date.parse(ip.json.retryAt) > Date.now());
-    ok("Text nennt eine echte Uhrzeit statt \"morgen\"", /\b\d{1,2}:\d{2} Uhr\b/.test(ip.json.error || ""));
-    ok("Text sagt nicht mehr \"von deinem Anschluss\"", !/Anschluss/i.test(ip.json.error || ""));
+    // Jeden einzelnen Zaehler weit ueber seine Grenze setzen: IP (3), Domain (2), Konto (3)
+    // und weltweit (40). Fuer einen Produktionskunden waere hier an vier Stellen Schluss.
+    for (let i = 0; i < 6; i++) seedPreview("203.0.113.9", "quota-test.example", 60_000, quotaId);
+    for (let i = 0; i < 45; i++) seedPreview(`198.51.100.${i}`, `g${i}.example`);
+    const zaehler = db.prepare("SELECT COUNT(*) AS n FROM start_previews WHERE created_at > ?").get(new Date(Date.now() - 86_400_000).toISOString()).n;
+    ok("Alle vier Zaehler stehen ueber ihrer Grenze", zaehler >= 45, String(zaehler));
 
-    seedPreview("203.0.113.50", "quota-test.example"); seedPreview("203.0.113.51", "quota-test.example");
-    const dom = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "https://www.quota-test.example/" }, headers: { "x-forwarded-for": "203.0.113.77" } });
-    ok("2 Vorschauen fuer dieselbe Domain -> 429 (Grund domain), Domain normalisiert", dom.res.status === 429 && dom.json.reason === "domain");
-    ok("Domain-Grenze bietet den Anmeldeweg an", /Anmelden/.test(dom.json.error || "") && dom.json.limit === true);
+    const trotzdem = await call("POST", "/api/start/preview", {
+      cookie: quotaCookie,
+      body: { website: "https://www.quota-test.example/" },
+      headers: { "x-forwarded-for": "203.0.113.9" },
+    });
+    ok("Die Sandbox laesst die Vorschau trotzdem zu (keine 429)", trotzdem.res.status === 202, `${trotzdem.res.status} ${trotzdem.text.slice(0, 80)}`);
     unseed();
 
-    seedPreview("203.0.113.60", "acc1.example", 60_000, quotaId); seedPreview("203.0.113.60", "acc2.example", 60_000, quotaId); seedPreview("203.0.113.60", "acc3.example", 60_000, quotaId);
-    const konto3 = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "acc4.example" }, headers: { "x-forwarded-for": "203.0.113.90" } });
-    ok("3 Vorschauen fuer dasselbe KONTO an einem Tag -> 429 (Grund account)", konto3.res.status === 429 && konto3.json.reason === "account", konto3.text.slice(0, 90));
-    unseed();
-
-    seedPreview("203.0.113.9", "alt1.example", 25 * 3_600_000); seedPreview("203.0.113.9", "alt2.example", 25 * 3_600_000); seedPreview("203.0.113.9", "alt3.example", 25 * 3_600_000);
-    const alt = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "e.example" }, headers: { "x-forwarded-for": "203.0.113.9" } });
-    ok("Zaehler aelter als 24 h zaehlen nicht mehr", alt.res.status !== 429 || alt.json.reason !== "ip", alt.text.slice(0, 90));
-    unseed();
-
-    for (let i = 0; i < 40; i++) seedPreview(`198.51.100.${i}`, `g${i}.example`);
-    const glob = await call("POST", "/api/start/preview", { cookie: quotaCookie, body: { website: "h.example" }, headers: { "x-forwarded-for": "203.0.113.200" } });
-    ok("40 Vorschauen weltweit am Tag -> 429 (Grund global)", glob.res.status === 429 && glob.json.reason === "global");
-    // Der alte Text versprach, eine E-Mail-Bestaetigung hebe die globale Grenze auf. Tat sie nie.
-    ok("Globale Grenze verspricht nichts, was sie nicht haelt", !/bestätige deine E-Mail/i.test(glob.json.error || "") && /liegt an uns/.test(glob.json.error || ""));
-    unseed();
+    // Beliebig oft ueber den NORMALEN Einstieg: das Stundenlimit fuers Anlegen von Konten
+    // (15/h) und das Tageslimit (5/Tag) sind in der Sandbox ebenfalls aus.
+    let angelegt = 0;
+    const wegwerf = [];
+    for (let i = 0; i < 8; i++) {
+      const m = `durchlauf-${Date.now()}-${i}@example.invalid`;
+      const r = await call("POST", "/api/start/email", { body: { email: m } });
+      if (r.res.status === 201) { angelegt++; wegwerf.push(m); }
+    }
+    ok("Acht Durchlaeufe hintereinander ueber den normalen Einstieg", angelegt === 8, `${angelegt} von 8`);
+    for (const m of wegwerf) {
+      const id = db.prepare("SELECT id FROM customers WHERE email = ?").get(m)?.id;
+      if (id) { db.prepare("DELETE FROM sessions WHERE customer_id = ?").run(id); db.prepare("DELETE FROM customers WHERE id = ?").run(id); }
+    }
   }
 
   console.log("\nBildschirm 2 -> 4 - echte Vorschau mit Markenfarben (kostet ca. 0,02 USD):");
@@ -256,8 +260,12 @@ try {
     const c = db.prepare("SELECT tone, avoid_topics, branding_last_changed_at FROM customers WHERE id = ?").get(customerId);
     ok("Wunsch auf die bestehenden Felder abgebildet", Boolean(c?.branding_last_changed_at) && (c.tone === "locker" || (c.avoid_topics || "").length > 0), JSON.stringify(c));
     ok("Neuschreiben beendet", (await warteAufJob(cookie))?.job?.phase === "done");
+    // In Produktion waere hier bei einem unbestaetigten Konto Schluss (adjustUnverified = 1).
+    // In der Sandbox sind die Sperren abgeschaltet, also muss die zweite Anpassung durchgehen -
+    // die Grenze selbst prueft npm run test:start-quota.
     const nochmal = await call("POST", "/api/start/adjust", { cookie, body: { wish: "noch lockerer" } });
-    ok("Zweite Anpassung vor der Bestaetigung -> 429", nochmal.res.status === 429 && nochmal.json.reason === "unverified");
+    ok("Zweite Anpassung geht in der Sandbox durch (in Produktion 429)", nochmal.res.status === 200, `${nochmal.res.status} ${nochmal.text.slice(0, 80)}`);
+    await warteAufJob(cookie);
   }
 
   console.log("\nE-Mail-Bestaetigung -> Bild-Nachtrag:");

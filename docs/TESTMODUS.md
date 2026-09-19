@@ -3,6 +3,20 @@
 Stand 19.09.2026. Nur Sandbox. Produktion hat den Weg nicht: er existiert nur,
 wenn `PANEL_SANDBOX=true` **und** `PANEL_TEST_KEY` gesetzt sind.
 
+## Wofuer noch, seit die Deckel weg sind
+
+Seit dem 19.09.2026 sind in der Sandbox alle Tagesgrenzen und Sperren
+abgeschaltet (siehe `EASY_ONBOARDING_TAGESLIMIT.md`). Der normale Einstieg
+laesst sich also beliebig oft durchklicken, ohne Schluessel. Der Testmodus
+bleibt trotzdem nuetzlich, und zwar fuer genau zwei Dinge:
+
+- **Kein Konto ausdenken.** Der Einstieg legt den Durchlauf an, ohne nach einer
+  E-Mail-Adresse zu fragen.
+- **Zuruecksetzen mit einem Klick.** Wer sich ueber den normalen Weg anmeldet,
+  bekommt beim zweiten Durchlauf seine bestehende Woche zu sehen
+  ("Für dieses Konto liegt schon eine Woche bereit"). Im Testmodus raeumt
+  "Neu starten" das weg.
+
 ## Benutzen
 
 **Einstieg:** `https://mcp.pipebot.at/panel/sandbox/start/test?key=<SCHLUESSEL>`

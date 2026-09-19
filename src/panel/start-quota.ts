@@ -41,6 +41,24 @@ export interface PreviewLimits {
   postsUnverified: number;
 }
 
+/**
+ * Sind die Deckel abgeschaltet? Ausschliesslich in der Sandbox (Auftrag vom 19.09.2026).
+ *
+ * BEWUSST KEIN EIGENER SCHALTER. Der einzige Hebel ist `PANEL_SANDBOX`, und zwar aus einem
+ * Grund: eine eigene Variable wie PANEL_PREVIEW_LIMITS_OFF koennte beim Uebernehmen einer
+ * Konfiguration nach Produktion mitwandern und dort still den Schutz aushebeln. `PANEL_SANDBOX`
+ * kann das nicht unbemerkt: es schaltet zugleich das Testversion-Band ueber dem Kundenpanel
+ * ein. Waere es in Produktion je gesetzt, saehe das jeder Kunde sofort auf dem ersten
+ * Bildschirm. Der Schutz kann also nur zusammen mit einem sehr sichtbaren Fehler ausfallen.
+ *
+ * Die Grenzen selbst bleiben unveraendert im Code und gelten in Produktion vollstaendig -
+ * `decidePreviewQuota()` entscheidet weiter genau wie vorher und wird auch weiter getestet.
+ * Abgeschaltet wird nur ihre ANWENDUNG, und nur hier an einer Stelle.
+ */
+export function limitsAusgeschaltet(): boolean {
+  return process.env.PANEL_SANDBOX === "true";
+}
+
 export function previewLimits(): PreviewLimits {
   return {
     perAccountPerDay: envInt("PANEL_PREVIEW_PER_ACCOUNT_DAY", 3),

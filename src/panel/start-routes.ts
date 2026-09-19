@@ -31,7 +31,7 @@ import { turnstileConfigured, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { loginLinkEmail, verificationEmail } from "./emails.js";
 import { istTestkunde } from "./start-testmode.js";
-import { countAdjustsForCustomer, countPreviews, decidePreviewQuota, naechsterPlatz, normalizeDomain, previewLimits, quotaText, recordPreview, zeitSatz, type QuotaReason } from "./start-quota.js";
+import { countAdjustsForCustomer, countPreviews, decidePreviewQuota, limitsAusgeschaltet, naechsterPlatz, normalizeDomain, previewLimits, quotaText, recordPreview, zeitSatz, type QuotaReason } from "./start-quota.js";
 import { getStartJob, isJobRunning, runAdjustJob, runPlanWeekJob, runPreviewJob, runRecolorJob } from "./start-jobs.js";
 import { PLANNING_LOOKAHEAD_DAYS } from "./planning.js";
 import { AuthNotConfiguredError, authProvidersPublic, getAuthProvider } from "./auth-providers.js";
@@ -110,6 +110,12 @@ function summaryFor(c: CustomerRow) {
 /* ------------------------------------- Routen ---------------------------------------- */
 
 export function registerStartRoutes(router: Router, ctx: StartContext): void {
+  // Beim Start laut sagen, wenn der Kostenschutz aus ist. Wer diese Zeile je in einem
+  // Produktionslog sieht, hat PANEL_SANDBOX falsch gesetzt - und saehe dann auch das
+  // Testversion-Band ueber dem Kundenpanel.
+  if (limitsAusgeschaltet()) {
+    console.log("[start] PANEL_SANDBOX=true - Tagesgrenzen und Sperren der Vorschau sind ABGESCHALTET. Nur fuer die Sandbox gedacht.");
+  }
   const redirectUri = (req: Request, providerId: string): string => `${ctx.baseUrlFor(req)}${ctx.mountFor(req)}/auth/${providerId}/callback`;
   const zurueckZumStart = (res: Response, req: Request, params: Record<string, string>): void => {
     res.redirect(303, `${ctx.mountFor(req)}/start/?${new URLSearchParams(params)}`);
@@ -122,7 +128,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
       const provider = getAuthProvider(String(req.params.provider));
       if (!provider) return zurueckZumStart(res, req, { autherror: "unknown" });
       if (!provider.isConfigured()) return zurueckZumStart(res, req, { autherror: "not_configured", provider: provider.id });
-      if (ctx.rateLimited(`auth-start:${ctx.clientIp(req)}`, 20, 3_600_000)) return zurueckZumStart(res, req, { autherror: "rate" });
+      if (!limitsAusgeschaltet() && ctx.rateLimited(`auth-start:${ctx.clientIp(req)}`, 20, 3_600_000)) return zurueckZumStart(res, req, { autherror: "rate" });
       const state = randomToken(24);
       const nonce = randomToken(16);
       db.prepare("INSERT INTO auth_states (state, provider, nonce, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
@@ -170,7 +176,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
         }
       }
       if (!kunde) {
-        if (ctx.rateLimited(`auth-signup:${ctx.clientIp(req)}`, 5, 24 * 3_600_000)) return zurueckZumStart(res, req, { autherror: "rate" });
+        if (!limitsAusgeschaltet() && ctx.rateLimited(`auth-signup:${ctx.clientIp(req)}`, 5, 24 * 3_600_000)) return zurueckZumStart(res, req, { autherror: "rate" });
         kunde = createEasyCustomer({
           email: identitaet.email,
           name: identitaet.name,
@@ -197,7 +203,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
   router.post(
     "/api/start/email",
     safe(async (req, res) => {
-      if (ctx.rateLimited(`start-email:${ctx.clientIp(req)}`, 15, 3_600_000)) {
+      if (!limitsAusgeschaltet() && ctx.rateLimited(`start-email:${ctx.clientIp(req)}`, 15, 3_600_000)) {
         res.status(429).json({ error: "Zu viele Versuche. Bitte in einer Stunde noch einmal." });
         return;
       }
@@ -232,7 +238,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
         });
         return;
       }
-      if (ctx.rateLimited(`start-signup:${ctx.clientIp(req)}`, 5, 24 * 3_600_000)) {
+      if (!limitsAusgeschaltet() && ctx.rateLimited(`start-signup:${ctx.clientIp(req)}`, 5, 24 * 3_600_000)) {
         res.status(429).json({ error: "Aus deinem Netzwerk wurden heute schon mehrere Konten angelegt. Wenn ihr zu mehreren im selben WLAN sitzt, zählt das zusammen. Morgen geht es wieder." });
         return;
       }
@@ -258,7 +264,9 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
       // Ein Testlauf der Sandbox laeuft an allen Deckeln vorbei: Stundenlimit, Turnstile und
       // die vier Tagesgrenzen. Er kann keine echten Kunden verdraengen, weil er in keiner
       // Liste und keiner Abrechnung auftaucht (start-testmode.ts).
-      const testlauf = istTestkunde(c);
+      // `ohneDeckel` deckt beides ab: einen Testlauf und die Sandbox als Ganzes. In Produktion
+      // ist limitsAusgeschaltet() immer false, dort bleibt alles wie bisher.
+      const testlauf = istTestkunde(c) || limitsAusgeschaltet();
       if (!testlauf && ctx.rateLimited(`start-preview:${ip}`, 10, 3_600_000)) {
         res.status(429).json({ error: "Zu viele Versuche. Bitte in einer Stunde noch einmal." });
         return;
@@ -378,7 +386,7 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
       }
       const limits = previewLimits();
       if (!c.email_verified) {
-        if (countAdjustsForCustomer(c.id) >= limits.adjustUnverified) {
+        if (!limitsAusgeschaltet() && !istTestkunde(c) && countAdjustsForCustomer(c.id) >= limits.adjustUnverified) {
           res.status(429).json({ error: `Vor der Bestätigung deiner E-Mail-Adresse ist ${limits.adjustUnverified === 1 ? "eine Anpassung" : `${limits.adjustUnverified} Anpassungen`} möglich. Bestätige deine E-Mail - danach kannst du beliebig oft anpassen.`, reason: "unverified" });
           return;
         }

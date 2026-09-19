@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decidePreviewQuota, normalizeDomain, zeitSatz, type PreviewLimits } from "../src/panel/start-quota.js";
+import { decidePreviewQuota, limitsAusgeschaltet, normalizeDomain, quotaText, zeitSatz, type PreviewLimits } from "../src/panel/start-quota.js";
 
 const limits: PreviewLimits = { perAccountPerDay: 3, perIpPerDay: 3, perDomainPerDay: 2, globalPerDay: 40, imagesUnverified: 3, adjustUnverified: 1, postsUnverified: 14 };
 
@@ -56,4 +56,72 @@ test("Zeitsatz bleibt leer, wenn nichts zu nennen ist", () => {
   assert.equal(zeitSatz(null, jetzt), "");
   assert.equal(zeitSatz("2026-09-19T09:00:00Z", jetzt), "");
   assert.equal(zeitSatz("kaputt", jetzt), "");
+});
+
+/**
+ * Der Kern der Sandbox-Abschaltung: sie haengt an EINER Bedingung, und die ist in Produktion
+ * nie erfuellt. Diese vier Faelle sind die eigentliche Sicherung gegen ein versehentliches
+ * Mitnehmen des Schalters auf Produktion.
+ */
+test("Deckel sind NUR bei PANEL_SANDBOX=true abgeschaltet", () => {
+  const vorher = process.env.PANEL_SANDBOX;
+  try {
+    delete process.env.PANEL_SANDBOX;
+    assert.equal(limitsAusgeschaltet(), false, "ohne PANEL_SANDBOX muss der Deckel greifen");
+    process.env.PANEL_SANDBOX = "false";
+    assert.equal(limitsAusgeschaltet(), false);
+    // Auch ein wohlmeinendes "1" oder "TRUE" zaehlt nicht - nur exakt "true".
+    process.env.PANEL_SANDBOX = "1";
+    assert.equal(limitsAusgeschaltet(), false);
+    process.env.PANEL_SANDBOX = "TRUE";
+    assert.equal(limitsAusgeschaltet(), false);
+    process.env.PANEL_SANDBOX = "true";
+    assert.equal(limitsAusgeschaltet(), true);
+  } finally {
+    if (vorher === undefined) delete process.env.PANEL_SANDBOX;
+    else process.env.PANEL_SANDBOX = vorher;
+  }
+});
+
+test("Die Grenzen selbst bleiben unveraendert - auch waehrend die Sandbox sie ignoriert", () => {
+  const vorher = process.env.PANEL_SANDBOX;
+  process.env.PANEL_SANDBOX = "true";
+  try {
+    // decidePreviewQuota kennt den Sandbox-Schalter GAR NICHT. Es entscheidet weiter wie in
+    // Produktion; nur die Aufrufstelle in start-routes.ts fragt vorher, ob sie zuhoeren muss.
+    const d = decidePreviewQuota({ ip: 3, domain: 0, global: 0 }, limits);
+    assert.equal(d.ok, false);
+    assert.equal(d.ok === false && d.reason, "ip");
+  } finally {
+    if (vorher === undefined) delete process.env.PANEL_SANDBOX;
+    else process.env.PANEL_SANDBOX = vorher;
+  }
+});
+
+/**
+ * Die Texte selbst. Frueher standen diese Pruefungen in scripts/test-start.mjs und liessen sich
+ * eine echte 429 vom Server geben. Seit die Sandbox die Deckel ignoriert, kommt dort keine 429
+ * mehr - also werden die Texte hier direkt geprueft, wo sie entstehen.
+ */
+test("Kein Text nennt den \"Anschluss\" und keiner klingt nach Fehler", () => {
+  for (const grund of ["global", "ip", "domain", "account"] as const) {
+    const t = quotaText(grund);
+    assert.doesNotMatch(t, /Anschluss/i, `${grund}: "Anschluss" ist Vorwurfssprache`);
+    assert.doesNotMatch(t, /Fehler|fehlgeschlagen|ungültig/i, `${grund}: klingt nach Fehler`);
+    assert.ok(t.length > 40, `${grund}: zu knapp, um verstanden zu werden`);
+  }
+});
+
+test("Der Netzwerk-Text erklaert das gemeinsame WLAN und nennt einen Weg", () => {
+  const t = quotaText("ip");
+  assert.match(t, /WLAN/);
+  assert.match(t, /geht trotzdem sofort durch/);
+});
+
+test("Der Domain-Text bietet den Anmeldeweg an", () => {
+  assert.match(quotaText("domain"), /Anmelden/);
+});
+
+test("Der Konto-Text sagt zu, dass die bestehende Woche bleibt", () => {
+  assert.match(quotaText("account"), /Woche bleibt bestehen/);
 });

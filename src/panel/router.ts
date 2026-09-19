@@ -70,6 +70,7 @@ import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 import { registerStartRoutes } from "./start-routes.js";
 import { registerTestmodeRoutes, testmodusMoeglich } from "./start-testmode.js";
+import { limitsAusgeschaltet } from "./start-quota.js";
 import { runBackfillJob } from "./start-jobs.js";
 import { featuresForTier, normalizeTier } from "./tiers.js";
 import { reorderPlannedPosts } from "./credentials.js";
@@ -770,6 +771,8 @@ export function createPanelRouter(): Router {
       // die Demo-Hinweistexte im Frontend, nie in Produktion gesetzt.
       sandbox: process.env.PANEL_SANDBOX === "true",
       testmodeAvailable: testmodusMoeglich(),
+      // Nur zur Anzeige und fuer die Testreihe: sagt, ob die Tagesgrenzen gerade greifen.
+      previewLimitsOff: limitsAusgeschaltet(),
     });
   });
 

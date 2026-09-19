@@ -1,4 +1,4 @@
-# Tageslimit: neuer Text (gebaut) und Ausnahme fuer Demos (Vorschlag)
+# Tageslimit: neuer Text und Abschaltung in der Sandbox
 
 Stand 19.09.2026. Sandbox. Vorgelegt als Claude-Doc:
 https://claude.ai/code/artifact/12a9d43e-4589-4d46-8fcd-9901019d6600
@@ -38,7 +38,69 @@ Geaenderte Dateien: `src/panel/start-quota.ts`, `src/panel/start-routes.ts`,
 `public/panel/start/start.js`, `public/panel/start/start.css`,
 `scripts/start-quota.test.ts`, `scripts/test-start.mjs`.
 
-## Teil B: Ausnahme fuer eigenes Konto und Demos (Vorschlag, NICHT gebaut)
+## Teil B: In der Sandbox komplett abgeschaltet (gebaut, 19.09.2026)
+
+Auf Ansage von Paul: auf der Sandbox gibt es keine echten Kunden, der Deckel
+steht dort nur im Weg. Er bleibt vollstaendig im Code und greift in Produktion
+unveraendert.
+
+### Der Schalter
+
+`limitsAusgeschaltet()` in `start-quota.ts`. Genau eine Bedingung:
+
+```
+process.env.PANEL_SANDBOX === "true"
+```
+
+**Bewusst kein eigener Schalter.** Eine Variable wie
+`PANEL_PREVIEW_LIMITS_OFF` koennte beim Uebernehmen einer Konfiguration nach
+Produktion mitwandern und dort still den Schutz aushebeln. `PANEL_SANDBOX` kann
+das nicht unbemerkt: es schaltet zugleich das Testversion-Band ueber dem
+Kundenpanel ein. Waere es in Produktion je gesetzt, saehe das jeder Kunde
+sofort auf dem ersten Bildschirm. Der Schutz kann also nur zusammen mit einem
+sehr sichtbaren Fehler ausfallen.
+
+Zusaetzlich schreibt der Prozess beim Start eine Zeile ins Log, wenn die
+Deckel aus sind, und `/api/providers` meldet `previewLimitsOff`.
+
+### Was genau aus ist
+
+| Sperre | Grenze | In der Sandbox |
+| --- | --- | --- |
+| Vorschau pro Konto | 3 / Tag | aus |
+| Vorschau pro IP | 3 / Tag | aus |
+| Vorschau pro Domain | 2 / Tag | aus |
+| Vorschau weltweit | 40 / Tag | aus |
+| Vorschau-Versuche pro IP | 10 / Stunde | aus |
+| Konto anlegen per E-Mail | 15 / Stunde | aus |
+| Konto anlegen (Neuanlage) | 5 / Tag | aus |
+| Anmeldung ueber Anbieter | 20 / Stunde | aus |
+| Neuanlage ueber Anbieter | 5 / Tag | aus |
+| "Anders machen" vor der Bestaetigung | 1 | aus |
+
+**Nicht** abgeschaltet sind die Budgets pro Durchlauf
+(`imagesUnverified`, `postsUnverified`) - die begrenzen keine Haeufigkeit,
+sondern die Groesse eines einzelnen Laufs, und sie sollen sich in der Sandbox
+genauso verhalten wie spaeter in Produktion.
+
+### Wo das geprueft wird
+
+`decidePreviewQuota()` kennt den Schalter GAR NICHT. Es entscheidet weiter
+genau wie in Produktion; nur die Aufrufstelle in `start-routes.ts` fragt
+vorher, ob sie zuhoeren muss. `npm run test:start-quota` (14 Pruefungen)
+beweist beides: dass die Entscheidung unveraendert faellt, und dass der
+Schalter ausschliesslich bei exakt `PANEL_SANDBOX=true` greift - nicht bei
+`1`, nicht bei `TRUE`, nicht bei fehlender Variable.
+
+`npm run test:start` prueft die andere Richtung: dass die Sandbox die Deckel
+wirklich ignoriert, auch wenn alle vier Zaehler weit ueber ihrer Grenze stehen,
+und dass acht Durchlaeufe hintereinander ueber den normalen Einstieg gehen.
+
+## Anhang: der urspruengliche Vorschlag (ueberholt)
+
+Vor der Abschaltung war eine Ausnahmeliste geplant. Sie wird nicht mehr
+gebraucht; hier nur als Protokoll.
+
 
 ### Welcher Deckel wirklich zuschlaegt
 
