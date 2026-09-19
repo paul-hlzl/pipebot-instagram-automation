@@ -40,6 +40,13 @@ export interface AuthProvider {
   name: string;
   /** Kurzer Satz fuer den Report/das Panel, wenn der Anbieter noch nicht eingerichtet ist. */
   pendingNote: string;
+  /**
+   * Solange keine Zugangsdaten hinterlegt sind, taucht dieser Anbieter im Panel GAR NICHT auf -
+   * kein ausgegrauter Knopf, kein "kommt noch". Fuer Anbieter, bei denen das Einrichten nicht
+   * blosses Eintragen ist, sondern eine Entscheidung mit Kosten (Apple: Developer Program).
+   * Dasselbe Muster wie `hiddenUntilConfigured` bei den Kanal-Providern (providers/index.ts).
+   */
+  hiddenUntilConfigured?: boolean;
   isConfigured(): boolean;
   authorizeUrl(state: string, nonce: string, redirectUri: string): string;
   exchangeCode(code: string, redirectUri: string): Promise<AuthIdentity>;
@@ -213,6 +220,9 @@ export const apple: AuthProvider = {
   id: "apple",
   name: "Apple",
   pendingNote: "Braucht ein Apple Developer Program (rund 99 USD im Jahr) - noch nicht vorhanden.",
+  // Bis das Developer Program da ist, zeigt das Panel Apple ueberhaupt nicht an (19.09.2026, auf
+  // Ansage): ein Knopf, der nur erklaert, warum er nicht geht, ist kein Angebot, sondern Lärm.
+  hiddenUntilConfigured: true,
   isConfigured: () => false,
   authorizeUrl() {
     throw new ToolError("Anmelden mit Apple ist noch nicht eingerichtet.");
@@ -229,6 +239,10 @@ export function getAuthProvider(id: string): AuthProvider | undefined {
   return authProviders.find((p) => p.id === id);
 }
 
+/** Was das Panel anbietet: alles Eingerichtete, plus das Nicht-Eingerichtete, das sich durch
+ *  blosses Eintragen von Zugangsdaten scharf schalten laesst. Siehe hiddenUntilConfigured. */
 export function authProvidersPublic(): { id: string; name: string; available: boolean; note: string | null }[] {
-  return authProviders.map((p) => ({ id: p.id, name: p.name, available: p.isConfigured(), note: p.isConfigured() ? null : p.pendingNote }));
+  return authProviders
+    .filter((p) => p.isConfigured() || !p.hiddenUntilConfigured)
+    .map((p) => ({ id: p.id, name: p.name, available: p.isConfigured(), note: p.isConfigured() ? null : p.pendingNote }));
 }

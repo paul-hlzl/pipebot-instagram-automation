@@ -181,7 +181,13 @@
         <div class="auth-liste">
           ${liste.map((p) => p.available
             ? `<a class="auth-btn" href="${esc(MOUNT)}/auth/${esc(p.id)}">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} fortfahren</a>`
-            : `<button type="button" class="auth-btn kommt-noch" data-auth-pending="${esc(p.id)}" aria-disabled="true">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} fortfahren<span class="bald">kommt noch</span></button>`).join("")}
+            // Nicht eingerichtet: der Grund steht direkt unter DIESEM Knopf. Frueher kam er als
+            // rote Meldung am unteren Bildschirmrand hoch - weit weg vom Knopf, und bei jedem
+            // Tippen eine weitere obendrauf.
+            : `<div class="auth-eintrag">
+                 <button type="button" class="auth-btn kommt-noch" disabled>${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} fortfahren<span class="bald">kommt noch</span></button>
+                 ${p.note ? `<p class="auth-notiz">${esc(p.note)}</p>` : ""}
+               </div>`).join("")}
         </div>
         <div class="auth-trenner">oder</div>
         <div class="actions" style="margin-top:14px"><button type="button" class="btn secondary lg" data-go="email">Mit E-Mail fortfahren</button></div>
@@ -1060,12 +1066,6 @@
       if (ziel === "home") { go(angemeldet() ? (eingerichtet() ? "dashboard" : "ergebnis") : "konto"); return; }
       if (ziel === "dashboard" && !eingerichtet()) { go("plan"); return; }
       go(ziel);
-      return;
-    }
-    const bald = t.closest("[data-auth-pending]");
-    if (bald) {
-      const p = S.authProviders.find((x) => x.id === bald.dataset.authPending);
-      toast(p?.note || "Dieser Anmeldeweg wird gerade eingerichtet. Nimm so lange den E-Mail-Weg.", "bad");
       return;
     }
     if (t.closest("#ki-verbessern")) { kiVerbessern(); return; }

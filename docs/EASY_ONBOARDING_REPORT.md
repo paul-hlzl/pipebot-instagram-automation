@@ -82,8 +82,10 @@ einmaliges Eintragen. Außerdem liefert Apple Name und E-Mail **nur beim allerer
 mit; wer das Konto einmal löscht und neu anlegt, bekommt sie nie wieder. Und mit „E-Mail
 verbergen" kommt eine Weiterleitungsadresse (`@privaterelay.appleid.com`), an die wir zwar
 schreiben können, die aber als Kundenadresse im Panel unbrauchbar aussieht. Mein Vorschlag:
-Apple erst, wenn ein Kunde ausdrücklich danach fragt. Im Panel steht der Knopf sichtbar da und
-sagt ehrlich „kommt noch", es ist nichts nachgebaut.
+Apple erst, wenn ein Kunde ausdrücklich danach fragt. **Im Panel erscheint Apple seit 19.09.2026
+gar nicht** (`hiddenUntilConfigured`, dasselbe Muster wie beim Google-Unternehmensprofil unter
+den Kanälen): ein Knopf, der nur erklärt, warum er nicht funktioniert, ist kein Angebot. Sobald
+Zugangsdaten hinterlegt sind, taucht er von selbst auf, ohne Code-Änderung.
 
 **Der E-Mail-Weg bleibt** als Rückfalloption unter den drei Knöpfen, wie beauftragt: Adresse
 eingeben, Konto entsteht sofort, Bestätigungsmail geht raus, und der Bestätigungsschritt bleibt
@@ -325,6 +327,13 @@ Ergebnis und im Dashboard, die Vorschaukarten ändern sich beim Ziehen am Farbre
 Umsortieren per Pfeil vom Server bestätigt, nach der Bestätigung null Platzhalter übrig. Je
 Bildschirm geprüft: nichts über den Rand, höchstens ein Pflichtfeld, Tap-Ziele ab 44 px, keine
 Überlappung, keine JavaScript-Fehler.
+
+Nach deiner Rückmeldung vom 19.09. noch behoben: Apple stand als ausgegrauter Knopf herum statt
+zu verschwinden, und der Hinweis „Braucht einen OAuth-Client …" kam als **rote** Meldung am
+unteren Bildschirmrand hoch - bei jedem Tippen eine weitere obendrauf. Beides reproduziert
+(zwei gestapelte Meldungen, 16 und 90 px über dem Rand) und geändert: der Hinweis steht jetzt
+als ruhige graue Zeile 6 px unter genau dem Knopf, zu dem er gehört, und der Knopf ist echt
+`disabled` statt nur `aria-disabled` - damit gibt es auch nichts mehr zu stapeln.
 
 Unterwegs gefunden und behoben, damit es nicht wie „lief sofort" aussieht: `/start` ohne Slash
 wurde hinter dem Sandbox-Proxy falsch umgeleitet; das Polling endete stumm beim Wechsel von
