@@ -85,13 +85,16 @@ async function run(width) {
     // 1 Konto: drei Anbieter-Knoepfe + E-Mail als Rueckfallweg
     await check(page, "01-konto", width, { maxButtons: 1, maxRequired: 0 });
     const anbieterKnoepfe = await page.locator(".auth-btn").count();
-    log(anbieterKnoepfe === 3, "Drei Anmeldewege (Google, Microsoft, Apple) angeboten", String(anbieterKnoepfe));
+    log(!(await page.locator("#stage").innerText()).includes("Apple"), "Apple erscheint gar nicht (nicht eingerichtet, hiddenUntilConfigured)");
     // Wie viele "kommt noch" richtig sind, haengt davon ab, welche Zugangsdaten hinterlegt sind -
     // deshalb gegen den Server abgeglichen statt gegen eine feste Zahl.
     const cfg = await page.evaluate(async (m) => (await (await fetch(`${m}/api/start/config`)).json()).authProviders, new URL(BASE).pathname.replace(/\/$/, ""));
     const offen = cfg.filter((p) => !p.available).length;
     const echt = cfg.filter((p) => p.available).map((p) => p.id);
+    log(anbieterKnoepfe === cfg.length, `So viele Knoepfe wie angebotene Anbieter (${cfg.length})`, String(anbieterKnoepfe));
     log(await page.locator(".auth-btn .bald").count() === offen, `Genau die ${offen} nicht eingerichteten Anbieter zeigen „kommt noch“`);
+    log(await page.locator(".auth-notiz").count() === offen, "Zu jedem davon steht der Grund direkt unter dem Knopf");
+    log(await page.locator(".toast").count() === 0, "Keine Meldung am Bildschirmrand");
     for (const id of echt) {
       log(await page.locator(`a.auth-btn[href*="/auth/${id}"]`).count() === 1, `${id} ist ein echter Anmeldeknopf mit Link`);
     }

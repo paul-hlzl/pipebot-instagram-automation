@@ -209,8 +209,12 @@ try {
     const apple = await hole("/panel/auth/apple");
     ok("Apple ist ehrlich als nicht eingerichtet gekennzeichnet", apple.status === 303 && /autherror=not_configured/.test(apple.headers.get("location") || ""));
     const cfg = await hole("/panel/api/start/config").then((x) => x.json());
-    const appleCfg = cfg.authProviders.find((p) => p.id === "apple");
-    ok("Apple im Panel: available false, mit Begruendung", appleCfg?.available === false && /Developer Program/.test(appleCfg?.note || ""), JSON.stringify(appleCfg));
+    const ids = cfg.authProviders.map((p) => p.id);
+    // Apple ist hiddenUntilConfigured: solange kein Developer Program da ist, taucht es im Panel
+    // gar nicht auf - kein ausgegrauter Knopf. Die Route bleibt trotzdem abgesichert (oben).
+    ok("Apple erscheint im Panel gar nicht, solange es nicht eingerichtet ist", !ids.includes("apple"), ids.join(","));
+    // In diesem Test sind Google und Microsoft auf den Attrappen-Anbieter konfiguriert, also beide verfuegbar.
+    ok("Die eingerichteten Anbieter erscheinen als verfuegbar", ["google", "microsoft"].every((id) => cfg.authProviders.some((p) => p.id === id && p.available === true)), JSON.stringify(cfg.authProviders.map((p) => [p.id, p.available])));
   }
 } catch (err) {
   fail++;
