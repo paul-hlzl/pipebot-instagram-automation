@@ -86,7 +86,15 @@ async function run(width) {
     await check(page, "01-konto", width, { maxButtons: 1, maxRequired: 0 });
     const anbieterKnoepfe = await page.locator(".auth-btn").count();
     log(anbieterKnoepfe === 3, "Drei Anmeldewege (Google, Microsoft, Apple) angeboten", String(anbieterKnoepfe));
-    log(await page.locator(".auth-btn .bald").count() === 3, "Alle drei ehrlich als „kommt noch“ gekennzeichnet (keine Zugangsdaten hinterlegt)");
+    // Wie viele "kommt noch" richtig sind, haengt davon ab, welche Zugangsdaten hinterlegt sind -
+    // deshalb gegen den Server abgeglichen statt gegen eine feste Zahl.
+    const cfg = await page.evaluate(async (m) => (await (await fetch(`${m}/api/start/config`)).json()).authProviders, new URL(BASE).pathname.replace(/\/$/, ""));
+    const offen = cfg.filter((p) => !p.available).length;
+    const echt = cfg.filter((p) => p.available).map((p) => p.id);
+    log(await page.locator(".auth-btn .bald").count() === offen, `Genau die ${offen} nicht eingerichteten Anbieter zeigen „kommt noch“`);
+    for (const id of echt) {
+      log(await page.locator(`a.auth-btn[href*="/auth/${id}"]`).count() === 1, `${id} ist ein echter Anmeldeknopf mit Link`);
+    }
     log(/powered by Pipeline AI Solutions/.test(await page.locator(".marke").textContent()), "Kopfzeile: Produktname mit Zusatzzeile");
     await page.click("[data-go=email]");
     await page.waitForSelector("#email");

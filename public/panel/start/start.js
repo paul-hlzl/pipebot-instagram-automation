@@ -648,7 +648,7 @@
       slot.innerHTML = "";
       S.turnstileToken = "";
       S.turnstileWidget = window.turnstile.render(slot, {
-        sitekey: S.turnstileSiteKey, appearance: "interaction-only", theme: "dark",
+        sitekey: S.turnstileSiteKey, appearance: "interaction-only", theme: "light",
         callback: (t) => { S.turnstileToken = t; },
         "expired-callback": () => { S.turnstileToken = ""; },
         "error-callback": () => { S.turnstileToken = ""; },

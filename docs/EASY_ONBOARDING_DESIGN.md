@@ -7,21 +7,26 @@ geschätzt): Hintergrund Weiß, Text `#0d0d0d`, Sekundärtext `#5d5d5d`, eine Sa
 (Radius 9999px, Höhe 40 px, 14 px, Gewicht 500), Primär schwarz gefüllt, Sekundär als Umriss.
 Karten mit 1 px heller Linie, großer Radius, kein Schatten. Viel Weißraum, eine Spalte.
 
-Abweichung zum Auftragstext („ruhig und dunkel"): Die zweite Nachricht („genau so wie
-ads.openai.com, 1:1") hat Vorrang - das Vorbild ist hell. Das bestehende Panel ist ebenfalls
-hell (`--paper #fff`), die Verwandtschaft bleibt also erhalten. Falls doch dunkel gewünscht:
-alle Farben sind Tokens in `start.css`, ein Umschalten ist ein Block. **Offene Entscheidung für
-Paul, siehe Report.**
+Zur Farbstimmung, die zwischendurch zweimal gewechselt hat: Der Auftrag sagt in Abschnitt 9
+„ruhig und dunkel gehalten, im Charakter des bestehenden Panels". Beides zusammen geht nicht -
+das bestehende Panel ist weiss, und ads.openai.com ebenfalls. Gebaut war kurzzeitig eine dunkle
+Fassung; **entschieden und umgesetzt ist jetzt hell** (19.09.2026). Der Umbau war ein einziger
+Token-Block: jede Regel in `start.css` benutzt ausschliesslich die sechs Tokens, keine festen
+Farben. Die drei verbliebenen festen Weisswerte sind Absicht - sie stehen auf der Markenfarbe
+des Kunden (Kachel-Schlagzeile, Vorschau im Farbpicker, Schalter-Knauf) und muessen dort weiss
+bleiben, weil das echte Beitragsbild es auch ist.
 
 ## 1. Farbe (Tokens in `public/panel/start/start.css`)
 
 | Token | Wert | Rolle |
 |---|---|---|
-| `--paper` | `#ffffff` | Fläche |
-| `--ink` | `#0d0d0d` | Text, Primärbutton, Fokusring (gemessen am Vorbild) |
-| `--ink-2` | `#5d5d5d` | Sekundärtext, Sekundärbutton-Rand (gemessen) |
-| `--line` | `#e6e6e6` | Trennlinien, Kartenrand, Eingabefeld-Rand |
-| `--wash` | `#f7f7f5` | ruhige Hinterlegung (Tabellenzeile, Platzhalter-Kachel) |
+| `--grund` | `#ffffff` | Seitenhintergrund |
+| `--flaeche` | `#fbfbfa` | Karten, Felder, alles Erhobene |
+| `--linie` | `#e5e5e2` | Trennlinien, Kartenrand, Eingabefeld-Rand |
+| `--text` | `#0d0d0d` | Fließtext und Überschriften (am Vorbild gemessen) |
+| `--text-2` | `#5d5d5d` | Sekundärtext, Beschriftungen (gemessen) |
+| `--aktion` / `--aktion-text` | `#0d0d0d` / `#ffffff` | Hauptaktion: schwarze Pille, weiße Schrift |
+| `--wash` | `#f2f2f0` | neutrale Hinterlegung hinter einem Bild |
 | `--go` / `--stop` | `#137a3f` / `#b42318` | ausschließlich Bedeutung: Erfolg / Fehler (aus panel.css übernommen) |
 
 Keine weiteren Farbtöne im UI. Die einzige „Farbe" auf der Seite ist die **Akzentfarbe des
@@ -60,102 +65,100 @@ liegt bereits unter `assets/fonts/`. Keine Mono-Kleinlabels (das Vorbild hat kei
    Wochenansicht auf Desktop bis 1040 px)
 
 ```
-1 Einstieg                         1b Wiederkehrend
+1 Konto                            1b Wiederkehrend
 ┌──────────────────────────┐       ┌──────────────────────────┐
 │ Pipeflow                 │       │ Pipeflow                 │
+│ powered by Pipeline AI…  │       │ powered by Pipeline AI…  │
 │                          │       │                          │
 │ Deine Beiträge.          │       │ Willkommen zurück        │
 │ Jede Woche. Automatisch. │       │ ┌──────────────────────┐ │
-│ Pipeflow schreibt und    │       │ │ ● Hölzl Physio       │ │
-│ gestaltet, du gibst frei.│       │ │   Weiter als …    →  │ │
-│ ┌──────────────────────┐ │       │ └──────────────────────┘ │
-│ │ E-Mail-Adresse       │ │       │ Mit anderem Konto        │
-│ └──────────────────────┘ │       │ anmelden                 │
-│ [    Los geht's        ] │       └──────────────────────────┘
-│ Mit „Los geht's" stimmst │
-│ du der Datenverarbeitung │
-│ zu. Datenschutz          │
-└──────────────────────────┘
+│ Pipeflow liest deine     │       │ │ (H) Hittaro          │ │
+│ Website, erkennt Themen  │       │ │  Weiter als …     →  │ │
+│ und Farben …             │       │ └──────────────────────┘ │
+│ ┌──────────────────────┐ │       │ Mit einem anderen Konto  │
+│ │ G  Mit Google …      │ │       │ anmelden                 │
+│ ├──────────────────────┤ │       └──────────────────────────┘
+│ │ ▣  Mit Microsoft …   │ │
+│ ├──────────────────────┤ │       1c Nur E-Mail
+│ │ ⌘  Mit Apple …       │ │       ┌──────────────────────────┐
+│ └──────────────────────┘ │       │ Mit E-Mail fortfahren    │
+│ ────────  oder  ──────── │       │ ┌──────────────────────┐ │
+│ [ Mit E-Mail fortfahren ]│       │ │ E-Mail-Adresse       │ │
+│ Mit dem Fortfahren       │       │ └──────────────────────┘ │
+│ stimmst du zu … Daten-   │       │ [       Weiter         ] │
+│ schutzerklärung          │       │ Zurück zu Google, …      │
+└──────────────────────────┘       └──────────────────────────┘
 
 2 Die eine Frage                   2b Ohne Website
 ┌──────────────────────────┐       ┌──────────────────────────┐
-│ Pipeflow                 │       │ Was macht dein           │
-│ So könnte deine erste    │       │ Unternehmen?             │
-│ Woche aussehen           │       │ ┌──────────────────────┐ │
-│ ┌──────────────────────┐ │       │ │ (Textfeld, 3 Zeilen) │ │
-│ │ deine-website.at     │ │       │ └──────────────────────┘ │
-│ └──────────────────────┘ │       │ [  Vorschau erstellen  ] │
-│ [  Vorschau erstellen  ] │       │ Nichts wird veröffent-   │
-│ Nichts wird veröffent-   │       │ licht, bevor du es       │
-│ licht, bevor du es       │       │ freigibst.               │
-│ freigibst.               │       └──────────────────────────┘
-│ Ich habe keine Website   │
+│ So könnte deine nächste  │       │ Was macht dein           │
+│ Woche aussehen           │       │ Unternehmen?             │
+│ ┌──────────────────────┐ │       │ ┌──────────────────────┐ │
+│ │ deine-firma.at       │ │       │ │ (Textfeld)           │ │
+│ └──────────────────────┘ │       │ │      [Mit KI verbes.]│ │
+│ [  Vorschau erstellen  ] │       │ └──────────────────────┘ │
+│ Nichts wird veröffent-   │       │ [  Vorschau erstellen  ] │
+│ licht, bevor du es       │       │ Ich habe doch eine       │
+│ freigibst.               │       │ Website                  │
+│ Ich habe keine Website   │       └──────────────────────────┘
 └──────────────────────────┘
 
 3 Es arbeitet                      4 Das Ergebnis
 ┌──────────────────────────┐       ┌──────────────────────────┐
-│ Pipeflow                 │       │ Pipeflow                 │
-│ Wir lesen deine Website  │       │ Deine nächste Woche      │
-│ ✓ Website gelesen        │       │ ist fertig               │
-│ ✓ Themen erkannt         │       │ Wir haben sie rund um    │
-│ ● Beiträge entworfen 4/10│       │ Rückenschmerzen und      │
-│ ○ Bilder erstellt        │       │ Prävention geplant - zwei│
-│   (dauert gerade etwas   │       │ Themen, die auf hoelzl…  │
-│    länger …)             │       │ besonders hervorstachen. │
-│                          │       │ ┌──────────────────────┐ │
-└──────────────────────────┘       │ │ Mo 21.9. · Instagram │ │
-                                   │ │ ┌──────────────────┐ │ │
-                                   │ │ │  [Bild 4:5]      │ │ │
-                                   │ │ │  Headline im Bild│ │ │
-                                   │ │ └──────────────────┘ │ │
-                                   │ │ Caption … mehr       │ │
+│ Wir lesen hittaro.com    │       │ So könnte deine nächste  │
+│ ✓ Website gelesen        │       │ Woche aussehen.          │
+│ ✓ Themen erkannt         │       │ Wir haben diese Beiträge │
+│   KI-Sichtbarkeit, …     │       │ rund um X und Y erstellt │
+│ ✓ Farben übernommen      │       │ - zwei Themen, die auf   │
+│   ■■ #8f6d33             │       │ hittaro.com besonders    │
+│ ● Beiträge entworfen 4/10│       │ hervorstachen. Die Farben│
+│ ○ Bilder erstellt  0/3   │       │ stammen von deiner Seite.│
+│                          │       │ Mo 21.9. Montag          │
+│ (dauert gerade etwas     │       │ ┌──────────────────────┐ │
+│  länger …)               │       │ │ INSTAGRAM            │ │
+└──────────────────────────┘       │ │ ┌──────────────────┐ │ │
+                                   │ │ │ [Bild 4:5 in der │ │ │
+KEINE leeren Tage: Samstag und     │ │ │  Markenfarbe]    │ │ │
+Sonntag erscheinen gar nicht,      │ │ └──────────────────┘ │ │
+nicht als graue Karte, nicht als   │ │ Headline             │ │
+Zeile. Nur Tage mit Beitrag.       │ │ Caption … mehr       │ │
                                    │ └──────────────────────┘ │
-                                   │ ┌ Mo 21.9. · LinkedIn ─┐ │
-                                   │ │ [Bild 1.91:1] …      │ │
-                                   │ └──────────────────────┘ │
-                                   │ Sa 26.9. · kein Beitrag  │
+                                   │ Di 22.9. Dienstag        │
                                    │ …                        │
-                                   │ ─── klebt unten ───────  │
+                                   │ ══ klebt unten ════════  │
                                    │ [    Passt, weiter     ] │
                                    │ Anders machen            │
                                    └──────────────────────────┘
 
-4b Anders machen                   5 Der Plan
+5 Der Plan                         5b Farbe bearbeiten (inline)
 ┌──────────────────────────┐       ┌──────────────────────────┐
-│ Was soll anders sein?    │       │ Dein Plan                │
-│ ┌──────────────────────┐ │       │ Unternehmen  Hölzl Physio│
-│ │ z. B. „lockerer, keine│ │       │              Physiothe…✎ │
-│ │ Preise nennen"        │ │       │ Themen       Rücken, …  ✎│
-│ └──────────────────────┘ │       │ Kanäle       Instagram   │
-│ [  Neu erstellen       ] │       │              LinkedIn   ✎│
-│ Zurück zur Vorschau      │       │ Rhythmus     Werktags   ✎│
-└──────────────────────────┘       │ Farbe        ■ #0a0e1a  ✎│
-                                   │ Freigabe     An         ✎│
-                                   │  Jeder Beitrag wartet auf│
-                                   │  dein OK, bevor er raus- │
-                                   │  geht.                   │
-                                   │ [   Plan übernehmen    ] │
-                                   └──────────────────────────┘
+│ Dein Plan                │       │ … Vorschaukarten oben …  │
+│ ┌────┐┌────┐┌────┐       │       │ Farbe                    │
+│ │Vor-││schau││karten│    │       │ ┌──────────────────────┐ │
+│ └────┘└────┘└────┘       │       │ │  Beispiel (Verlauf)  │ │
+│ Unternehmen  Hittaro   ✎ │       │ └──────────────────────┘ │
+│ Themen       ○ ○ ○     ✎ │       │ Hauptfarbe ● ● ● ● ● ⬤  │
+│ Kanäle       IG, LI    ✎ │       │ [x] Farbverlauf statt    │
+│ Rhythmus     Werktags  ✎ │       │     einer Farbe          │
+│ Farbe        ■ #8F6D33 ✎ │       │ Zweite Farbe ● ● ● ⬤     │
+│ Freigabe     An        ✎ │       │ Richtung (Diag)(Waag)(Sen)│
+│ [   Plan übernehmen    ] │       │ [Speichern] Abbrechen    │
+└──────────────────────────┘       └──────────────────────────┘
 
 6 Verbinden                        Dashboard
 ┌──────────────────────────┐       ┌──────────────────────────┐
-│ Kanäle verbinden         │       │ Pipeflow      Einstellungen│
-│ ┌──────────────────────┐ │       │ ⚠ E-Mail bestätigen …    │
-│ │ ◎ Instagram verbinden│ │       │ Als Nächstes             │
-│ └──────────────────────┘ │       │ ┌──────────────────────┐ │
-│ Später verbinden         │       │ │ Mo 21.9. · Instagram │ │
-│ ┌──────────────────────┐ │       │ │ [Bild]               │ │
-│ │ in LinkedIn verbinden│ │       │ │ Headline             │ │
-│ └──────────────────────┘ │       │ │ [Freigeben] Jetzt    │ │
-│ Später verbinden         │       │ │             posten   │ │
-│ [   Zum Dashboard      ] │       │ └──────────────────────┘ │
-└──────────────────────────┘       │ ≡ Karten per Griff       │
-                                   │   umsortierbar           │
-                                   │ ─────────────────────── │
-                                   │ Einstellungen (Plan wie  │
-                                   │ Bildschirm 5, Verbinden, │
-                                   │ Verlauf, Klassisches     │
-                                   │ Panel)                   │
+│ Kanäle verbinden         │       │ Pipeflow    Einstellungen│
+│ ┌──────────────────────┐ │       │ So sehen deine nächsten  │
+│ │ ◎ Instagram verbinden│ │       │ Tage aus   [Jetzt posten]│
+│ └──────────────────────┘ │       │ ⚠ Instagram noch nicht   │
+│ Ihre Beiträge erscheinen…│       │   verbunden  [Verbinden] │
+│ Später verbinden         │       │ Wartet auf deine Freigabe│
+│ ┌──────────────────────┐ │       │ ┌──────────────────────┐ │
+│ │ in LinkedIn verbinden│ │       │ │ [Bild] Headline      │ │
+│ └──────────────────────┘ │       │ │ [Freigeben] Ablehnen │ │
+│ Später verbinden         │       │ └──────────────────────┘ │
+│ [   Zum Dashboard      ] │       │ Geplant   ↑↓ oder Ziehen │
+└──────────────────────────┘       │ Mo 21.9. …               │
                                    └──────────────────────────┘
 ```
 

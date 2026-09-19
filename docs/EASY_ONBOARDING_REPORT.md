@@ -236,7 +236,50 @@ hat einen Knopf je Kanal plus „Zum Dashboard", das Dashboard hat die Aktionen 
 
 ---
 
-## 6. Wie die Vorausplanung sofort läuft - ohne Umbau der Routine
+## 6. Designplan und was sich gegenüber dem ersten Entwurf geändert hat
+
+Der vollständige Plan steht in `docs/EASY_ONBOARDING_DESIGN.md`: sechs benannte Farbwerte,
+Schriften mit ihren Rollen, ein ASCII-Wireframe je Bildschirm, fünf Leitprinzipien. Grundlage
+sind Messwerte, keine Schätzungen - ich habe ads.openai.com im Headless-Browser geladen und
+Farben, Schriftgrößen, Gewichte und Button-Maße ausgelesen: Weiß, Text `#0d0d0d`, Sekundärtext
+`#5d5d5d`, eine Sans, Überschriften Gewicht 500 mit negativer Laufweite, Pillen-Buttons.
+Umgesetzt mit der selbst gehosteten Inter (OpenAI Sans ist nicht frei) und der Wortmarke in der
+Instrument Serif des bestehenden Panels.
+
+**Die Prüffrage aus dem Auftrag - käme dieser Plan auch für irgendein anderes SaaS heraus?**
+Beim ersten Entwurf: ja. Weiß, Inter, schwarze Pillen, zentrierte Spalte, Fortschrittsliste.
+Fünf Dinge habe ich daraufhin geändert:
+
+1. **Die Seite trägt die Farbe des Kunden, nicht unsere.** Beitragskarten rendern Akzentfarbe,
+   Verlauf, Bildschrift und Wasserzeichen genau so, wie die Bildpipeline sie baut. Der
+   Ergebnis-Bildschirm eines Physiotherapeuten sieht anders aus als der eines Tischlers - das
+   ist nach der Markenfarben-Erkennung kein Effekt mehr, sondern die Hauptaussage.
+2. **Die Woche ist eine Woche, aber nur ihre vollen Tage.** Ursprünglich standen dort sieben
+   Tageszeilen, leere als schmale Zeile. Jetzt erscheinen ausschließlich Tage mit Beitrag - fünf
+   volle Karten wirken stark, fünf volle und zwei leere wirken unfertig.
+3. **Die Begründung nennt ihre Quelle.** „… zwei Themen, die auf hittaro.com besonders
+   hervorstachen" statt einer allgemeinen Floskel.
+4. **Wortmarke in der Serif des bestehenden Panels** samt der Zeile „powered by Pipeline AI
+   Solutions" - der einzige Schmuck und zugleich die Brücke zur alten Oberfläche.
+5. **Drei Formen, drei Bedeutungen** statt Kartenwüste: Karte = Beitrag, Zeile mit Stift =
+   Einstellung, Liste = Fortschritt. Nur die Beitragskarte hat einen Rahmen.
+
+Zwei Dinge kamen im Bau dazu, die im ersten Entwurf fehlten: der Fortschrittsschritt „Farben
+übernommen" mit den beiden erkannten Farbpunkten daneben, und im Plan-Bildschirm die drei
+Vorschaukarten **über** dem Farbregler, die sich beim Ziehen sofort mitfärben - ohne sie wäre
+die Farbwahl eine Zahl ohne Wirkung.
+
+Gegen überlappende Schritt-Labels, die es hier schon einmal gab, hilft kein Feinschliff, sondern
+der Aufbau: es gibt keine horizontale Schrittleiste mehr. Der Fortschritt ist eine vertikale
+Liste, alles andere hat gar keine.
+
+Zur Farbstimmung: Abschnitt 9 sagt „dunkel", zugleich „im Charakter des bestehenden Panels" -
+das ist weiß. Gebaut war zwischenzeitlich beides; entschieden ist hell (siehe Abschnitt 10,
+Punkt 3).
+
+---
+
+## 7. Wie die Vorausplanung sofort läuft - ohne Umbau der Routine
 
 Die Kundenschleife aus `planUpcomingPosts()` ist als `planCustomerWeek(row, opts)`
 herausgelöst - gleiche Slot-Auswahl, gleiche Idempotenz über `getPlannedPostByChannelDate`,
@@ -260,14 +303,14 @@ gegengeprüft. Bedienung: Ziehen am Griff und Pfeile hoch/runter (44 px, auch mi
 
 ---
 
-## 7. Tests
+## 8. Tests
 
 | Lauf | Ergebnis |
 |---|---|
 | `npm run test:auth` (Anmeldung Ende zu Ende gegen Attrappen-Anbieter) | **21 passed, 0 failed** |
 | `npm run test:start-quota` (Kostenschutz-Logik) | **6 passed, 0 failed** |
 | `npm run test:start` (HTTP gegen Staging, echte Vorschau) | **60 passed, 0 failed** |
-| `npm run test:start-browser` (Chromium 360 und 1440 px, jeder Bildschirm) | **141 Prüfungen, 0 Probleme** |
+| `npm run test:start-browser` (Chromium 360 und 1440 px, jeder Bildschirm) | **140 Prüfungen, 0 Probleme** in der hellen Fassung (eine Prüfung ging von „kein Anbieter eingerichtet" aus und vergleicht jetzt gegen `/api/start/config`, seit Microsoft scharf ist) |
 | `npm run test:prod-copy` (Sandbox-Build gegen Kopie der Produktions-DB) | **64 passed, 0 failed** |
 | `npm run test:panel` (bestehende Suite, 251 Prüfungen) | **251 passed, 0 failed** |
 | `npm run test:backoff` | **15 passed, 0 failed** |
@@ -299,7 +342,7 @@ ungestört gelaufen.
 
 ---
 
-## 8. Nachweis: Produktion unberührt
+## 9. Nachweis: Produktion unberührt
 
 Baseline vor Beginn (`docs/easy-onboarding/baseline-produktion.txt`) und Kontrolle danach
 (`docs/easy-onboarding/kontrolle-produktion.txt`, erzeugt mit
@@ -333,14 +376,13 @@ Umgebung: nichts zwingend (alle Deckel haben Standardwerte); für den Login zus�
 
 ---
 
-## 9. Offene Entscheidungen für dich
+## 10. Offene Entscheidungen für dich
 
 1. **Anbieter-Apps anlegen** (Abschnitt 1). Ohne sie bleibt der Hauptweg der E-Mail-Weg.
 2. **Apple ja oder nein** - 99 USD im Jahr plus halbjährlich neu zu erzeugendes Secret.
-3. **Dunkel war deine Vorgabe aus Abschnitt 9, das klassische Panel ist hell.** Der neue Flow
-   ist jetzt dunkel; wer über „Einstellungen" ins klassische Panel wechselt, erlebt einen
-   sichtbaren Bruch. Entweder das klassische Panel folgt später nach, oder wir bleiben hell.
-   Umschalten kostet mich etwa eine Stunde, die Farben sind sechs Tokens in `start.css`.
+3. ~~Hell oder dunkel~~ **entschieden am 19.09.2026: hell.** Damit passt der neue Flow zum
+   klassischen Panel und zum Vorbild; der Wortlaut „dunkel" aus Abschnitt 9 ist bewusst nicht
+   umgesetzt. Zurück wäre wieder nur ein Token-Block.
 4. **„Du" statt „Sie".** Der neue Flow duzt, das klassische Panel siezt.
 5. **Zustimmung als Satz statt Häkchen** auf Bildschirm 1 (ein Pflichtfeld weniger). Ob das
    rechtlich reicht, gehört zu dir bzw. deiner Rechtsberatung. `consent_at` wird gesetzt.
@@ -357,7 +399,7 @@ Umgebung: nichts zwingend (alle Deckel haben Standardwerte); für den Login zus�
 
 ---
 
-## 10. Was ich NICHT im echten Browser getestet habe
+## 11. Was ich NICHT im echten Browser getestet habe
 
 - **Die echte Anmeldung bei Google, Microsoft oder Apple.** Getestet ist der komplette Ablauf
   gegen einen selbst gebauten, regelkonformen Anbieter - nicht gegen Google.
@@ -382,7 +424,7 @@ Umgebung: nichts zwingend (alle Deckel haben Standardwerte); für den Login zus�
 
 ---
 
-## 11. Rollback in einem Satz
+## 12. Rollback in einem Satz
 
 `cp /root/staging.ecosystem.json.bak-20260919 /root/staging.ecosystem.json && pm2 delete
 instagram-mcp-staging && pm2 start /root/staging.ecosystem.json && pm2 save && rm -r
