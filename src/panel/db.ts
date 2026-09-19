@@ -667,6 +667,33 @@ migrateColumns("customers", [["ui_mode", "TEXT"], ["plan_tier", "TEXT"]]);
 // der eine fremde E-Mail-Adresse eintippt, den gespeicherten Zugangslink des Kunden entwerten
 // (bei "Zugang verloren?" im klassischen Panel ist genau das das gewollte Verhalten, hier nicht).
 migrateColumns("customers", [["login_link_token_hash", "TEXT"], ["login_link_expires_at", "TEXT"]]);
+// Anmeldung ueber Google/Microsoft/Apple (Auftrag Abschnitt 4). auth_provider/auth_subject sind
+// die dauerhafte Zuordnung zum Anbieterkonto - die E-Mail-Adresse allein reicht nicht, weil sie
+// sich beim Anbieter aendern kann. NULL = Kunde kam ueber den E-Mail-Weg (alle bestehenden).
+migrateColumns("customers", [["auth_provider", "TEXT"], ["auth_subject", "TEXT"]]);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS customers_auth ON customers(auth_provider, auth_subject) WHERE auth_provider IS NOT NULL`);
+
+// Kurzlebiger Zustand eines laufenden Anmeldevorgangs. Eigene Tabelle statt oauth_states: dort
+// haengt ein Pflicht-Fremdschluessel auf customers, und beim Anmelden gibt es den Kunden noch
+// nicht (genau das ist der Unterschied zwischen "Kanal verbinden" und "Konto anlegen").
+db.exec(`
+CREATE TABLE IF NOT EXISTS auth_states (
+  state TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Kostenschutz (Auftrag Abschnitt 8): eine Domain, die schon analysiert wurde, wird eine Zeit
+-- lang aus dem Zwischenspeicher bedient statt neu analysiert. Speichert NUR das Ergebnis der
+-- Website-Analyse und die erkannten Markenfarben - nichts Kundenbezogenes.
+CREATE TABLE IF NOT EXISTS domain_cache (
+  domain TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`);
 db.exec(`
 CREATE TABLE IF NOT EXISTS start_previews (
   id TEXT PRIMARY KEY,
@@ -757,6 +784,10 @@ export interface CustomerRow {
   plan_tier: string | null;
   login_link_token_hash: string | null;
   login_link_expires_at: string | null;
+  /** 'google' | 'microsoft' | 'apple' | NULL (= ueber E-Mail angelegt). */
+  auth_provider: string | null;
+  /** Dauerhafte Kennung des Kontos beim Anbieter ("sub"). */
+  auth_subject: string | null;
 }
 
 export interface ConnectionRow {
@@ -978,4 +1009,5 @@ export function cleanupExpired(): void {
   db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
   db.prepare("DELETE FROM oauth_states WHERE expires_at < ?").run(now);
   db.prepare("DELETE FROM admin_sessions WHERE expires_at < ?").run(now);
+  db.prepare("DELETE FROM auth_states WHERE expires_at < ?").run(now);
 }

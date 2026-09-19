@@ -28,7 +28,9 @@
     "test:start-quota": "node --import tsx --test scripts/start-quota.test.ts",
     "test:start": "node scripts/test-start.mjs",
     "test:start-browser": "node scripts/easy-onboarding-shots.mjs",
-    "test:prod-copy": "node scripts/test-prod-copy.mjs"
+    "test:prod-copy": "node scripts/test-prod-copy.mjs",
+    "test:auth": "node scripts/test-auth.mjs",
+    "brand-colors:proof": "node scripts/brand-colors-proof.mjs"
   },
   "keywords": [
     "mcp",

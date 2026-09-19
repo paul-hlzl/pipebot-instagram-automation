@@ -87,8 +87,9 @@ async function resolvePinnedIp(rawHostname: string): Promise<string> {
   return (addresses.find((a) => a.family === 4) ?? addresses[0]).address;
 }
 
-/** Ergebnis eines einzelnen Abrufs: entweder der Text, oder das Ziel einer Weiterleitung. */
-type HopResult = { kind: "body"; body: string } | { kind: "redirect"; location: string };
+/** Ergebnis eines einzelnen Abrufs: der Inhalt, oder das Ziel einer Weiterleitung. */
+type HopResult = { kind: "body"; body: string } | { kind: "bytes"; bytes: Buffer; contentType: string } | { kind: "redirect"; location: string };
+type Modus = "text" | "binaer";
 
 /**
  * Fetches a customer-supplied URL and returns its response body as text, or throws a user-facing
@@ -96,13 +97,31 @@ type HopResult = { kind: "body"; body: string } | { kind: "redirect"; location: 
  * geprueft (siehe Dateikopf).
  */
 export async function fetchTextSafely(rawUrl: string, timeoutMs = 8000): Promise<string> {
+  const ergebnis = await folgeWeiterleitungen(rawUrl, timeoutMs, "text");
+  if (ergebnis.kind !== "body") throw new Error("Die Website lieferte keinen Text.");
+  return ergebnis.body;
+}
+
+/**
+ * Wie fetchTextSafely, aber fuer Binaerdaten (Favicon, Logo, Stylesheet-Bild) - identische
+ * SSRF-Pruefung, identische Weiterleitungs-Logik, nur ohne Text-Dekodierung und mit einer
+ * eigenen, kleineren Groessengrenze. Gebraucht seit der Markenfarben-Erkennung
+ * (panel/brand-colors.ts), die Logo/Favicon auswertet.
+ */
+export async function fetchBinarySafely(rawUrl: string, timeoutMs = 8000, maxBytes = 1_500_000): Promise<{ bytes: Buffer; contentType: string }> {
+  const ergebnis = await folgeWeiterleitungen(rawUrl, timeoutMs, "binaer", maxBytes);
+  if (ergebnis.kind !== "bytes") throw new Error("Die Adresse lieferte keine Daten.");
+  return { bytes: ergebnis.bytes, contentType: ergebnis.contentType };
+}
+
+async function folgeWeiterleitungen(rawUrl: string, timeoutMs: number, modus: Modus, maxBytes = MAX_RESPONSE_BYTES): Promise<HopResult> {
   let aktuell = rawUrl;
   const besucht = new Set<string>();
   for (let sprung = 0; sprung <= MAX_REDIRECTS; sprung++) {
     if (besucht.has(aktuell)) throw new Error("Die Website leitet im Kreis - bitte die genaue Adresse eintragen.");
     besucht.add(aktuell);
-    const ergebnis = await fetchOneHop(aktuell, timeoutMs);
-    if (ergebnis.kind === "body") return ergebnis.body;
+    const ergebnis = await fetchOneHop(aktuell, timeoutMs, modus, maxBytes);
+    if (ergebnis.kind !== "redirect") return ergebnis;
     // Location darf relativ sein ("/de/") - gegen die aktuelle Adresse aufloesen.
     try {
       aktuell = new URL(ergebnis.location, aktuell).toString();
@@ -113,7 +132,7 @@ export async function fetchTextSafely(rawUrl: string, timeoutMs = 8000): Promise
   throw new Error("Die Website leitet zu oft weiter - bitte die genaue Adresse eintragen.");
 }
 
-async function fetchOneHop(rawUrl: string, timeoutMs: number): Promise<HopResult> {
+async function fetchOneHop(rawUrl: string, timeoutMs: number, modus: Modus = "text", maxBytes = MAX_RESPONSE_BYTES): Promise<HopResult> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -135,7 +154,10 @@ async function fetchOneHop(rawUrl: string, timeoutMs: number): Promise<HopResult
         path: `${url.pathname}${url.search}`,
         method: "GET",
         timeout: timeoutMs,
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; PipelineBot/1.0; +https://pipebot.at)", Accept: "text/html" },
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; PipelineBot/1.0; +https://pipebot.at)",
+          Accept: modus === "binaer" ? "image/*,text/css;q=0.9,*/*;q=0.5" : "text/html",
+        },
         // Pins the connection to the pre-validated IP without changing the hostname used for
         // the Host header / TLS SNI - see the file-level comment on why this matters. Node's
         // newer "happy eyeballs" connect logic calls this with `options.all: true` and expects
@@ -168,12 +190,27 @@ async function fetchOneHop(rawUrl: string, timeoutMs: number): Promise<HopResult
           reject(new Error(`Die Website antwortete mit einem Fehler (Status ${res.statusCode}).`));
           return;
         }
+        if (modus === "binaer") {
+          const stuecke: Buffer[] = [];
+          let gelesen = 0;
+          res.on("data", (chunk: Buffer) => {
+            gelesen += chunk.length;
+            if (gelesen > maxBytes) {
+              res.destroy();
+              reject(new Error("Die Antwort der Website ist zu groß."));
+              return;
+            }
+            stuecke.push(chunk);
+          });
+          res.on("end", () => resolve({ kind: "bytes", bytes: Buffer.concat(stuecke), contentType: String(res.headers["content-type"] ?? "") }));
+          return;
+        }
         let body = "";
         let bytes = 0;
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => {
           bytes += Buffer.byteLength(chunk);
-          if (bytes > MAX_RESPONSE_BYTES) {
+          if (bytes > maxBytes) {
             res.destroy();
             reject(new Error("Die Antwort der Website ist zu groß."));
             return;

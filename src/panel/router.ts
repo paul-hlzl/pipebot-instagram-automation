@@ -506,6 +506,9 @@ function publicState(c: CustomerRow) {
       // Easy Onboarding: welche Oberflaeche dieser Kunde sieht und welche Funktionen seine
       // Preisstufe freischaltet (tiers.ts). Bestehende Kunden: 'classic' / basic, keine Wirkung.
       uiMode: c.ui_mode === "easy" ? "easy" : "classic",
+      // Easy Onboarding: ueber welchen Weg das Konto entstanden ist. Steuert im neuen Panel, ob
+      // der E-Mail-Bestaetigungs-Hinweis ueberhaupt in Frage kommt (Auftrag Abschnitt 5).
+      authProvider: c.auth_provider ?? null,
       planTier: normalizeTier(c.plan_tier),
       features: featuresForTier(c.plan_tier),
     },

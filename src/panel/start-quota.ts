@@ -28,6 +28,8 @@ function envInt(name: string, fallback: number): number {
 }
 
 export interface PreviewLimits {
+  /** Vorschauen pro angemeldetem Konto und Tag - der teuerste Weg eines echten Nutzers. */
+  perAccountPerDay: number;
   perIpPerDay: number;
   perDomainPerDay: number;
   globalPerDay: number;
@@ -41,6 +43,7 @@ export interface PreviewLimits {
 
 export function previewLimits(): PreviewLimits {
   return {
+    perAccountPerDay: envInt("PANEL_PREVIEW_PER_ACCOUNT_DAY", 3),
     perIpPerDay: envInt("PANEL_PREVIEW_PER_IP_DAY", 3),
     perDomainPerDay: envInt("PANEL_PREVIEW_PER_DOMAIN_DAY", 2),
     globalPerDay: envInt("PANEL_PREVIEW_GLOBAL_DAY", 40),

@@ -45,7 +45,7 @@ import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./sc
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
 import { anthropicAvailable, generatePlannedPostContent } from "../anthropic.js";
-import { FAL_IMAGE_COST_USD, generateImageUrl } from "../fal.js";
+import { generateImageUrl } from "../fal.js";
 import { logUsageCost } from "./analytics.js";
 import { ToolError } from "../errors.js";
 import { sendMailBestEffort } from "./mailer.js";
@@ -176,8 +176,9 @@ async function generatePost(
     return { headline: content.headline, caption: content.caption, imageUrl: "", accentColorUsed: branding.accentColor, costUsd };
   }
   const generated = await generateImageUrl(content.headline, CHANNEL_IMAGE_FORMAT[channel], branding);
-  costUsd = costUsd != null ? costUsd + FAL_IMAGE_COST_USD : FAL_IMAGE_COST_USD;
-  logUsageCost(row.id, feature, FAL_IMAGE_COST_USD);
+  // generated.costUsd ist 0, wenn der Hintergrund ein lokal gerenderter Farbverlauf war.
+  costUsd = costUsd != null ? costUsd + generated.costUsd : generated.costUsd;
+  logUsageCost(row.id, feature, generated.costUsd);
 
   return { headline: content.headline, caption: content.caption, imageUrl: generated.imageUrl, accentColorUsed: branding.accentColor, costUsd };
 }
@@ -359,6 +360,8 @@ export interface PlanWeekOptions {
 }
 
 export interface PlanWeekResult {
+  /** Wie viele Slots dieser Lauf ueberhaupt zu fuellen hatte (0 = kein Posting-Tag in der Woche). */
+  slots: number;
   planned: number;
   skippedExisting: number;
   errors: number;
@@ -438,7 +441,42 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, slots.length) }, worker));
-  return { planned, skippedExisting, errors, overBudget };
+  return { slots: slots.length, planned, skippedExisting, errors, overBudget };
+}
+
+/**
+ * Rendert die Bilder der offenen Woche mit dem AKTUELLEN Branding neu - fuer den Moment, in dem
+ * der Kunde im Plan-Bildschirm die Farbe aendert. Text und Termin bleiben unberuehrt, nur das
+ * Bild wird ersetzt; `regenerate_count` bleibt unveraendert, weil das keine Neu-Erstellung auf
+ * Kundenwunsch ist, sondern dieselbe Schlagzeile in neuer Farbe.
+ */
+export async function recolorPlannedPosts(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
+  const today = viennaDateStr();
+  const to = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
+  const rows = listPlannedPosts(row.id, today, to).filter((p) => p.headline && p.imageUrl && ["planned", "edited", "approved"].includes(p.status));
+  if (!rows.length) return { filled: 0, failed: 0 };
+  const branding = resolveImageBranding(row.id);
+  let filled = 0;
+  let failed = 0;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < rows.length) {
+      const plan = rows[next++];
+      try {
+        const generated = await generateImageUrl(plan.headline as string, CHANNEL_IMAGE_FORMAT[plan.channel as PlannableChannel], branding);
+        logUsageCost(row.id, "easy-onboarding-farbwechsel", generated.costUsd);
+        setPlannedPostImage(plan.id, generated.imageUrl, branding.accentColor);
+        filled++;
+      } catch (err) {
+        failed++;
+        const message = err instanceof Error ? err.message : String(err);
+        logPlanningError(row.id, plan.channel, plan.scheduledFor, `Farbwechsel fehlgeschlagen: ${message}`);
+      }
+      opts.onProgress?.(filled + failed, rows.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, opts.concurrency ?? 1), rows.length) }, worker));
+  return { filled, failed };
 }
 
 export interface BackfillResult {
@@ -466,7 +504,7 @@ export async function backfillMissingImages(row: CustomerRow, opts: { concurrenc
       const plan = rows[next++];
       try {
         const generated = await generateImageUrl(plan.headline as string, CHANNEL_IMAGE_FORMAT[plan.channel as PlannableChannel], branding);
-        logUsageCost(row.id, "planned-post-bild-nachtrag", FAL_IMAGE_COST_USD);
+        logUsageCost(row.id, "planned-post-bild-nachtrag", generated.costUsd);
         setPlannedPostImage(plan.id, generated.imageUrl, branding.accentColor);
         filled++;
       } catch (err) {

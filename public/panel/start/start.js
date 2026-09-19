@@ -1,8 +1,9 @@
 /* ===========================================================================
-   Pipeflow „Start" — Easy Onboarding (19.09.2026)
-   Eine Eingabe (Domain), zwei Klicks bis zur fertigen Woche. Nutzt ausschließlich bestehende
-   Endpunkte plus die vier kleinen /api/start/*-Routen (siehe src/panel/start-routes.ts).
-   Kein Framework, kein Build. Designplan: docs/EASY_ONBOARDING_DESIGN.md
+   Pipeflow „Start" — Easy Onboarding (Fassung 19.09.2026)
+   Eine Eingabe (Domain), zwei Klicks bis zur fertigen Woche in den Markenfarben
+   des Kunden. Nutzt ausschliesslich bestehende Endpunkte plus /api/start/* und
+   /auth/* (siehe src/panel/start-routes.ts). Kein Framework, kein Build.
+   Designplan: docs/EASY_ONBOARDING_DESIGN.md
    =========================================================================== */
 (() => {
   "use strict";
@@ -12,20 +13,24 @@
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  const CHANNEL = {
-    ig_feed: { label: "Instagram", format: "feed", provider: "instagram" },
-    ig_story: { label: "Instagram Story", format: "story", provider: "instagram" },
-    linkedin: { label: "LinkedIn", format: "feed", provider: "linkedin" },
+  const KANAL = {
+    ig_feed: { label: "Instagram", format: "feed" },
+    ig_story: { label: "Instagram Story", format: "story" },
+    linkedin: { label: "LinkedIn", format: "feed" },
   };
-  const CHANNEL_ORDER = ["ig_feed", "ig_story", "linkedin"];
-  const FREQ = { "3x-woche": { label: "3× pro Woche", sub: "Montag, Mittwoch, Freitag", days: [1, 3, 5] }, werktags: { label: "Werktags", sub: "Montag bis Freitag", days: [1, 2, 3, 4, 5] }, taeglich: { label: "Täglich", sub: "auch am Wochenende", days: [1, 2, 3, 4, 5, 6, 7] } };
-  const TONES = { sachlich: "sachlich", locker: "locker", inspirierend: "inspirierend", humorvoll: "humorvoll" };
+  const KANAL_REIHE = ["ig_feed", "ig_story", "linkedin"];
+  const RHYTHMUS = {
+    "3x-woche": { label: "3× pro Woche", sub: "Montag, Mittwoch, Freitag", tage: [1, 3, 5] },
+    werktags: { label: "Werktags", sub: "Montag bis Freitag, 5× pro Woche", tage: [1, 2, 3, 4, 5] },
+    taeglich: { label: "Täglich", sub: "auch am Wochenende", tage: [1, 2, 3, 4, 5, 6, 7] },
+  };
   const PALETTE = ["#0a0e1a", "#1a2e1a", "#2e1a1a", "#1a1a2e", "#2e2410", "#111111"];
   const STANDARD_AKZENT = "#0a0e1a";
-  // Bildschriften der Bild-Pipeline (fonts.ts) - fuer die Platzhalter-Kacheln, die wie das echte Bild aussehen.
-  const FONTS = { inter: ["Inter", "Inter.ttf", 700], poppins: ["Poppins", "Poppins.ttf", 700], playfair: ["Playfair Display", "PlayfairDisplay.ttf", 700], merriweather: ["Merriweather", "Merriweather.ttf", 700], bebas: ["Bebas Neue", "BebasNeue.ttf", 400], anton: ["Anton", "Anton.ttf", 400], caveat: ["Caveat", "Caveat.ttf", 700], pacifico: ["Pacifico", "Pacifico.ttf", 400] };
-  const WEEKDAY_SHORT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
-  const ERRORS = {
+  // Bildschriften der Pipeline (fonts.ts) - die Platzhalterkachel setzt die Schlagzeile in
+  // derselben Schrift wie das echte Bild.
+  const SCHRIFTEN = { inter: ["Inter", "Inter.ttf", 700], poppins: ["Poppins", "Poppins.ttf", 700], playfair: ["Playfair Display", "PlayfairDisplay.ttf", 700], merriweather: ["Merriweather", "Merriweather.ttf", 700], bebas: ["Bebas Neue", "BebasNeue.ttf", 400], anton: ["Anton", "Anton.ttf", 400], caveat: ["Caveat", "Caveat.ttf", 700], pacifico: ["Pacifico", "Pacifico.ttf", 400] };
+  const WOCHENTAG_KURZ = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+  const FEHLER = {
     failed: (p) => `Die Verbindung mit ${p || "dem Kanal"} hat nicht geklappt. Bitte versuche es noch einmal.`,
     cancelled: (p) => `Du hast die Verbindung mit ${p || "dem Kanal"} abgebrochen. Du kannst sie jederzeit nachholen.`,
     state: () => "Die Sitzung ist abgelaufen. Bitte versuche es noch einmal.",
@@ -34,22 +39,24 @@
     not_configured: (p) => `${p} ist auf diesem Server nicht eingerichtet.`,
     session: () => "Bitte melde dich zuerst an.",
     verify: () => "Dieser Bestätigungslink ist ungültig oder wurde schon verwendet.",
-    login: () => "Dieser Anmeldelink ist ungültig. Gib deine E-Mail-Adresse ein, wir schicken dir einen neuen.",
+    login: () => "Dieser Anmeldelink ist ungültig oder abgelaufen. Gib deine E-Mail-Adresse ein, wir schicken dir einen neuen.",
     "login-limit": () => "Zu viele Anmeldeversuche. Bitte in einer Stunde noch einmal.",
+    rate: () => "Zu viele Anmeldeversuche. Bitte in einer Stunde noch einmal.",
+    unknown: () => "Dieser Anmeldeweg ist nicht bekannt.",
   };
 
   const S = {
-    screen: "start", providers: [], aiAvailable: false, turnstileSiteKey: null, sandbox: false,
+    screen: "konto", gerendert: null, providers: [], authProviders: [], aiAvailable: false, turnstileSiteKey: null, sandbox: false,
     customer: null, connections: [], skipped: new Set(),
-    email: "", website: "", description: "", noSite: false,
-    status: null, approvals: [], posts: [], history: null,
-    notice: null, editing: null, poll: null, workingSince: 0, turnstileWidget: null,
+    status: null, approvals: [], verlauf: null,
+    notice: null, editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
+    beschreibung: "", website: "", leerlauf: 0,
   };
-  const established = () => Boolean(S.customer);
-  const onboardingDone = () => Boolean(S.customer && S.customer.tourDone);
-  const conn = (id) => S.connections.find((c) => c.provider === id);
-  const prov = (id) => S.providers.find((p) => p.id === id);
-  const applyState = (d) => { if (!d || !d.customer) return; S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer.skippedProviders || []); };
+  const angemeldet = () => Boolean(S.customer);
+  const eingerichtet = () => Boolean(S.customer && S.customer.tourDone);
+  const kanal = (id) => S.connections.find((c) => c.provider === id);
+  const anbieter = (id) => S.providers.find((p) => p.id === id);
+  const uebernehmen = (d) => { if (!d || !d.customer) return; S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer.skippedProviders || []); };
 
   /* ================= API ================= */
   async function api(method, url, body) {
@@ -67,148 +74,169 @@
     return data;
   }
 
-  function toast(text, kind = "ok") {
+  function toast(text, art = "ok") {
     const el = document.createElement("div");
-    el.className = `toast ${kind}`;
+    el.className = `toast ${art}`;
     el.textContent = text;
     $("#toasts").appendChild(el);
     setTimeout(() => el.remove(), 4200);
   }
 
   /* ================= Formatierung ================= */
-  const dateOf = (iso) => new Date(`${iso}T12:00:00`);
-  const fmtDay = (iso) => { const d = dateOf(iso); return `${WEEKDAY_SHORT[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}.`; };
-  const fmtLong = (iso) => dateOf(iso).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
-  const fmtWhen = (iso) => new Date(iso).toLocaleString("de-AT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
-  const todayStr = () => { const d = new Date(); const v = new Date(d.toLocaleString("en-US", { timeZone: "Europe/Vienna" })); return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`; };
-  const addDays = (iso, n) => { const d = dateOf(iso); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-  const isoWeekday = (iso) => { const g = dateOf(iso).getDay(); return g === 0 ? 7 : g; };
+  const datumVon = (iso) => new Date(`${iso}T12:00:00`);
+  const kurzDatum = (iso) => { const d = datumVon(iso); return `${WOCHENTAG_KURZ[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}.`; };
+  const langDatum = (iso) => datumVon(iso).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
+  const zeitpunkt = (iso) => new Date(iso).toLocaleString("de-AT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
 
-  function enabledChannels(c = S.customer) {
-    if (!c) return CHANNEL_ORDER;
-    return CHANNEL_ORDER.filter((ch) => (ch === "ig_feed" && c.igFeedEnabled) || (ch === "ig_story" && c.igStoryEnabled) || (ch === "linkedin" && c.linkedinEnabled));
+  function aktiveKanaele(c = S.customer) {
+    if (!c) return KANAL_REIHE;
+    return KANAL_REIHE.filter((ch) => (ch === "ig_feed" && c.igFeedEnabled) || (ch === "ig_story" && c.igStoryEnabled) || (ch === "linkedin" && c.linkedinEnabled));
   }
-  function postingDays(c = S.customer) {
-    const explicit = c && c.activeWeekdays ? c.activeWeekdays.split(",").map(Number).filter((n) => n >= 1 && n <= 7) : null;
-    return explicit && explicit.length ? explicit : (FREQ[c?.frequency] || FREQ.werktags).days;
+  function postTage(c = S.customer) {
+    const explizit = c && c.activeWeekdays ? c.activeWeekdays.split(",").map(Number).filter((n) => n >= 1 && n <= 7) : null;
+    return explizit && explizit.length ? explizit : (RHYTHMUS[c?.frequency] || RHYTHMUS.werktags).tage;
   }
-  function frequencyLabel(c = S.customer) {
-    const days = postingDays(c);
-    const key = [...days].sort().join(",");
-    const found = Object.entries(FREQ).find(([, f]) => f.days.join(",") === key);
-    if (found) return FREQ[found[0]].label;
-    return `${days.length}× pro Woche (${days.map((d) => WEEKDAY_SHORT[d % 7]).join(", ")})`;
+  function rhythmusText(c = S.customer) {
+    const tage = postTage(c);
+    const schluessel = [...tage].sort().join(",");
+    const treffer = Object.entries(RHYTHMUS).find(([, f]) => f.tage.join(",") === schluessel);
+    if (treffer) return `${RHYTHMUS[treffer[0]].label}, ${tage.length}× pro Woche`;
+    return `${tage.length}× pro Woche (${tage.map((d) => WOCHENTAG_KURZ[d % 7]).join(", ")})`;
   }
-  const tileBg = (c = S.customer) => {
-    const hex = (c && c.accentColor) || STANDARD_AKZENT;
-    if (c && c.gradientEnabled && c.gradientColor2) {
-      const angle = { horizontal: "90deg", vertical: "180deg", diagonal: "135deg" }[c.gradientDirection] || "135deg";
-      return `linear-gradient(${angle}, ${hex}, ${c.gradientColor2})`;
-    }
-    return hex;
+  const GRAD_WINKEL = { horizontal: "90deg", vertical: "180deg", diagonal: "135deg" };
+  /** Der Bildhintergrund, wie ihn die Pipeline gerade erzeugen wuerde - eine Stelle fuer alle
+   *  Vorschauen (Platzhalterkachel und Farbvorschau im Plan). */
+  const kachelHintergrund = (c = S.customer, ueberschreiben) => {
+    const q = ueberschreiben || {};
+    const hex = q.accentColor || (c && c.accentColor) || STANDARD_AKZENT;
+    const an = q.gradientEnabled !== undefined ? q.gradientEnabled : c && c.gradientEnabled;
+    const zwei = q.gradientColor2 !== undefined ? q.gradientColor2 : c && c.gradientColor2;
+    const richtung = q.gradientDirection || (c && c.gradientDirection) || "diagonal";
+    return an && zwei ? `linear-gradient(${GRAD_WINKEL[richtung] || GRAD_WINKEL.diagonal}, ${hex}, ${zwei})` : hex;
   };
-  const tileFont = (c = S.customer) => { const f = FONTS[c?.fontChoice] || FONTS.inter; return `font-family:"${f[0]}";font-weight:${f[2]}`; };
+  const kachelSchrift = (c = S.customer) => { const f = SCHRIFTEN[c?.fontChoice] || SCHRIFTEN.inter; return `font-family:"${f[0]}";font-weight:${f[2]}`; };
 
-  function injectImageFonts() {
-    if ($("#pf-image-fonts")) return;
+  function schriftenLaden() {
+    if ($("#pf-bildschriften")) return;
     const style = document.createElement("style");
-    style.id = "pf-image-fonts";
-    style.textContent = Object.values(FONTS).map(([family, file]) => `@font-face{font-family:"${family}";src:url("${MOUNT}/fonts/${file}") format("truetype");font-weight:100 900;font-display:swap;}`).join("\n");
+    style.id = "pf-bildschriften";
+    style.textContent = Object.values(SCHRIFTEN).map(([familie, datei]) => `@font-face{font-family:"${familie}";src:url("${MOUNT}/fonts/${datei}") format("truetype");font-weight:100 900;font-display:swap;}`).join("\n");
     document.head.appendChild(style);
   }
 
-  /* ================= Rendering: Rahmen ================= */
+  /* ================= Rahmen ================= */
   function render() {
     const stage = $("#stage");
-    const wide = ["result", "dashboard", "settings"].includes(S.screen);
-    stage.classList.toggle("wide", wide);
+    stage.classList.toggle("breit", ["ergebnis", "dashboard", "einstellungen", "plan"].includes(S.screen));
     const html = {
-      start: startHtml, known: knownHtml, website: websiteHtml, describe: describeHtml, working: workingHtml,
-      result: resultHtml, adjust: adjustHtml, plan: planHtml, connect: connectHtml, welcome: welcomeHtml,
-      dashboard: dashboardHtml, settings: settingsHtml, error: errorHtml,
+      konto: kontoHtml, email: emailHtml, gesendet: gesendetHtml, willkommen: willkommenHtml,
+      website: websiteHtml, beschreibung: beschreibungHtml, arbeitet: arbeitetHtml,
+      ergebnis: ergebnisHtml, anders: andersHtml, plan: planHtml, verbinden: verbindenHtml,
+      dashboard: dashboardHtml, einstellungen: einstellungenHtml, fehler: fehlerHtml,
     }[S.screen];
-    // Der Einblend-Moment gehoert dem Bildschirmwechsel - ein Neuzeichnen durch das Polling
-    // (Fortschritt, fertige Beitraege) darf nicht jedes Mal neu einblenden (Flackern).
-    const wechsel = S.renderedScreen !== S.screen;
-    S.renderedScreen = S.screen;
+    const wechsel = S.gerendert !== S.screen;
+    S.gerendert = S.screen;
     stage.innerHTML = `<div class="screen${wechsel ? " enter" : ""}">${html ? html() : ""}</div>`;
-    renderTop();
-    if (S.screen === "website" && S.turnstileSiteKey) renderTurnstile();
-    if (["working", "result", "dashboard"].includes(S.screen)) ensurePolling(); else stopPolling();
-    if (S.screen === "dashboard") loadDashboardExtras();
-    if (S.screen === "settings" && S.history === null) loadHistory();
-    const focusTarget = $("[autofocus]", stage);
-    if (focusTarget && !/Mobi|Android/i.test(navigator.userAgent)) focusTarget.focus();
+    kopfzeile();
+    if (["website", "beschreibung"].includes(S.screen) && S.turnstileSiteKey && S.customer && !S.customer.authProvider) renderTurnstile();
+    if (["arbeitet", "ergebnis", "dashboard"].includes(S.screen)) pollStarten(); else pollStoppen();
+    if (S.screen === "dashboard") dashboardNachladen();
+    if (S.screen === "einstellungen" && S.verlauf === null) verlaufLaden();
+    const ziel = $("[autofocus]", stage);
+    if (ziel && !/Mobi|Android/i.test(navigator.userAgent)) ziel.focus();
     else stage.focus({ preventScroll: true });
     window.scrollTo({ top: 0 });
   }
 
-  function renderTop() {
+  function kopfzeile() {
     const nav = $("#top-actions");
-    if (!established() || !onboardingDone()) { nav.innerHTML = ""; return; }
-    nav.innerHTML = S.screen === "settings"
+    if (!eingerichtet()) { nav.innerHTML = ""; return; }
+    nav.innerHTML = S.screen === "einstellungen"
       ? `<button type="button" class="btn secondary sm" data-go="dashboard">Zur Übersicht</button>`
-      : `<button type="button" class="btn secondary sm" data-go="settings">Einstellungen</button>`;
+      : `<button type="button" class="btn secondary sm" data-go="einstellungen">Einstellungen</button>`;
   }
 
   function go(screen, opts = {}) {
     S.screen = screen;
     S.editing = null;
-    if (["dashboard", "settings"].includes(screen)) history.replaceState(null, "", `#${screen}`);
+    if (["dashboard", "einstellungen"].includes(screen)) history.replaceState(null, "", `#${screen}`);
     else if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     if (!opts.keepNotice) S.notice = null;
     render();
   }
 
-  /* ================= Bildschirme ================= */
-  function startHtml() {
+  /* ================= Bildschirm 1: Konto ================= */
+  const AUTH_LOGO = {
+    google: `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.4a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.6-5.2 3.6-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 0 1-10.7-3.8h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.1 7.1 0 0 1 0-4.6v-3h-4a12 12 0 0 0 0 10.7l4-3.1z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1A7.2 7.2 0 0 1 12 4.8z"/></svg>`,
+    microsoft: `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path fill="#F25022" d="M2 2h9.5v9.5H2z"/><path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z"/><path fill="#00A4EF" d="M2 12.5h9.5V22H2z"/><path fill="#FFB900" d="M12.5 12.5H22V22h-9.5z"/></svg>`,
+    apple: `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.1-.8-1.6 0-3.1.9-3.9 2.4-1.7 2.9-.4 7.2 1.2 9.5.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.1.8 1.3 0 2.1-1.2 2.9-2.3.9-1.3 1.3-2.6 1.3-2.7-.1 0-2.5-1-2.5-3.7zM14 4.6c.7-.8 1.1-1.9 1-3-1 0-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3 1.1.1 2.2-.6 2.9-1.5z"/></svg>`,
+  };
+  function kontoHtml() {
+    const liste = S.authProviders.length ? S.authProviders : [{ id: "google", name: "Google", available: false, note: "Wird gerade eingerichtet." }];
     return `
       <section class="hero">
         <h1>Deine Beiträge. Jede Woche. Automatisch.</h1>
-        <p class="lede">Pipeflow liest deine Website, schreibt und gestaltet deine Beiträge für Instagram und LinkedIn - du gibst nur noch frei.</p>
-        <form id="f-start" novalidate>
+        <p class="lede">Pipeflow liest deine Website, erkennt deine Themen und deine Farben und plant die nächste Woche für Instagram und LinkedIn. Du gibst nur noch frei.</p>
+        <div class="auth-liste">
+          ${liste.map((p) => p.available
+            ? `<a class="auth-btn" href="${esc(MOUNT)}/auth/${esc(p.id)}">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} fortfahren</a>`
+            : `<button type="button" class="auth-btn kommt-noch" data-auth-pending="${esc(p.id)}" aria-disabled="true">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} fortfahren<span class="bald">kommt noch</span></button>`).join("")}
+        </div>
+        <div class="auth-trenner">oder</div>
+        <div class="actions" style="margin-top:14px"><button type="button" class="btn secondary lg" data-go="email">Mit E-Mail fortfahren</button></div>
+        <p class="hint">Mit dem Fortfahren stimmst du zu, dass Pipeline AI Solutions deine Angaben speichert, um Beiträge für dich vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
+      </section>`;
+  }
+
+  function emailHtml() {
+    return `
+      <section class="hero">
+        <h1>Mit E-Mail fortfahren</h1>
+        <p class="lede">Wir erkennen selbst, ob wir dich schon kennen.</p>
+        <form id="f-email" novalidate>
           <div class="field">
             <label for="email">E-Mail-Adresse</label>
-            <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="du@deine-firma.at" value="${esc(S.email)}" required autofocus>
+            <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="du@deine-firma.at" required autofocus>
             <p class="error" id="err-email" aria-live="assertive"></p>
           </div>
-          <div class="actions"><button class="btn lg" type="submit">Los geht's</button></div>
-          <p class="hint">Mit „Los geht's" stimmst du zu, dass Pipeline AI Solutions deine Angaben speichert, um Beiträge für dich vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
+          <div class="actions"><button class="btn lg" type="submit">Weiter</button></div>
+          <button type="button" class="link" data-go="konto">Zurück zu Google, Microsoft und Apple</button>
         </form>
       </section>`;
   }
 
-  function knownHtml() {
+  function gesendetHtml() {
     return `
       <section class="hero">
         <h1>Willkommen zurück</h1>
-        <p class="lede">${S.knownMailed
-          ? `Wir haben dir einen Anmeldelink an <strong>${esc(S.email)}</strong> geschickt. Ein Klick darauf, und du bist drin.`
-          : `Für <strong>${esc(S.email)}</strong> gibt es schon ein Konto. Wir haben in der letzten Stunde bereits Anmeldelinks geschickt - bitte schau ins Postfach.`}</p>
-        ${S.sandbox ? `<p class="hint">Testversion: Hier werden keine E-Mails verschickt. Der Link steht nur im Server-Log.</p>` : ""}
-        <div class="actions"><button type="button" class="link" data-go="start">Andere E-Mail-Adresse verwenden</button></div>
+        <p class="lede">${S.mailGeschickt
+          ? `Wir haben dir einen Anmeldelink an <strong>${esc(S.email)}</strong> geschickt. Er gilt eine Stunde.`
+          : `Für <strong>${esc(S.email)}</strong> gibt es schon ein Konto. In der letzten Stunde wurden bereits Anmeldelinks verschickt - bitte schau ins Postfach.`}</p>
+        ${S.sandbox ? `<p class="hint">Testversion: Hier wird keine E-Mail verschickt, der Link steht nur im Server-Log.</p>` : ""}
+        <div class="actions"><button type="button" class="link" data-go="email">Andere E-Mail-Adresse verwenden</button></div>
       </section>`;
   }
 
-  function welcomeHtml() {
+  function willkommenHtml() {
     const c = S.customer;
     return `
       <section class="hero">
         <h1>Willkommen zurück</h1>
-        <button type="button" class="acct-card" data-go="dashboard">
-          <span class="acct-avatar" aria-hidden="true">${esc((c.company || "?").trim().charAt(0).toUpperCase())}</span>
+        <button type="button" class="konto-karte" data-go="dashboard">
+          <span class="konto-avatar" aria-hidden="true">${esc((c.company || "?").trim().charAt(0).toUpperCase())}</span>
           <span><strong>${esc(c.company)}</strong><span class="muted small">Weiter als ${esc(c.email)}</span></span>
-          <span class="arrow" aria-hidden="true">→</span>
+          <span class="pfeil" aria-hidden="true">→</span>
         </button>
-        <div class="actions"><button type="button" class="link" id="logout-other">Mit einem anderen Konto anmelden</button></div>
+        <div class="actions"><button type="button" class="link" id="abmelden-anderes">Mit einem anderen Konto anmelden</button></div>
       </section>`;
   }
 
+  /* ================= Bildschirm 2: die eine Frage ================= */
   function websiteHtml() {
     return `
       <section class="hero">
-        <h1>So könnte deine erste Woche aussehen</h1>
-        <p class="lede">Gib deine Website ein. Wir lesen sie, erkennen deine Themen und planen die nächsten sieben Tage.</p>
+        <h1>So könnte deine nächste Woche aussehen</h1>
+        <p class="lede">Gib deine Website ein. Wir lesen sie, erkennen Themen und Farben und planen die nächsten sieben Tage.</p>
         <form id="f-website" novalidate>
           <div class="field">
             <label for="website">Website-Adresse</label>
@@ -216,348 +244,430 @@
             <p class="error" id="err-website" aria-live="assertive"></p>
           </div>
           <div id="turnstile-slot"></div>
-          <div class="actions"><button class="btn lg" type="submit" id="btn-preview">Vorschau erstellen</button></div>
+          <div class="actions"><button class="btn lg" type="submit" id="btn-vorschau">Vorschau erstellen</button></div>
           <p class="hint">Nichts wird veröffentlicht, bevor du es freigibst.</p>
-          <button type="button" class="link" data-go="describe">Ich habe keine Website</button>
+          <button type="button" class="link" data-go="beschreibung">Ich habe keine Website</button>
         </form>
       </section>`;
   }
 
-  function describeHtml() {
+  function beschreibungHtml() {
     return `
       <section class="hero">
         <h1>Was macht dein Unternehmen?</h1>
-        <p class="lede">Ein, zwei Sätze reichen - wer ihr seid, was ihr anbietet, für wen.</p>
-        <form id="f-describe" novalidate>
-          <div class="field">
+        <p class="lede">Ein, zwei Sätze reichen. Wenn es holprig klingt: „Mit KI verbessern" macht einen sauberen Absatz daraus, den du weiter bearbeiten kannst.</p>
+        <form id="f-beschreibung" novalidate>
+          <div class="field feld-mit-ki">
             <label for="description">Beschreibung</label>
-            <textarea class="textarea" id="description" name="description" rows="3" placeholder="Physiotherapie-Praxis in Linz, Schwerpunkt Rückenschmerzen. Wir helfen Büroangestellten, wieder schmerzfrei zu arbeiten." required autofocus>${esc(S.description)}</textarea>
+            <textarea class="textarea" id="description" name="description" rows="4" placeholder="physio in linz, viele büroleute mit rücken, auch massage" required autofocus>${esc(S.beschreibung)}</textarea>
+            <button type="button" class="btn secondary sm ki-knopf" id="ki-verbessern">Mit KI verbessern</button>
             <p class="error" id="err-description" aria-live="assertive"></p>
           </div>
           <div id="turnstile-slot"></div>
-          <div class="actions"><button class="btn lg" type="submit" id="btn-preview">Vorschau erstellen</button></div>
+          <div class="actions"><button class="btn lg" type="submit" id="btn-vorschau">Vorschau erstellen</button></div>
           <p class="hint">Nichts wird veröffentlicht, bevor du es freigibst.</p>
           <button type="button" class="link" data-go="website">Ich habe doch eine Website</button>
         </form>
       </section>`;
   }
 
-  function expectedImages() {
+  /* ================= Bildschirm 3: es arbeitet ================= */
+  function erwarteteBilder() {
     const st = S.status;
     if (!st) return 0;
-    const total = Math.max(st.job?.total || 0, st.posts.length);
-    if (S.customer?.emailVerified) return total;
-    return Math.min(st.summary?.limits?.imagesUnverified ?? 3, total);
+    const gesamt = Math.max(st.job?.total || 0, st.posts.length);
+    if (S.customer?.emailVerified) return gesamt;
+    return Math.min(st.summary?.limits?.imagesUnverified ?? 3, gesamt);
   }
 
-  function workingHtml() {
+  function arbeitetHtml() {
     const st = S.status;
-    const job = st?.job || { phase: "writing", done: 0, total: 0 };
-    const posts = st?.posts || [];
-    const running = job.phase !== "done" && job.phase !== "error" && job.phase !== "idle";
-    const writingDone = !running || (job.total > 0 && job.done >= job.total);
-    const imgExpected = expectedImages();
-    const imgDone = st?.imagesDone || 0;
-    const imagesDone = !running && (imgDone >= imgExpected || imgExpected === 0);
-    const slow = Date.now() - S.workingSince > 6000;
-    const step = (state, label, sub) => `<li class="step is-${state}"><span class="step-mark" aria-hidden="true">${state === "done" ? "✓" : ""}</span><span class="step-text"><span>${label}</span>${sub ? `<span class="step-sub">${sub}</span>` : ""}</span></li>`;
+    const job = st?.job || { phase: "reading", done: 0, total: 0 };
+    const laeuft = !["done", "error", "idle"].includes(job.phase);
+    const gefunden = job.found;
+    const nachLesen = Boolean(gefunden) || ["colors", "writing", "images", "done"].includes(job.phase);
+    const textFertig = !laeuft || (job.total > 0 && job.done >= job.total);
+    const bildZiel = erwarteteBilder();
+    const bildFertig = st?.imagesDone || 0;
+    const bilderFertig = !laeuft && (bildFertig >= bildZiel || bildZiel === 0);
+    const langsam = Date.now() - S.arbeitSeit > 7000;
+    const schritt = (zustand, titel, unter) => `<li class="step is-${zustand}"><span class="step-mark" aria-hidden="true">${zustand === "done" ? "✓" : ""}</span><span class="step-text"><span>${titel}</span>${unter ? `<span class="step-sub">${unter}</span>` : ""}</span></li>`;
+    const farbPunkte = gefunden?.colors
+      ? `<span class="step-farben"><span class="step-farbe" style="background:${esc(gefunden.colors.accentColor)}"></span><span class="step-farbe" style="background:${esc(gefunden.colors.gradientColor2)}"></span>${esc(gefunden.colors.accentColor)}</span>`
+      : nachLesen ? "Keine eigenen Farben gefunden - wir nehmen unser Standardthema." : "";
     return `
       <section>
-        <h1>Wir lesen ${st?.summary?.domain ? esc(st.summary.domain) : "deine Angaben"}</h1>
+        <h1>${S.website ? `Wir lesen ${esc(S.website.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))}` : "Wir lesen deine Angaben"}</h1>
         <p class="lede">Das dauert meistens unter einer Minute.</p>
         <ol class="steps" aria-label="Fortschritt">
-          ${step("done", S.noSite ? "Beschreibung gelesen" : "Website gelesen")}
-          ${step("done", "Themen erkannt", st?.summary?.pillars?.length ? esc(st.summary.pillars.map((p) => p.title).join(", ")) : "")}
-          ${step(writingDone ? "done" : "active", "Beiträge entworfen", job.total ? `${job.done} von ${job.total}${!writingDone && slow ? " · dauert gerade etwas länger …" : ""}` : (slow ? "dauert gerade etwas länger …" : ""))}
-          ${step(imagesDone ? "done" : (writingDone || posts.length ? "active" : "open"), "Bilder erstellt", imgExpected ? `${Math.min(imgDone, imgExpected)} von ${imgExpected}` : "")}
+          ${schritt(nachLesen ? "done" : "active", S.website ? "Website gelesen" : "Beschreibung gelesen", !nachLesen && langsam ? "dauert gerade etwas länger …" : gefunden?.cached ? "aus dem Zwischenspeicher" : "")}
+          ${schritt(nachLesen ? "done" : "open", "Themen erkannt", gefunden?.pillars?.length ? esc(gefunden.pillars.join(", ")) : "")}
+          ${schritt(nachLesen ? "done" : "open", "Farben übernommen", farbPunkte)}
+          ${schritt(textFertig && nachLesen ? "done" : nachLesen ? "active" : "open", "Beiträge entworfen", job.total ? `${job.done} von ${job.total}${!textFertig && langsam ? " · dauert gerade etwas länger …" : ""}` : "")}
+          ${schritt(bilderFertig ? "done" : (st?.posts?.length ? "active" : "open"), "Bilder erstellt", bildZiel ? `${Math.min(bildFertig, bildZiel)} von ${bildZiel}` : "")}
         </ol>
       </section>`;
   }
 
-  function weekHtml(opts = {}) {
+  /* ================= Die Woche (ohne leere Tage) ================= */
+  function wocheHtml(opts = {}) {
     const st = S.status;
-    const from = st?.window?.from || todayStr();
-    const posts = (st?.posts || []).filter((p) => enabledChannels().includes(p.channel));
-    const running = st?.job && !["done", "error", "idle"].includes(st.job.phase);
-    const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
-    const due = postingDays();
-    return `<div class="week" id="week">${days.map((day) => {
-      const list = posts.filter((p) => p.scheduledFor === day && p.status !== "rejected").sort((a, b) => CHANNEL_ORDER.indexOf(a.channel) - CHANNEL_ORDER.indexOf(b.channel));
-      const posting = due.includes(isoWeekday(day));
-      let body;
-      if (list.length) body = `<div class="day-posts">${list.map((p) => postHtml(p, opts)).join("")}</div>`;
-      else if (posting && running) body = `<div class="day-posts">${enabledChannels().map((ch) => skeletonHtml(ch)).join("")}</div>`;
-      else if (posting) body = `<p class="day-quiet">Noch kein Beitrag für diesen Tag.${opts.dashboard ? ` <button type="button" class="link" data-replan>Jetzt planen</button>` : ""}</p>`;
-      else body = `<p class="day-quiet">Kein Beitrag - ${isoWeekday(day) >= 6 ? "Wochenende" : "Pausentag"}.</p>`;
-      return `<section class="day" aria-label="${esc(fmtLong(day))}"><div class="day-head"><strong>${esc(fmtDay(day))}</strong><span class="muted">${esc(dateOf(day).toLocaleDateString("de-AT", { weekday: "long" }))}</span></div>${body}</section>`;
+    const posts = (st?.posts || []).filter((p) => p.status !== "rejected" && aktiveKanaele().includes(p.channel));
+    const laeuft = st?.job && !["done", "error", "idle"].includes(st.job.phase);
+    // Nur Tage, an denen wirklich etwas rausgeht. Ein Tag ohne Beitrag erscheint nicht -
+    // kein grauer Kasten, kein Platzhalter (Auftrag Abschnitt 5, Abnahme 3).
+    const tage = [...new Set(posts.map((p) => p.scheduledFor))].sort();
+    if (!tage.length) {
+      return laeuft
+        ? `<div class="woche" id="woche"><div class="tag"><div class="tag-posts">${aktiveKanaele().map((ch) => skelettHtml(ch)).join("")}</div></div></div>`
+        : `<div class="woche" id="woche"><p class="leer">Für die nächsten sieben Tage ist noch nichts geplant.${opts.dashboard ? ` <button type="button" class="link" data-replan>Jetzt planen</button>` : ""}</p></div>`;
+    }
+    return `<div class="woche" id="woche">${tage.map((tag) => {
+      const liste = posts.filter((p) => p.scheduledFor === tag).sort((a, b) => KANAL_REIHE.indexOf(a.channel) - KANAL_REIHE.indexOf(b.channel));
+      return `<section class="tag" aria-label="${esc(langDatum(tag))}"><div class="tag-kopf"><strong>${esc(kurzDatum(tag))}</strong><span class="muted">${esc(datumVon(tag).toLocaleDateString("de-AT", { weekday: "long" }))}</span></div><div class="tag-posts">${liste.map((p) => postHtml(p, opts)).join("")}</div></section>`;
     }).join("")}</div>`;
   }
 
-  function skeletonHtml(ch) {
-    const meta = CHANNEL[ch];
+  function skelettHtml(ch) {
+    const meta = KANAL[ch];
     return `<article class="post" aria-busy="true"><div class="post-meta"><span class="chan ${ch}">${esc(meta.label)}</span><span class="status">wird geschrieben …</span></div><div class="media ${meta.format}"><div class="skeleton">Beitrag entsteht gerade</div></div></article>`;
   }
 
   function postHtml(p, opts = {}) {
-    const meta = CHANNEL[p.channel] || CHANNEL.ig_feed;
+    const meta = KANAL[p.channel] || KANAL.ig_feed;
     const c = S.customer;
     const wm = (c && (c.watermarkText || c.company)) || "";
-    const media = p.imageUrl
+    const medien = p.imageUrl
       ? `<img src="${esc(p.imageUrl)}" alt="Beitragsbild: ${esc(p.headline || "")}" loading="lazy">`
-      : `<div class="tile" style="--acc:${esc((p.accentColorUsed || c?.accentColor || STANDARD_AKZENT))};background:${esc(p.accentColorUsed ? p.accentColorUsed : tileBg())}"><span class="tile-h" style="${tileFont()}">${esc(p.headline || "")}</span><span class="tile-wm" style="${tileFont()}">${esc(wm)}</span></div><span class="tile-note">${c?.emailVerified ? "Bild wird gerade erstellt" : "Bild folgt nach der Bestätigung"}</span>`;
-    const statusLabel = { edited: "von dir bearbeitet", approved: "freigegeben", submitted: "in der Freigabe", published: "veröffentlicht", channel_disconnected: "Kanal getrennt" }[p.status] || "";
-    const canReorder = opts.dashboard && ["planned", "edited", "approved"].includes(p.status);
-    const actions = opts.dashboard ? `
+      : `<div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div><span class="kachel-notiz">${c?.emailVerified ? "Bild wird gerade erstellt" : "Bild folgt nach der Bestätigung"}</span>`;
+    const statusText = { edited: "von dir bearbeitet", approved: "freigegeben", submitted: "in der Freigabe", published: "veröffentlicht", channel_disconnected: "Kanal getrennt" }[p.status] || "";
+    const sortierbar = opts.dashboard && ["planned", "edited", "approved"].includes(p.status);
+    const aktionen = opts.dashboard ? `
       <div class="post-actions">
-        ${c?.approvalMode && ["planned", "edited"].includes(p.status) ? `<button type="button" class="btn sm" data-approve-plan="${esc(p.id)}">Freigeben</button>` : ""}
+        ${c?.approvalMode && ["planned", "edited"].includes(p.status) ? `<button type="button" class="btn sm" data-freigeben-plan="${esc(p.id)}">Freigeben</button>` : ""}
         ${["planned", "edited", "approved"].includes(p.status) ? `<button type="button" class="link" data-skip-plan="${esc(p.id)}">Überspringen</button>` : ""}
-        ${canReorder ? `<span class="order-btns" role="group" aria-label="Reihenfolge"><button type="button" data-move="up" data-id="${esc(p.id)}" aria-label="Früher">↑</button><button type="button" data-move="down" data-id="${esc(p.id)}" aria-label="Später">↓</button></span><span class="grip" draggable="true" data-drag="${esc(p.id)}" title="Ziehen zum Umsortieren">⠿ ziehen</span>` : ""}
+        ${sortierbar ? `<span class="order-btns" role="group" aria-label="Reihenfolge"><button type="button" data-move="up" data-id="${esc(p.id)}" aria-label="Früher">↑</button><button type="button" data-move="down" data-id="${esc(p.id)}" aria-label="Später">↓</button></span><span class="griff" draggable="true" data-drag="${esc(p.id)}" title="Ziehen zum Umsortieren">⠿</span>` : ""}
       </div>` : "";
     return `<article class="post" data-id="${esc(p.id)}" data-channel="${esc(p.channel)}" data-date="${esc(p.scheduledFor)}">
-      <div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><span class="status ${p.status === "approved" || p.status === "published" ? "ok" : ""}">${esc(statusLabel)}</span></div>
-      <div class="media ${meta.format}">${media}</div>
+      <div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><span class="status ${p.status === "approved" || p.status === "published" ? "ok" : ""}">${esc(statusText)}</span></div>
+      <div class="media ${meta.format}">${medien}</div>
       <div class="post-body">
         <h3 class="post-h">${esc(p.headline || "")}</h3>
         ${p.caption ? `<p class="post-c">${esc(p.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}
-      </div>${actions}</article>`;
+      </div>${aktionen}</article>`;
   }
 
-  function resultHtml() {
+  /* ================= Bildschirm 4: das Ergebnis ================= */
+  function ergebnisHtml() {
     const st = S.status;
     const sum = st?.summary || {};
-    const pillars = (sum.pillars || []).map((p) => p.title);
-    const source = sum.domain ? sum.domain : "deiner Beschreibung";
-    const running = st?.job && !["done", "error", "idle"].includes(st.job.phase);
-    const remaining = running && st.job.total ? Math.max(0, st.job.total - st.job.done) : 0;
-    const themes = pillars.length >= 2 ? `rund um <strong>${esc(pillars[0])}</strong> und <strong>${esc(pillars[1])}</strong> geplant - zwei Themen, die ${sum.domain ? `auf ${esc(sum.domain)}` : "in deiner Beschreibung"} besonders hervorstachen`
-      : pillars.length === 1 ? `rund um <strong>${esc(pillars[0])}</strong> geplant - das Thema, das ${sum.domain ? `auf ${esc(sum.domain)}` : "in deiner Beschreibung"} am stärksten hervorstach`
-      : `aus ${esc(source)} abgeleitet`;
+    const themen = (sum.pillars || []).map((p) => p.title);
+    const quelle = sum.domain ? `auf ${esc(sum.domain)}` : "in deiner Beschreibung";
+    const laeuft = st?.job && !["done", "error", "idle"].includes(st.job.phase);
+    const offen = laeuft && st.job.total ? Math.max(0, st.job.total - st.job.done) : 0;
+    const satz = themen.length >= 2
+      ? `Wir haben diese Beiträge rund um <strong>${esc(themen[0])}</strong> und <strong>${esc(themen[1])}</strong> erstellt - zwei Themen, die ${quelle} besonders hervorstachen.`
+      : themen.length === 1
+        ? `Wir haben diese Beiträge rund um <strong>${esc(themen[0])}</strong> erstellt - das Thema, das ${quelle} am stärksten hervorstach.`
+        : `Wir haben diese Beiträge aus dem abgeleitet, was ${quelle} steht.`;
+    const farbSatz = sum.colors?.gradientEnabled && sum.colors.accentColor
+      ? ` Die Farben stammen von deiner Website.`
+      : "";
     return `
       <section>
-        <h1>Deine nächste Woche ist fertig</h1>
-        <p class="lede">Wir haben sie ${themes}. Du hast dafür eine Zeile getippt - alles darunter kannst du noch ändern.</p>
-        ${remaining ? `<p class="progress-line">Noch ${remaining} ${remaining === 1 ? "Beitrag" : "Beiträge"} in Arbeit - sie erscheinen gleich hier.</p>` : ""}
+        <h1>So könnte deine nächste Woche aussehen.</h1>
+        <p class="lede">${satz}${farbSatz}</p>
+        ${offen ? `<p class="lauf-zeile">Noch ${offen} ${offen === 1 ? "Beitrag" : "Beiträge"} in Arbeit - sie erscheinen gleich hier.</p>` : ""}
         ${S.notice ? noticeHtml() : ""}
-        ${weekHtml()}
+        ${wocheHtml()}
         <div class="sticky-actions">
           <button type="button" class="btn lg" data-go="plan">Passt, weiter</button>
-          <button type="button" class="link" data-go="adjust">Anders machen</button>
+          <button type="button" class="link" data-go="anders">Anders machen</button>
         </div>
       </section>`;
   }
 
-  function adjustHtml() {
+  function andersHtml() {
     const limits = S.status?.summary?.limits;
-    const verified = S.customer?.emailVerified;
+    const bestaetigt = S.customer?.emailVerified;
     return `
       <section class="hero">
         <h1>Was soll anders sein?</h1>
         <p class="lede">Sag es in deinen Worten. Wir übersetzen das in Beschreibung, Tonalität und Themen und schreiben die Woche neu.</p>
-        <form id="f-adjust" novalidate>
+        <form id="f-anders" novalidate>
           <div class="field">
             <label for="wish">Dein Wunsch</label>
             <textarea class="textarea" id="wish" name="wish" rows="3" placeholder="z. B. lockerer im Ton, keine Preise nennen, mehr über das Team" required autofocus></textarea>
             <p class="error" id="err-wish" aria-live="assertive"></p>
           </div>
           <div class="actions"><button class="btn lg" type="submit">Neu erstellen</button></div>
-          ${!verified && limits ? `<p class="hint">Vor der Bestätigung deiner E-Mail-Adresse ist ${limits.adjustUnverified === 1 ? "eine Anpassung" : `${limits.adjustUnverified} Anpassungen`} möglich - danach beliebig viele.</p>` : ""}
-          <button type="button" class="link" data-go="result">Zurück zur Vorschau</button>
+          ${!bestaetigt && limits ? `<p class="hint">Vor der Bestätigung deiner E-Mail-Adresse ist ${limits.adjustUnverified === 1 ? "eine Anpassung" : `${limits.adjustUnverified} Anpassungen`} möglich - danach beliebig viele.</p>` : ""}
+          <button type="button" class="link" data-go="ergebnis">Zurück zur Vorschau</button>
         </form>
       </section>`;
   }
 
-  /* ---- Plan: Zeilen mit Stift + Inline-Feld (Bildschirm 5 und Einstellungen) ---- */
-  const PENCIL = `<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13H3v-2z"/></svg>`;
-  function planRow(id, label, valueHtml, formHtml, note) {
-    const editing = S.editing === id;
-    return `<div class="row" id="row-${id}">
-      <span class="row-k">${esc(label)}</span>
-      ${editing ? "" : `<div class="row-v">${valueHtml}</div><button type="button" class="row-edit" data-edit="${id}" aria-label="${esc(label)} bearbeiten" aria-expanded="false">${PENCIL}</button>`}
-      ${editing ? `<form class="row-form" data-row-form="${id}">${formHtml}<div class="row-form-actions"><button class="btn sm" type="submit">Speichern</button><button type="button" class="link" data-cancel-edit style="padding:0 6px">Abbrechen</button><span class="error" data-row-error aria-live="assertive"></span></div></form>` : ""}
-      ${note ? `<span class="row-note">${note}</span>` : ""}
+  /* ================= Bildschirm 5: der Plan ================= */
+  const STIFT = `<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13H3v-2z"/></svg>`;
+  function planZeile(id, label, wertHtml, formHtml, notiz) {
+    const offen = S.editing === id;
+    return `<div class="zeile" id="zeile-${id}">
+      <span class="zeile-k">${esc(label)}</span>
+      ${offen ? "" : `<div class="zeile-v">${wertHtml}</div><button type="button" class="stift" data-edit="${id}" aria-label="${esc(label)} bearbeiten" aria-expanded="false">${STIFT}</button>`}
+      ${offen ? `<form class="zeile-form" data-zeile-form="${id}">${formHtml}<div class="zeile-form-actions"><button class="btn sm" type="submit">Speichern</button><button type="button" class="link" data-cancel-edit style="padding:0 6px">Abbrechen</button><span class="error" data-zeile-fehler aria-live="assertive"></span></div></form>` : ""}
+      ${notiz ? `<span class="zeile-notiz">${notiz}</span>` : ""}
     </div>`;
   }
 
-  function planRowsHtml() {
+  /** Der bestehende Farbverlaufs-Picker: Akzentfarbe, zweite Farbe, Richtung - inline. */
+  function pickerHtml(c) {
+    const akzent = c.accentColor || STANDARD_AKZENT;
+    const zwei = c.gradientColor2 || "";
+    const richtung = c.gradientDirection || "diagonal";
+    const an = Boolean(c.gradientEnabled && zwei);
+    return `
+      <div class="picker">
+        <div class="picker-vorschau" id="picker-vorschau" style="background:${esc(kachelHintergrund(c))}">Beispiel</div>
+        <div class="picker-gruppe">
+          <span>Hauptfarbe</span>
+          <div class="swatches" role="group" aria-label="Hauptfarbe wählen">
+            ${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="accentColor" data-hex="${hex}" aria-pressed="${akzent.toLowerCase() === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}
+            <span class="swatch eigene" title="Eigene Farbe"><input type="color" data-pick="accentColor" value="${esc(akzent)}" aria-label="Eigene Hauptfarbe"></span>
+          </div>
+        </div>
+        <label class="schalter"><input type="checkbox" name="gradientEnabled" ${an ? "checked" : ""}><span>Farbverlauf statt einer Farbe</span></label>
+        <div class="picker-gruppe" data-nur-verlauf ${an ? "" : "hidden"}>
+          <span>Zweite Farbe</span>
+          <div class="swatches" role="group" aria-label="Zweite Farbe wählen">
+            <span id="partner-vorschlaege"></span>
+            <span class="swatch eigene" title="Eigene zweite Farbe"><input type="color" data-pick="gradientColor2" value="${esc(zwei || "#137A3F")}" aria-label="Eigene zweite Farbe"></span>
+          </div>
+          <span>Richtung</span>
+          <div class="richtung" role="group" aria-label="Richtung des Verlaufs">
+            ${[["diagonal", "Diagonal"], ["horizontal", "Waagrecht"], ["vertical", "Senkrecht"]].map(([w, l]) => `<button type="button" data-richtung="${w}" aria-pressed="${richtung === w}">${l}</button>`).join("")}
+          </div>
+        </div>
+        <input type="hidden" name="accentColor" value="${esc(akzent)}">
+        <input type="hidden" name="gradientColor2" value="${esc(zwei)}">
+        <input type="hidden" name="gradientDirection" value="${esc(richtung)}">
+        <span class="small muted">Die Karten oben ändern sich sofort mit. Die fertigen Bilder werden nach dem Speichern neu gerendert.</span>
+      </div>`;
+  }
+
+  /** Verlaufspartner zur aktuellen Hauptfarbe - dieselbe Rechnung wie gradient.ts auf dem Server. */
+  function partnerVorschlaege(hex) {
+    const [h, s, l] = hexToHsl(hex);
+    const sat = Math.max(s, 0.35);
+    const hell = l + (0.5 - l) * 0.45;
+    return [hslToHex(h + 35, sat, hell), hslToHex(h + 180, sat, hell), hslToHex(h, sat, Math.min(0.92, l + 0.28)), hslToHex(h, sat, Math.max(0.08, l - 0.28))];
+  }
+  function hexToHsl(hex) {
+    const n = parseInt(String(hex).slice(1), 16);
+    const [r, g, b] = [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+    let h = 0, s = 0;
+    if (d) {
+      s = d / (1 - Math.abs(2 * l - 1));
+      h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return [h, s, l];
+  }
+  function hslToHex(h, s, l) {
+    const hh = ((h % 360) + 360) % 360, c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((hh / 60) % 2) - 1)), m = l - c / 2;
+    const [r, g, b] = hh < 60 ? [c, x, 0] : hh < 120 ? [x, c, 0] : hh < 180 ? [0, c, x] : hh < 240 ? [0, x, c] : hh < 300 ? [x, 0, c] : [c, 0, x];
+    return `#${[r, g, b].map((v) => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("")}`;
+  }
+
+  function planZeilenHtml() {
     const c = S.customer;
-    const pillars = (c.contentPillars || []).map((p) => p.title);
-    const chans = enabledChannels(c).map((ch) => CHANNEL[ch].label);
-    const feat = c.features || {};
+    const themen = (c.contentPillars || []).map((p) => p.title);
+    const kanaele = aktiveKanaele(c).map((ch) => KANAL[ch].label);
+    const stufe = c.features || {};
     return `<div class="plan">
-      ${planRow("company", "Unternehmen und Branche", `<strong>${esc(c.company)}</strong><br><span class="muted">${esc(c.industry || "Branche noch offen")}</span>`,
+      ${planZeile("firma", "Unternehmen und Branche", `<strong>${esc(c.company)}</strong><br><span class="muted">${esc(c.industry || "Branche noch offen")}</span>`,
         `<label class="small muted" for="e-company">Unternehmen</label><input class="input" id="e-company" name="company" value="${esc(c.company)}" required maxlength="120">
          <label class="small muted" for="e-industry">Branche</label><input class="input" id="e-industry" name="industry" value="${esc(c.industry || "")}" maxlength="120" placeholder="z. B. Physiotherapie">`)}
-      ${planRow("pillars", "Themen", pillars.length ? pillars.map((t) => `<span class="chip">${esc(t)}</span>`).join(" ") : `<span class="muted">Noch keine Themen - wir schreiben dann allgemein über dein Unternehmen.</span>`,
-        `<div class="chips" id="chip-edit">${pillars.map((t, i) => `<span class="chip">${esc(t)}<button type="button" data-chip-remove="${i}" aria-label="${esc(t)} entfernen">×</button></span>`).join("")}<span class="chip add"><input id="chip-input" placeholder="Thema hinzufügen, Enter" aria-label="Thema hinzufügen" maxlength="60"></span></div>
-         <input type="hidden" name="pillars" value="${esc(JSON.stringify(pillars))}">`)}
-      ${planRow("channels", "Kanäle", chans.length ? esc(chans.join(", ")) : `<span class="muted">Kein Kanal aktiv</span>`,
-        `<div class="choice">${CHANNEL_ORDER.map((ch) => `<label><input type="checkbox" name="ch" value="${ch}" ${enabledChannels(c).includes(ch) ? "checked" : ""}><span>${esc(CHANNEL[ch].label)}${ch === "ig_story" ? `<small>24 Stunden sichtbar, ohne Text darunter</small>` : ch === "linkedin" ? `<small>auf deinem persönlichen Profil</small>` : ""}</span></label>`).join("")}</div>`)}
-      ${planRow("rhythm", "Rhythmus", `${esc(frequencyLabel(c))}<br><span class="muted">jeweils um ${esc(c.postTime || "15:00")} Uhr</span>`,
-        `<div class="choice">${Object.entries(FREQ).map(([k, f]) => `<label><input type="radio" name="frequency" value="${k}" ${(!c.activeWeekdays || c.activeWeekdays === f.days.join(",")) && (c.activeWeekdays ? c.activeWeekdays === f.days.join(",") : c.frequency === k) ? "checked" : ""}><span>${esc(f.label)}<small>${esc(f.sub)}</small></span></label>`).join("")}</div>
+      ${planZeile("themen", "Themen", themen.length ? themen.map((t) => `<span class="chip">${esc(t)}</span>`).join(" ") : `<span class="muted">Noch keine Themen - wir schreiben allgemein über dein Unternehmen.</span>`,
+        `<div class="chips" id="chip-edit">${themen.map((t, i) => `<span class="chip">${esc(t)}<button type="button" data-chip-remove="${i}" aria-label="${esc(t)} entfernen">×</button></span>`).join("")}<span class="chip add"><input id="chip-input" placeholder="Thema hinzufügen, Enter" aria-label="Thema hinzufügen" maxlength="60"></span></div>
+         <input type="hidden" name="pillars" value="${esc(JSON.stringify(themen))}">`)}
+      ${planZeile("kanaele", "Kanäle", kanaele.length ? esc(kanaele.join(", ")) : `<span class="muted">Kein Kanal aktiv</span>`,
+        `<div class="wahl">${KANAL_REIHE.map((ch) => `<label><input type="checkbox" name="ch" value="${ch}" ${aktiveKanaele(c).includes(ch) ? "checked" : ""}><span>${esc(KANAL[ch].label)}${ch === "ig_story" ? `<small>24 Stunden sichtbar, ohne Text darunter</small>` : ch === "linkedin" ? `<small>auf deinem persönlichen Profil</small>` : ""}</span></label>`).join("")}</div>`)}
+      ${planZeile("rhythmus", "Rhythmus", `${esc(rhythmusText(c))}<br><span class="muted">jeweils um ${esc(c.postTime || "15:00")} Uhr</span>`,
+        `<div class="wahl">${Object.entries(RHYTHMUS).map(([k, f]) => `<label><input type="radio" name="frequency" value="${k}" ${(c.activeWeekdays ? c.activeWeekdays === f.tage.join(",") : c.frequency === k) ? "checked" : ""}><span>${esc(f.label)}<small>${esc(f.sub)}</small></span></label>`).join("")}</div>
          <label class="small muted" for="e-time">Uhrzeit</label><input class="input" id="e-time" name="postTime" type="time" value="${esc(c.postTime || "15:00")}" required>
-         ${feat.weekdayMatrix ? "" : `<span class="small muted">Einzelne Wochentage je Kanal gibt es in der nächsten Stufe.</span>`}`)}
-      ${planRow("color", "Farbe", `<span class="swatch-dot" style="background:${esc(tileBg(c))}"></span>${esc((c.accentColor || STANDARD_AKZENT).toUpperCase())}${c.gradientEnabled && c.gradientColor2 ? ` → ${esc(c.gradientColor2.toUpperCase())}` : ""}`,
-        `<div class="swatches" role="group" aria-label="Farbe wählen">${PALETTE.map((hex) => `<button type="button" class="swatch" data-swatch="${hex}" aria-pressed="${(c.accentColor || STANDARD_AKZENT).toLowerCase() === hex}" style="background:${hex}" aria-label="${hex}"></button>`).join("")}<span class="swatch custom" title="Eigene Farbe"><input type="color" name="accentColorPick" value="${esc(c.accentColor || STANDARD_AKZENT)}" aria-label="Eigene Farbe"></span></div>
-         <input type="hidden" name="accentColor" value="${esc(c.accentColor || STANDARD_AKZENT)}">
-         <span class="small muted">Neue Bilder verwenden die Farbe sofort. ${feat.multiThemes ? "" : "Mehrere gespeicherte Farbthemen gibt es in der nächsten Stufe."}</span>`)}
-      ${planRow("approval", "Freigabe", `${c.approvalMode ? "An" : "Aus"}<br><span class="muted">${c.approvalMode ? "Jeder Beitrag wartet auf dein OK, bevor er rausgeht." : "Beiträge gehen zur geplanten Zeit automatisch raus."}</span>`,
-        `<label class="toggle"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Freigabe an - jeder Beitrag wartet auf dein OK</span></label>
+         ${stufe.weekdayMatrix ? "" : `<span class="small muted">Einzelne Wochentage je Kanal gibt es in der nächsten Stufe.</span>`}`)}
+      ${planZeile("farbe", "Farbe", `<span class="punkt" style="background:${esc(kachelHintergrund(c))}"></span>${esc((c.accentColor || STANDARD_AKZENT).toUpperCase())}${c.gradientEnabled && c.gradientColor2 ? ` → ${esc(c.gradientColor2.toUpperCase())}` : ""}${S.status?.summary?.colors?.gradientEnabled ? `<br><span class="muted">von deiner Website übernommen</span>` : ""}`,
+        pickerHtml(c))}
+      ${planZeile("freigabe", "Freigabe", `${c.approvalMode ? "An" : "Aus"}<br><span class="muted">${c.approvalMode ? "Jeder Beitrag wartet auf dein OK, bevor er rausgeht." : "Beiträge gehen zur geplanten Zeit automatisch raus."}</span>`,
+        `<label class="schalter"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Freigabe an - jeder Beitrag wartet auf dein OK</span></label>
          <span class="small muted">Aus heißt: Beiträge gehen zur geplanten Zeit automatisch raus. Du siehst sie trotzdem vorher in der Übersicht.</span>`)}
     </div>`;
   }
 
   function planHtml() {
+    const st = S.status;
+    const posts = (st?.posts || []).filter((p) => p.status !== "rejected").slice(0, 3);
     return `
       <section>
         <h1>Dein Plan</h1>
         <p class="lede">Alles aus deiner Website abgeleitet. Jede Zeile lässt sich mit dem Stift ändern.</p>
-        ${planRowsHtml()}
-        <div class="actions" style="margin-top:32px"><button type="button" class="btn lg" id="btn-adopt">Plan übernehmen</button></div>
+        ${posts.length ? `<div class="tag-posts" id="plan-vorschau" style="margin-top:22px">${posts.map((p) => vorschauKachelHtml(p)).join("")}</div>` : ""}
+        ${planZeilenHtml()}
+        <div class="actions" style="margin-top:30px"><button type="button" class="btn lg" id="btn-plan-uebernehmen">Plan übernehmen</button></div>
       </section>`;
   }
 
-  /* ---- Verbinden ---- */
+  /** Kachel im Plan-Bildschirm: IMMER als gerenderte Kachel (nie das fertige Bild), damit die
+   *  Farbänderung sofort sichtbar ist - das fertige Bild folgt nach dem Speichern. */
+  function vorschauKachelHtml(p) {
+    const meta = KANAL[p.channel] || KANAL.ig_feed;
+    const c = S.customer;
+    const wm = (c && (c.watermarkText || c.company)) || "";
+    return `<article class="post"><div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><time>${esc(kurzDatum(p.scheduledFor))}</time></div>
+      <div class="media ${meta.format}"><div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div></div></article>`;
+  }
+
+  /* ================= Bildschirm 6: verbinden ================= */
   const LOGO = {
     instagram: `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>`,
     linkedin: `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M4 3.5A1.5 1.5 0 1 1 4 6.5a1.5 1.5 0 0 1 0-3zM2.8 8h2.4v13H2.8zM9 8h2.3v1.8c.5-.9 1.7-2 3.6-2 3.7 0 4.3 2.4 4.3 5.6V21h-2.4v-6.6c0-1.6 0-3.6-2.2-3.6s-2.5 1.7-2.5 3.5V21H9z"/></svg>`,
     google: `<svg class="logo" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5h5"/></svg>`,
   };
-  /** Die Kanal-Texte kommen vom Server in der Sie-Form des klassischen Panels - der neue Flow duzt. */
+  /** Die Kanal-Texte kommen vom Server in der Sie-Form des klassischen Panels - hier wird geduzt. */
   const duzen = (t) => String(t ?? "").replace(/\bIhre\b/g, "Deine").replace(/\bIhrem\b/g, "deinem").replace(/\bIhren\b/g, "deinen").replace(/\bIhr\b/g, "Dein").replace(/\bSie\b/g, "du");
-  function connectCardHtml(p, inOnboarding) {
-    const k = conn(p.id);
-    const skipped = S.skipped.has(p.id);
+  function verbindenKarteHtml(p, imOnboarding) {
+    const k = kanal(p.id);
+    const uebersprungen = S.skipped.has(p.id);
     const ok = k && k.status === "ok";
-    const notice = S.notice && S.notice.provider === p.id ? `<p class="small" style="color:${S.notice.kind === "bad" ? "var(--stop)" : "var(--go)"}">${esc(S.notice.text)}</p>` : "";
-    let button;
-    if (ok) button = `<p class="connect-state">✓ Verbunden als ${esc(k.accountName || "—")}</p>${!inOnboarding ? `<button type="button" class="link" data-disconnect="${esc(p.id)}">Trennen</button>` : ""}`;
-    else if (!p.available) button = `<button type="button" class="btn secondary" disabled>${LOGO[p.id] || ""}${esc(p.name)} verbinden</button><p class="connect-state off">${S.sandbox ? "In der Testversion nicht möglich - hier gibt es keine echten Konten." : "Auf diesem Server nicht eingerichtet."}</p>`;
-    else button = `<a class="btn" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start">${LOGO[p.id] || ""}${esc(p.name)} verbinden</a>${k ? `<p class="connect-state off">Verbindung ${k.status === "expired" ? "abgelaufen" : k.status === "blocked" ? "blockiert" : "läuft bald ab"} - bitte neu verbinden.</p>` : ""}`;
+    const hinweis = S.notice && S.notice.provider === p.id ? `<p class="small" style="color:${S.notice.kind === "bad" ? "var(--schlecht)" : "var(--gut)"}">${esc(S.notice.text)}</p>` : "";
+    let knopf;
+    if (ok) knopf = `<p class="connect-state">✓ Verbunden als ${esc(k.accountName || "—")}</p>${!imOnboarding ? `<button type="button" class="link" data-disconnect="${esc(p.id)}">Trennen</button>` : ""}`;
+    else if (!p.available) knopf = `<button type="button" class="btn secondary" disabled>${LOGO[p.id] || ""}${esc(p.name)} verbinden</button><p class="connect-state off">${S.sandbox ? "In der Testversion nicht möglich - hier gibt es keine echten Konten." : "Auf diesem Server nicht eingerichtet."}</p>`;
+    else knopf = `<a class="btn" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start">${LOGO[p.id] || ""}${esc(p.name)} verbinden</a>${k ? `<p class="connect-state off">Verbindung ${k.status === "expired" ? "abgelaufen" : k.status === "blocked" ? "blockiert" : "läuft bald ab"} - bitte neu verbinden.</p>` : ""}`;
     return `<div class="connect" id="connect-${esc(p.id)}">
-      ${button}
+      ${knopf}
       <p class="small muted">${esc(duzen(p.tagline))}${p.notice ? ` ${esc(duzen(p.notice))}` : ""}</p>
-      ${notice}
-      ${!ok && inOnboarding ? (skipped ? `<p class="connect-state off">Später - du findest das jederzeit in den Einstellungen.</p>` : `<button type="button" class="link" data-skip="${esc(p.id)}">Später verbinden</button>`) : ""}
+      ${hinweis}
+      ${!ok && imOnboarding ? (uebersprungen ? `<p class="connect-state off">Später - du findest das jederzeit in den Einstellungen.</p>` : `<button type="button" class="link" data-skip="${esc(p.id)}">Später verbinden</button>`) : ""}
     </div>`;
   }
-  function connectHtml() {
-    const list = S.providers.filter((p) => p.id !== "google");
+  function verbindenHtml() {
+    const liste = S.providers.filter((p) => p.id !== "google");
     return `
       <section>
         <h1>Kanäle verbinden</h1>
         <p class="lede">Damit Pipeflow für dich veröffentlichen kann. Jeder Kanal einzeln, jeder überspringbar.</p>
-        <div class="connect-list">${list.map((p) => connectCardHtml(p, true)).join("")}</div>
-        <div class="actions" style="margin-top:32px"><button type="button" class="btn lg" id="btn-to-dashboard">Zum Dashboard</button></div>
+        <div class="connect-liste">${liste.map((p) => verbindenKarteHtml(p, true)).join("")}</div>
+        <div class="actions" style="margin-top:30px"><button type="button" class="btn lg" id="btn-zum-dashboard">Zum Dashboard</button></div>
       </section>`;
   }
 
-  /* ---- Dashboard ---- */
+  /* ================= Dashboard ================= */
   function noticeHtml() {
     const n = S.notice;
     return n ? `<div class="notice ${n.kind || ""}" role="status">${esc(n.text)}</div>` : "";
   }
   function dashboardHtml() {
     const c = S.customer;
-    const missing = S.providers.filter((p) => p.id !== "google" && !(conn(p.id) && conn(p.id).status === "ok"));
+    const fehlend = S.providers.filter((p) => p.id !== "google" && !(kanal(p.id) && kanal(p.id).status === "ok"));
     const st = S.status;
-    const running = st?.job && !["done", "error", "idle"].includes(st.job.phase);
+    const laeuft = st?.job && !["done", "error", "idle"].includes(st.job.phase);
     return `
       <section>
-        <div class="dash-head">
-          <div><h1>${esc(c.company)}</h1><p class="lede" style="margin-top:6px">Was als Nächstes rausgeht.</p></div>
-          <button type="button" class="btn" id="btn-post-now">Jetzt posten</button>
+        <div class="dash-kopf">
+          <div><h1>So sehen deine nächsten Tage aus</h1><p class="lede" style="margin-top:8px">${esc(c.company)}</p></div>
+          <button type="button" class="btn" id="btn-jetzt-posten">Jetzt posten</button>
         </div>
         ${S.notice ? noticeHtml() : ""}
-        ${!c.emailVerified ? `<div class="notice" role="status"><strong>Bitte bestätige deine E-Mail-Adresse.</strong> Wir haben einen Link an ${esc(c.email)} geschickt. Erst danach werden Beiträge veröffentlicht${st?.posts?.some((p) => !p.imageUrl) ? " und die restlichen Bilder erstellt" : ""}.<span><button type="button" class="link" id="resend-verify">Bestätigungsmail erneut senden</button></span></div>` : ""}
-        ${missing.length ? `<div class="notice" role="status">${esc(missing.map((p) => p.name).join(" und "))} ${missing.length > 1 ? "sind" : "ist"} noch nicht verbunden - Beiträge können dort erst dann veröffentlicht werden.<span><button type="button" class="link" data-go="settings" data-settings-target="verbinden">Jetzt verbinden</button></span></div>` : ""}
+        ${!c.emailVerified && !c.authProvider ? `<div class="notice" role="status"><strong>Bitte bestätige deine E-Mail-Adresse.</strong> Wir haben einen Link an ${esc(c.email)} geschickt. Erst danach wird veröffentlicht${st?.posts?.some((p) => !p.imageUrl) ? " und die restlichen Bilder werden erstellt" : ""}.<span><button type="button" class="link" id="verify-neu">Bestätigungsmail erneut senden</button></span></div>` : ""}
+        ${fehlend.map((p) => `<div class="notice" role="status">${esc(p.name)} ist noch nicht verbunden - dort kann noch nichts veröffentlicht werden.<span><a class="btn secondary sm" href="${esc(MOUNT)}/connect/${esc(p.id)}?return=start" style="justify-self:start">${esc(p.name)} verbinden</a></span></div>`).join("")}
         ${c.customerPaused ? `<div class="notice bad">Deine Veröffentlichung ist pausiert.<span><button type="button" class="link" data-pause="0">Fortsetzen</button></span></div>` : ""}
-        ${running ? `<p class="progress-line">${st.job.kind === "backfill" ? "Bilder werden erstellt" : "Beiträge werden erstellt"}${st.job.total ? ` - ${st.job.done} von ${st.job.total}` : ""} …</p>` : ""}
-        <div class="section" id="approvals-section">${approvalsHtml()}</div>
-        <div class="section">
-          <div class="section-head"><h2>Die nächsten sieben Tage</h2><span class="small muted">Reihenfolge per ↑↓ oder Ziehen</span></div>
-          ${weekHtml({ dashboard: true })}
+        ${laeuft ? `<p class="lauf-zeile">${st.job.kind === "backfill" || st.job.kind === "recolor" ? "Bilder werden erstellt" : "Beiträge werden erstellt"}${st.job.total ? ` - ${st.job.done} von ${st.job.total}` : ""} …</p>` : ""}
+        <div class="abschnitt" id="freigaben-abschnitt">${freigabenHtml()}</div>
+        <div class="abschnitt">
+          <div class="abschnitt-kopf"><h2>Geplant</h2><span class="small muted">Reihenfolge per ↑↓ oder Ziehen</span></div>
+          ${wocheHtml({ dashboard: true })}
         </div>
       </section>`;
   }
-  function approvalsHtml() {
-    const list = S.approvals || [];
-    if (!list.length) return "";
-    return `<div class="section-head"><h2>Wartet auf deine Freigabe</h2><span class="small muted">${list.length}</span></div>
-      <div class="day-posts">${list.map((a) => {
-        const meta = CHANNEL[a.channel] || CHANNEL.ig_feed;
+  function freigabenHtml() {
+    const liste = S.approvals || [];
+    if (!liste.length) return "";
+    return `<div class="abschnitt-kopf"><h2>Wartet auf deine Freigabe</h2><span class="small muted">${liste.length}</span></div>
+      <div class="tag-posts">${liste.map((a) => {
+        const meta = KANAL[a.channel] || KANAL.ig_feed;
         return `<article class="post" data-approval="${esc(a.id)}">
-          <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(fmtWhen(a.createdAt))}</time></div>
+          <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(zeitpunkt(a.createdAt))}</time></div>
           <div class="media ${meta.format}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" loading="lazy">` : `<div class="skeleton">Kein Bild</div>`}</div>
           <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}</div>
-          <div class="post-actions"><button type="button" class="btn sm" data-approve="${esc(a.id)}">Freigeben</button><button type="button" class="link" data-reject="${esc(a.id)}">Ablehnen</button></div>
+          <div class="post-actions"><button type="button" class="btn sm" data-freigeben="${esc(a.id)}">Freigeben</button><button type="button" class="link" data-ablehnen="${esc(a.id)}">Ablehnen</button></div>
         </article>`;
       }).join("")}</div>`;
   }
 
-  function settingsHtml() {
+  function einstellungenHtml() {
     const c = S.customer;
-    const list = S.providers.filter((p) => p.id !== "google" || p.available);
+    const liste = S.providers.filter((p) => p.id !== "google" || p.available);
     return `
       <section>
         <h1>Einstellungen</h1>
-        <p class="lede">Dein Plan, deine Kanäle, dein Verlauf. Alles andere bleibt im klassischen Panel.</p>
+        <p class="lede">Dein Plan, deine Kanäle, dein Verlauf. Alles Weitere bleibt im klassischen Panel.</p>
         ${S.notice ? noticeHtml() : ""}
-        ${planRowsHtml()}
-        <div class="row" id="row-adjust"><span class="row-k">Ausrichtung ändern</span><div class="row-v"><span class="muted">In eigenen Worten sagen, was anders sein soll - wir schreiben die offenen Beiträge neu.</span></div><button type="button" class="row-edit" data-go="adjust" aria-label="Ausrichtung ändern">${PENCIL}</button></div>
-        <div class="section" id="verbinden"><div class="section-head"><h2>Kanäle</h2></div><div class="connect-list">${list.map((p) => connectCardHtml(p, false)).join("")}</div></div>
-        <div class="section"><div class="section-head"><h2>Veröffentlicht</h2></div>${S.history === null ? `<p class="empty">Wird geladen …</p>` : historyHtml()}</div>
-        <div class="section">
-          <div class="section-head"><h2>Konto</h2></div>
+        ${planZeilenHtml()}
+        <div class="zeile" id="zeile-anders"><span class="zeile-k">Ausrichtung ändern</span><div class="zeile-v"><span class="muted">In eigenen Worten sagen, was anders sein soll - wir schreiben die offenen Beiträge neu.</span></div><button type="button" class="stift" data-go="anders" aria-label="Ausrichtung ändern">${STIFT}</button></div>
+        <div class="abschnitt" id="verbinden"><div class="abschnitt-kopf"><h2>Kanäle</h2></div><div class="connect-liste">${liste.map((p) => verbindenKarteHtml(p, false)).join("")}</div></div>
+        <div class="abschnitt"><div class="abschnitt-kopf"><h2>Veröffentlicht</h2></div>${S.verlauf === null ? `<p class="leer">Wird geladen …</p>` : verlaufHtml()}</div>
+        <div class="abschnitt">
+          <div class="abschnitt-kopf"><h2>Konto</h2></div>
           <div class="plan">
-            <div class="row"><span class="row-k">E-Mail</span><div class="row-v">${esc(c.email)}${c.emailVerified ? ` <span class="small" style="color:var(--go)">bestätigt</span>` : ` <span class="small" style="color:var(--stop)">noch nicht bestätigt</span> <button type="button" class="link" id="resend-verify">erneut senden</button>`}</div></div>
-            <div class="row"><span class="row-k">Veröffentlichung</span><div class="row-v">${c.customerPaused ? "Pausiert" : "Aktiv"}</div><button type="button" class="btn secondary sm" data-pause="${c.customerPaused ? 0 : 1}" style="align-self:center">${c.customerPaused ? "Fortsetzen" : "Pausieren"}</button></div>
-            <div class="row"><span class="row-k">Mehr</span><div class="row-v"><a href="${esc(MOUNT)}/?classic=1">Klassisches Panel öffnen</a><br><span class="small muted">Wochentagsplanung, Farbthemen, Formate, Analytics, Kommentare - alles bleibt dort erreichbar.</span></div></div>
-            <div class="row"><span class="row-k">Abmelden</span><div class="row-v"><button type="button" class="link" id="logout">Auf diesem Gerät abmelden</button></div></div>
+            <div class="zeile"><span class="zeile-k">Anmeldung</span><div class="zeile-v">${c.authProvider ? `über ${esc(c.authProvider.charAt(0).toUpperCase() + c.authProvider.slice(1))}` : "über E-Mail"}<br><span class="muted">${esc(c.email)}</span>${c.authProvider || c.emailVerified ? ` <span class="small" style="color:var(--gut)">bestätigt</span>` : ` <span class="small" style="color:var(--schlecht)">noch nicht bestätigt</span> <button type="button" class="link" id="verify-neu">erneut senden</button>`}</div></div>
+            <div class="zeile"><span class="zeile-k">Veröffentlichung</span><div class="zeile-v">${c.customerPaused ? "Pausiert" : "Aktiv"}</div><button type="button" class="btn secondary sm" data-pause="${c.customerPaused ? 0 : 1}" style="align-self:center">${c.customerPaused ? "Fortsetzen" : "Pausieren"}</button></div>
+            <div class="zeile"><span class="zeile-k">Mehr</span><div class="zeile-v"><a href="${esc(MOUNT)}/?classic=1">Klassisches Panel öffnen</a><br><span class="small muted">Wochentagsplanung, Farbthemen, Formate, Analytics, Kommentare - alles bleibt dort erreichbar.</span></div></div>
+            <div class="zeile"><span class="zeile-k">Abmelden</span><div class="zeile-v"><button type="button" class="link" id="abmelden">Auf diesem Gerät abmelden</button></div></div>
           </div>
         </div>
       </section>`;
   }
-  function historyHtml() {
-    const list = S.history || [];
-    if (!list.length) return `<p class="empty">Noch nichts veröffentlicht. Sobald der erste Beitrag draußen ist, steht er hier.</p>`;
-    return `<ul class="history">${list.slice(0, 20).map((p) => `<li>${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" loading="lazy">` : `<span class="thumb"></span>`}<span><strong style="font-weight:500">${esc(p.headline || "(ohne Titel)")}</strong><br><span class="small muted">${esc(CHANNEL[p.channel]?.label || p.provider || "")} · ${esc(fmtWhen(p.postedAt))}</span></span></li>`).join("")}</ul>`;
+  function verlaufHtml() {
+    const liste = S.verlauf || [];
+    if (!liste.length) return `<p class="leer">Noch nichts veröffentlicht. Sobald der erste Beitrag draußen ist, steht er hier.</p>`;
+    return `<ul class="verlauf">${liste.slice(0, 20).map((p) => `<li>${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" loading="lazy">` : `<span class="thumb"></span>`}<span><strong style="font-weight:500">${esc(p.headline || "(ohne Titel)")}</strong><br><span class="small muted">${esc(KANAL[p.channel]?.label || p.provider || "")} · ${esc(zeitpunkt(p.postedAt))}</span></span></li>`).join("")}</ul>`;
   }
-  function errorHtml() {
-    return `<section class="center"><h1>Das hat nicht geklappt</h1><p class="lede" style="margin:12px auto 0">${esc(S.errorText || "Bitte versuche es noch einmal.")}</p><div class="actions"><button type="button" class="btn" data-go="${S.customer ? "working" : "website"}" data-retry>Noch einmal versuchen</button></div></section>`;
+  function fehlerHtml() {
+    return `<section class="mitte"><h1>Das hat nicht geklappt</h1><p class="lede" style="margin:14px auto 0">${esc(S.fehlerText || "Bitte versuche es noch einmal.")}</p><div class="actions"><button type="button" class="btn" data-go="${S.customer ? "website" : "konto"}">Noch einmal versuchen</button></div></section>`;
   }
 
-  /* ================= Turnstile (nur mit Site-Key, also in Produktion) ================= */
+  /* ================= Turnstile ================= */
   function renderTurnstile() {
     const slot = $("#turnstile-slot");
     if (!slot || !S.turnstileSiteKey) return;
-    const mount = () => {
+    const einbauen = () => {
       if (!window.turnstile || !slot.isConnected) return;
       slot.innerHTML = "";
       S.turnstileToken = "";
       S.turnstileWidget = window.turnstile.render(slot, {
-        sitekey: S.turnstileSiteKey, appearance: "interaction-only", theme: "light",
-        callback: (token) => { S.turnstileToken = token; },
+        sitekey: S.turnstileSiteKey, appearance: "interaction-only", theme: "dark",
+        callback: (t) => { S.turnstileToken = t; },
         "expired-callback": () => { S.turnstileToken = ""; },
         "error-callback": () => { S.turnstileToken = ""; },
       });
     };
-    if (window.turnstile) { mount(); return; }
+    if (window.turnstile) { einbauen(); return; }
     if (!$("#turnstile-script")) {
       const s = document.createElement("script");
       s.id = "turnstile-script";
       s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       s.async = true;
-      s.onload = mount;
+      s.onload = einbauen;
       document.head.appendChild(s);
     }
   }
   const turnstileToken = () => { try { return S.turnstileToken || (S.turnstileWidget != null && window.turnstile ? window.turnstile.getResponse(S.turnstileWidget) : "") || ""; } catch { return S.turnstileToken || ""; } };
-  /** Die unsichtbare Pruefung braucht nach dem Rendern einen Moment - wer schneller tippt als
-   *  Cloudflare prueft, soll nicht an einem leeren Token scheitern: bis zu 8 s warten. */
-  async function waitForTurnstile() {
-    if (!S.turnstileSiteKey) return "";
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline) {
+  async function aufTurnstileWarten() {
+    if (!S.turnstileSiteKey || (S.customer && S.customer.authProvider)) return "";
+    const frist = Date.now() + 8000;
+    while (Date.now() < frist) {
       const t = turnstileToken();
       if (t) return t;
       await new Promise((r) => setTimeout(r, 200));
@@ -565,383 +675,463 @@
     return "";
   }
 
-  /* ================= Fortschritt / Polling ================= */
-  async function refreshStatus() {
+  /* ================= Fortschritt ================= */
+  async function statusHolen() {
     try {
-      const data = await api("GET", "/api/start/status");
-      S.status = data;
-      applyState(data);
-      return data;
+      const daten = await api("GET", "/api/start/status");
+      S.status = daten;
+      uebernehmen(daten);
+      return daten;
     } catch (err) {
-      if (err.status === 401) { S.customer = null; go("start"); }
+      if (err.status === 401) { S.customer = null; go("konto"); }
       return null;
     }
   }
-  function ensurePolling() {
+  function pollStarten() {
     if (S.poll) return;
-    S.poll = -1; // "wird gleich gesetzt" - verhindert doppelte Schleifen beim ersten Aufruf
+    S.poll = -1;
     const tick = async () => {
-      const data = await refreshStatus();
-      if (!data) { stopPolling(); return; }
-      const job = data.job || {};
-      const running = !["done", "error", "idle"].includes(job.phase);
-      if (S.screen === "working") {
-        if (job.phase === "error" && !data.posts.length) { S.errorText = job.message || "Die Beiträge konnten nicht erstellt werden."; S.poll = null; go("error"); return; }
-        // go() ruft render() und damit ensurePolling() auf - waehrend dieses Ticks ist S.poll aber
-        // noch der alte Timer, also erst zuruecksetzen, sonst endet das Polling hier stumm.
-        if (data.posts.length && (job.done >= 1 || !running)) { S.poll = null; go("result"); return; }
-        if (!running && !data.posts.length && job.phase === "idle") { S.errorText = "Die Vorbereitung wurde unterbrochen."; S.poll = null; go("error"); return; }
+      const daten = await statusHolen();
+      if (!daten) { pollStoppen(); return; }
+      const job = daten.job || {};
+      const laeuft = !["done", "error", "idle"].includes(job.phase);
+      if (S.screen === "arbeitet") {
+        if (job.phase === "error" && !daten.posts.length) { S.fehlerText = job.message || "Die Beiträge konnten nicht erstellt werden."; S.poll = null; go("fehler"); return; }
+        if (daten.posts.length && (job.done >= 1 || !laeuft)) { S.poll = null; go("ergebnis"); return; }
+        if (!laeuft && !daten.posts.length && job.phase === "idle") { S.fehlerText = "Die Vorbereitung wurde unterbrochen."; S.poll = null; go("fehler"); return; }
         render();
-      } else if (S.screen === "result" || S.screen === "dashboard") {
-        patchWeek();
-        // Ohne laufenden Job nur noch kurz nachsehen (fehlende Bilder eines bestaetigten Kunden
-        // traegt der Nachtlauf nach) - nicht endlos alle vier Sekunden.
-        S.idlePolls = running ? 0 : (S.idlePolls || 0) + 1;
-        const wartetAufBilder = data.posts.some((p) => !p.imageUrl) && S.customer?.emailVerified;
-        if (!running && (!wartetAufBilder || S.idlePolls > 15)) { stopPolling(); return; }
+      } else if (S.screen === "ergebnis" || S.screen === "dashboard") {
+        wocheAktualisieren();
+        S.leerlauf = laeuft ? 0 : S.leerlauf + 1;
+        const wartetAufBilder = daten.posts.some((p) => !p.imageUrl) && S.customer?.emailVerified;
+        if (!laeuft && (!wartetAufBilder || S.leerlauf > 15)) { pollStoppen(); return; }
       }
-      if (S.poll) S.poll = setTimeout(tick, running ? 1500 : 4000);
+      if (S.poll) S.poll = setTimeout(tick, laeuft ? 1500 : 4000);
     };
     S.poll = setTimeout(tick, 400);
   }
-  function stopPolling() { if (S.poll) { if (S.poll !== -1) clearTimeout(S.poll); S.poll = null; } }
-  /** Nur die Woche neu zeichnen (nicht die ganze Seite), damit ein offenes Inline-Feld oder ein
-   *  aufgeklappter Text nicht verschwindet, wenn im Hintergrund ein Beitrag fertig wird. */
-  function patchWeek() {
-    const week = $("#week");
-    if (!week) { render(); return; }
-    const open = new Set($$(".post.is-open", week).map((el) => el.dataset.id));
+  function pollStoppen() { if (S.poll) { if (S.poll !== -1) clearTimeout(S.poll); S.poll = null; } }
+  /** Nur die Woche neu zeichnen, damit ein offenes Inline-Feld oder ein aufgeklappter Text nicht
+   *  verschwindet, wenn im Hintergrund ein Beitrag fertig wird. */
+  function wocheAktualisieren() {
+    const woche = $("#woche");
+    if (!woche) { render(); return; }
+    const offen = new Set($$(".post.is-open", woche).map((el) => el.dataset.id));
     const tmp = document.createElement("div");
-    tmp.innerHTML = weekHtml({ dashboard: S.screen === "dashboard" });
-    week.replaceWith(tmp.firstElementChild);
-    open.forEach((id) => $(`.post[data-id="${CSS.escape(id)}"]`)?.classList.add("is-open"));
-    const line = $(".progress-line");
+    tmp.innerHTML = wocheHtml({ dashboard: S.screen === "dashboard" });
+    woche.replaceWith(tmp.firstElementChild);
+    offen.forEach((id) => $(`.post[data-id="${CSS.escape(id)}"]`)?.classList.add("is-open"));
+    const zeile = $(".lauf-zeile");
     const job = S.status?.job;
-    const running = job && !["done", "error", "idle"].includes(job.phase);
-    if (line && !running) line.remove();
-    if (line && running && job.total) line.textContent = S.screen === "dashboard" ? `${job.kind === "backfill" ? "Bilder werden erstellt" : "Beiträge werden erstellt"} - ${job.done} von ${job.total} …` : `Noch ${Math.max(0, job.total - job.done)} ${job.total - job.done === 1 ? "Beitrag" : "Beiträge"} in Arbeit - sie erscheinen gleich hier.`;
+    const laeuft = job && !["done", "error", "idle"].includes(job.phase);
+    if (zeile && !laeuft) zeile.remove();
+    else if (zeile && job.total) zeile.textContent = S.screen === "dashboard" ? `${job.kind === "backfill" || job.kind === "recolor" ? "Bilder werden erstellt" : "Beiträge werden erstellt"} - ${job.done} von ${job.total} …` : `Noch ${Math.max(0, job.total - job.done)} ${job.total - job.done === 1 ? "Beitrag" : "Beiträge"} in Arbeit - sie erscheinen gleich hier.`;
   }
 
-  async function loadDashboardExtras() {
+  async function dashboardNachladen() {
     if (!S.customer?.approvalMode) { S.approvals = []; return; }
     try {
       const { approvals } = await api("GET", "/api/approvals");
       S.approvals = approvals || [];
-      const sec = $("#approvals-section");
-      if (sec) sec.innerHTML = approvalsHtml();
+      const sec = $("#freigaben-abschnitt");
+      if (sec) sec.innerHTML = freigabenHtml();
     } catch { /* Abschnitt bleibt leer */ }
   }
-  async function loadHistory() {
-    try { const { posts } = await api("GET", "/api/posts"); S.history = posts || []; } catch { S.history = []; }
-    if (S.screen === "settings") render();
+  async function verlaufLaden() {
+    try { const { posts } = await api("GET", "/api/posts"); S.verlauf = posts || []; } catch { S.verlauf = []; }
+    if (S.screen === "einstellungen") render();
   }
 
   /* ================= Aktionen ================= */
-  function setFieldError(id, text) {
+  function feldFehler(id, text) {
     const el = $(`#err-${id}`);
-    const input = $(`#${id}`);
+    const feld = $(`#${id}`);
     if (el) el.textContent = text || "";
-    if (input) input.setAttribute("aria-invalid", text ? "true" : "false");
+    if (feld) feld.setAttribute("aria-invalid", text ? "true" : "false");
   }
-  function busy(btn, on, label) {
+  function beschaeftigt(btn, an, label) {
     if (!btn) return;
-    if (on) { btn.dataset.label = btn.textContent; btn.textContent = label || "Einen Moment …"; btn.classList.add("is-busy"); }
+    if (an) { btn.dataset.label = btn.textContent; btn.textContent = label || "Einen Moment …"; btn.classList.add("is-busy"); }
     else { btn.textContent = btn.dataset.label || btn.textContent; btn.classList.remove("is-busy"); }
   }
 
-  async function submitStart(form) {
+  async function emailAbsenden(form) {
     const email = form.email.value.trim();
-    setFieldError("email", "");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { setFieldError("email", "Das sieht nicht nach einer E-Mail-Adresse aus. Bitte prüfe die Eingabe."); return; }
+    feldFehler("email", "");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { feldFehler("email", "Das sieht nicht nach einer E-Mail-Adresse aus. Bitte prüfe die Eingabe."); return; }
     S.email = email;
     const btn = $("button[type=submit]", form);
-    busy(btn, true, "Wird geprüft …");
+    beschaeftigt(btn, true, "Wird geprüft …");
     try {
-      const r = await api("POST", "/api/start/begin", { email });
-      if (r.status === "known") { S.knownMailed = r.mailed; go("known"); } else go("website");
+      const r = await api("POST", "/api/start/email", { email });
+      if (r.status === "known") { S.mailGeschickt = r.mailed; go("gesendet"); return; }
+      uebernehmen(r);
+      go("website");
     } catch (err) {
-      busy(btn, false);
-      setFieldError("email", err.message);
+      beschaeftigt(btn, false);
+      feldFehler("email", err.message);
     }
   }
 
-  async function submitPreview(form, kind) {
-    const btn = $("#btn-preview", form);
-    const body = { email: S.email };
-    if (kind === "website") {
+  async function vorschauAbsenden(form, art) {
+    const btn = $("#btn-vorschau", form);
+    const body = {};
+    if (art === "website") {
       const website = form.website.value.trim();
-      setFieldError("website", "");
-      if (!website || !/[a-z0-9-]+\.[a-z]{2,}/i.test(website)) { setFieldError("website", "Bitte gib eine Adresse wie deine-firma.at ein."); return; }
-      S.website = website; S.noSite = false; body.website = website;
+      feldFehler("website", "");
+      if (!website || !/[a-z0-9-]+\.[a-z]{2,}/i.test(website)) { feldFehler("website", "Bitte gib eine Adresse wie deine-firma.at ein."); return; }
+      S.website = website; body.website = website;
     } else {
-      const description = form.description.value.trim();
-      setFieldError("description", "");
-      if (description.length < 12) { setFieldError("description", "Ein, zwei Sätze reichen - aber ein bisschen mehr als das brauchen wir."); return; }
-      S.description = description; S.noSite = true; body.description = description;
+      const beschreibung = form.description.value.trim();
+      feldFehler("description", "");
+      if (beschreibung.length < 12) { feldFehler("description", "Ein, zwei Sätze reichen - aber ein bisschen mehr als das brauchen wir."); return; }
+      S.beschreibung = beschreibung; S.website = ""; body.description = beschreibung;
     }
-    busy(btn, true, kind === "website" ? "Website wird gelesen …" : "Wird gelesen …");
-    const token = await waitForTurnstile();
+    beschaeftigt(btn, true, art === "website" ? "Website wird gelesen …" : "Wird gelesen …");
+    const token = await aufTurnstileWarten();
     if (token) body["cf-turnstile-response"] = token;
-    else if (S.turnstileSiteKey) {
-      busy(btn, false);
-      setFieldError(kind === "website" ? "website" : "description", "Die Sicherheitsprüfung ist noch nicht durch. Bitte einen Moment warten und noch einmal auf „Vorschau erstellen“ tippen.");
+    else if (S.turnstileSiteKey && S.customer && !S.customer.authProvider) {
+      beschaeftigt(btn, false);
+      feldFehler(art === "website" ? "website" : "description", "Die Sicherheitsprüfung ist noch nicht durch. Bitte kurz warten und noch einmal tippen.");
       return;
     }
-    S.workingSince = Date.now();
+    S.arbeitSeit = Date.now();
     try {
       const r = await api("POST", "/api/start/preview", body);
-      applyState(r);
-      S.status = { job: { phase: "writing", done: 0, total: 0 }, posts: [], summary: r.summary, imagesDone: 0, window: { from: todayStr() } };
-      go("working");
+      uebernehmen(r);
+      S.status = { job: { phase: "reading", done: 0, total: 0 }, posts: [], summary: S.status?.summary, imagesDone: 0, window: {} };
+      go("arbeitet");
     } catch (err) {
-      busy(btn, false);
-      if (err.data?.known) { S.knownMailed = false; go("known"); try { const r = await api("POST", "/api/start/begin", { email: S.email }); S.knownMailed = r.mailed; render(); } catch { /* egal */ } return; }
-      if (err.data?.fallback === "description" && kind === "website") { setFieldError("website", err.message); return; }
-      setFieldError(kind === "website" ? "website" : "description", err.message);
+      beschaeftigt(btn, false);
+      if (err.data?.ready) { go("ergebnis"); return; }
+      feldFehler(art === "website" ? "website" : "description", err.message);
       if (window.turnstile && S.turnstileWidget != null) { try { window.turnstile.reset(S.turnstileWidget); } catch { /* egal */ } }
     }
   }
 
-  async function submitAdjust(form) {
+  async function kiVerbessern() {
+    const btn = $("#ki-verbessern");
+    const feld = $("#description");
+    const text = feld.value.trim();
+    feldFehler("description", "");
+    if (text.length < 8) { feldFehler("description", "Schreib zuerst ein paar Stichworte, dann macht die KI einen Absatz daraus."); return; }
+    beschaeftigt(btn, true, "Wird verbessert …");
+    try {
+      const { suggestion } = await api("POST", "/api/improve-briefing", { company: S.customer?.company || "", industry: "", about: text });
+      feld.value = suggestion;
+      S.beschreibung = suggestion;
+      feld.focus();
+      toast("Vorschlag übernommen - du kannst ihn weiter bearbeiten.");
+    } catch (err) {
+      feldFehler("description", err.message);
+    } finally {
+      beschaeftigt(btn, false);
+    }
+  }
+
+  async function andersAbsenden(form) {
     const wish = form.wish.value.trim();
-    setFieldError("wish", "");
-    if (!wish) { setFieldError("wish", "Sag uns in ein paar Worten, was anders sein soll."); return; }
+    feldFehler("wish", "");
+    if (!wish) { feldFehler("wish", "Sag uns in ein paar Worten, was anders sein soll."); return; }
     const btn = $("button[type=submit]", form);
-    busy(btn, true, "Wird übersetzt …");
+    beschaeftigt(btn, true, "Wird übersetzt …");
     try {
       await api("POST", "/api/start/adjust", { wish });
-      S.workingSince = Date.now();
+      S.arbeitSeit = Date.now();
       S.status = { ...(S.status || {}), job: { phase: "writing", done: 0, total: 0, kind: "adjust" } };
       toast("Verstanden - die Woche wird neu geschrieben.");
-      go(onboardingDone() ? "dashboard" : "working");
+      go(eingerichtet() ? "dashboard" : "arbeitet");
     } catch (err) {
-      busy(btn, false);
-      setFieldError("wish", err.message);
+      beschaeftigt(btn, false);
+      feldFehler("wish", err.message);
     }
   }
 
-  async function saveRow(form) {
-    const id = form.dataset.rowForm;
-    const errEl = $("[data-row-error]", form);
+  async function zeileSpeichern(form) {
+    const id = form.dataset.zeileForm;
+    const fehlerEl = $("[data-zeile-fehler]", form);
     const patch = {};
-    if (id === "company") { patch.company = form.company.value.trim(); patch.industry = form.industry.value.trim(); if (!patch.company) { errEl.textContent = "Der Firmenname darf nicht leer sein."; return; } }
-    if (id === "pillars") { const titles = JSON.parse(form.pillars.value || "[]"); const existing = S.customer.contentPillars || []; patch.contentPillars = titles.map((t) => ({ title: t, description: existing.find((p) => p.title === t)?.description || "", weight: 1 })); }
-    if (id === "channels") { const on = $$("input[name=ch]:checked", form).map((i) => i.value); if (!on.length) { errEl.textContent = "Bitte mindestens einen Kanal auswählen."; return; } patch.igFeedEnabled = on.includes("ig_feed"); patch.igStoryEnabled = on.includes("ig_story"); patch.linkedinEnabled = on.includes("linkedin"); }
-    if (id === "rhythm") { const f = $("input[name=frequency]:checked", form)?.value; if (!f) { errEl.textContent = "Bitte einen Rhythmus wählen."; return; } patch.frequency = f; patch.activeWeekdays = ""; patch.instagramWeekdays = ""; patch.linkedinWeekdays = ""; patch.postTime = form.postTime.value || "15:00"; }
-    if (id === "color") { patch.accentColor = form.accentColor.value; }
-    if (id === "approval") { patch.approvalMode = form.approvalMode.checked; }
+    if (id === "firma") { patch.company = form.company.value.trim(); patch.industry = form.industry.value.trim(); if (!patch.company) { fehlerEl.textContent = "Der Firmenname darf nicht leer sein."; return; } }
+    if (id === "themen") { const titel = JSON.parse(form.pillars.value || "[]"); const alt = S.customer.contentPillars || []; patch.contentPillars = titel.map((t) => ({ title: t, description: alt.find((p) => p.title === t)?.description || "", weight: 1 })); }
+    if (id === "kanaele") { const an = $$("input[name=ch]:checked", form).map((i) => i.value); if (!an.length) { fehlerEl.textContent = "Bitte mindestens einen Kanal auswählen."; return; } patch.igFeedEnabled = an.includes("ig_feed"); patch.igStoryEnabled = an.includes("ig_story"); patch.linkedinEnabled = an.includes("linkedin"); }
+    if (id === "rhythmus") { const f = $("input[name=frequency]:checked", form)?.value; if (!f) { fehlerEl.textContent = "Bitte einen Rhythmus wählen."; return; } patch.frequency = f; patch.activeWeekdays = ""; patch.instagramWeekdays = ""; patch.linkedinWeekdays = ""; patch.postTime = form.postTime.value || "15:00"; }
+    if (id === "farbe") {
+      patch.accentColor = form.accentColor.value;
+      patch.gradientEnabled = form.gradientEnabled.checked;
+      patch.gradientColor2 = form.gradientColor2.value;
+      patch.gradientDirection = form.gradientDirection.value;
+      if (patch.gradientEnabled && !patch.gradientColor2) { fehlerEl.textContent = "Bitte eine zweite Farbe wählen oder den Verlauf ausschalten."; return; }
+    }
+    if (id === "freigabe") { patch.approvalMode = form.approvalMode.checked; }
     const btn = $("button[type=submit]", form);
-    busy(btn, true, "Speichern …");
+    beschaeftigt(btn, true, "Speichern …");
     try {
       const r = await api("PATCH", "/api/me", patch);
-      applyState(r);
+      uebernehmen(r);
       S.editing = null;
-      const structural = id === "channels" || id === "rhythm";
+      const strukturell = id === "kanaele" || id === "rhythmus";
       render();
-      if (structural && onboardingDone()) { try { await api("POST", "/api/start/replan"); ensurePolling(); } catch { /* still */ } }
-      toast("Gespeichert.");
+      if (id === "farbe") { try { await api("POST", "/api/start/recolor"); pollStarten(); toast("Farbe gespeichert - die Bilder werden neu gerendert."); } catch { toast("Farbe gespeichert."); } }
+      else toast("Gespeichert.");
+      if (strukturell) { try { await api("POST", "/api/start/replan"); pollStarten(); } catch { /* nichts Neues zu planen */ } }
     } catch (err) {
-      busy(btn, false);
-      errEl.textContent = err.message;
+      beschaeftigt(btn, false);
+      fehlerEl.textContent = err.message;
     }
   }
 
-  async function adoptPlan() {
-    const btn = $("#btn-adopt");
-    busy(btn, true, "Wird übernommen …");
-    try {
-      const r = await api("POST", "/api/tour-done");
-      applyState(r);
-      try { await api("POST", "/api/start/replan"); } catch { /* nichts Neues zu planen */ }
-      go("connect");
-    } catch (err) { busy(btn, false); toast(err.message, "bad"); }
+  /** Live-Vorschau im Plan-Bildschirm: Kacheln oben und die Picker-Vorschau ziehen sofort mit. */
+  function farbVorschauAktualisieren(form) {
+    const q = {
+      accentColor: form.accentColor.value,
+      gradientEnabled: form.gradientEnabled.checked,
+      gradientColor2: form.gradientColor2.value,
+      gradientDirection: form.gradientDirection.value,
+    };
+    const hg = kachelHintergrund(S.customer, q);
+    $$("[data-kachel]").forEach((el) => { el.style.background = hg; });
+    const v = $("#picker-vorschau", form);
+    if (v) v.style.background = hg;
+    const box = $("#partner-vorschlaege", form);
+    if (box) {
+      const aktuell = (form.gradientColor2.value || "").toLowerCase();
+      box.innerHTML = partnerVorschlaege(q.accentColor).map((h) => `<button type="button" class="swatch" data-swatch="gradientColor2" data-hex="${h}" aria-pressed="${aktuell === h.toLowerCase()}" style="background:${h}" aria-label="${h}"></button>`).join("");
+    }
+    const nurVerlauf = $("[data-nur-verlauf]", form);
+    if (nurVerlauf) nurVerlauf.hidden = !q.gradientEnabled;
   }
 
-  function openPostNow() {
+  async function planUebernehmen() {
+    const btn = $("#btn-plan-uebernehmen");
+    beschaeftigt(btn, true, "Wird übernommen …");
+    try {
+      const r = await api("POST", "/api/tour-done");
+      uebernehmen(r);
+      try { await api("POST", "/api/start/replan"); } catch { /* nichts Neues */ }
+      go("verbinden");
+    } catch (err) { beschaeftigt(btn, false); toast(err.message, "bad"); }
+  }
+
+  function jetztPostenOeffnen() {
     const c = S.customer;
-    const chans = enabledChannels(c);
-    const open = new Set((c.postRequests || []).filter((r) => r.status === "pending").map((r) => r.channel));
+    const kanaele = aktiveKanaele(c);
+    const offen = new Set((c.postRequests || []).filter((r) => r.status === "pending").map((r) => r.channel));
     $("#sheet-title").textContent = "Jetzt posten";
     $("#sheet-body").innerHTML = `
       <p class="small muted">Ein zusätzlicher Beitrag, außerhalb des Plans. Er wird in den nächsten Minuten erstellt${c.approvalMode ? " und wartet dann auf deine Freigabe" : " und veröffentlicht"}.</p>
-      <form id="f-postnow">
-        <div class="choice">${chans.map((ch) => `<label><input type="checkbox" name="ch" value="${ch}" ${open.has(ch) ? "disabled" : chans.length === 1 ? "checked" : ""}><span>${esc(CHANNEL[ch].label)}${open.has(ch) ? `<small>schon angefragt</small>` : ""}</span></label>`).join("")}</div>
+      <form id="f-jetzt">
+        <div class="wahl">${kanaele.map((ch) => `<label><input type="checkbox" name="ch" value="${ch}" ${offen.has(ch) ? "disabled" : kanaele.length === 1 ? "checked" : ""}><span>${esc(KANAL[ch].label)}${offen.has(ch) ? `<small>schon angefragt</small>` : ""}</span></label>`).join("")}</div>
         <div class="field" style="margin-top:14px"><label for="topic">Thema <span class="muted">(optional)</span></label><input class="input" id="topic" name="topic" maxlength="300" placeholder="z. B. unser neues Angebot ab Oktober"></div>
         <p class="error" id="err-topic" aria-live="assertive"></p>
         <div class="actions" style="margin-top:16px"><button class="btn lg" type="submit">Jetzt posten</button></div>
       </form>`;
     $("#sheet-overlay").hidden = false;
   }
-  function closeSheet() { $("#sheet-overlay").hidden = true; }
+  function sheetSchliessen() { $("#sheet-overlay").hidden = true; }
 
-  async function submitPostNow(form) {
-    const channels = $$("input[name=ch]:checked", form).map((i) => i.value);
-    setFieldError("topic", "");
-    if (!channels.length) { setFieldError("topic", "Bitte mindestens einen Kanal auswählen."); return; }
+  async function jetztPostenAbsenden(form) {
+    const kanaele = $$("input[name=ch]:checked", form).map((i) => i.value);
+    feldFehler("topic", "");
+    if (!kanaele.length) { feldFehler("topic", "Bitte mindestens einen Kanal auswählen."); return; }
     const btn = $("button[type=submit]", form);
-    busy(btn, true, "Wird angefragt …");
+    beschaeftigt(btn, true, "Wird angefragt …");
     try {
-      const r = await api("POST", "/api/post-now", { channels, topic: form.topic.value.trim(), format: "single" });
-      applyState(r);
-      closeSheet();
-      S.notice = { kind: "ok", text: `Angefragt für ${channels.map((ch) => CHANNEL[ch].label).join(" und ")}. Der Beitrag entsteht in den nächsten Minuten${S.customer.approvalMode ? " und erscheint dann oben zur Freigabe" : ""}.` };
+      const r = await api("POST", "/api/post-now", { channels: kanaele, topic: form.topic.value.trim(), format: "single" });
+      uebernehmen(r);
+      sheetSchliessen();
+      S.notice = { kind: "ok", text: `Angefragt für ${kanaele.map((ch) => KANAL[ch].label).join(" und ")}. Der Beitrag entsteht in den nächsten Minuten${S.customer.approvalMode ? " und erscheint dann oben zur Freigabe" : ""}.` };
       render();
-    } catch (err) { busy(btn, false); setFieldError("topic", err.message); }
+    } catch (err) { beschaeftigt(btn, false); feldFehler("topic", err.message); }
   }
 
-  /* ---- Reihenfolge (Drag-and-drop + Pfeile) ---- */
-  function channelOrder(channel) {
-    return $$(`#week .post[data-channel="${channel}"]`).filter((el) => ["planned", "edited", "approved"].includes(S.status.posts.find((p) => p.id === el.dataset.id)?.status)).map((el) => el.dataset.id);
+  /* ---- Reihenfolge ---- */
+  function kanalReihenfolge(channel) {
+    return $$(`#woche .post[data-channel="${channel}"]`).filter((el) => ["planned", "edited", "approved"].includes(S.status.posts.find((p) => p.id === el.dataset.id)?.status)).map((el) => el.dataset.id);
   }
-  async function reorder(channel, ids) {
+  async function umsortieren(channel, ids) {
     try {
       const { posts } = await api("POST", "/api/planned-posts/reorder", { channel, ids });
       posts.forEach((u) => { const i = S.status.posts.findIndex((p) => p.id === u.id); if (i >= 0) S.status.posts[i] = u; });
-      patchWeek();
+      wocheAktualisieren();
       toast("Reihenfolge gespeichert.");
-    } catch (err) { toast(err.message, "bad"); patchWeek(); }
+    } catch (err) { toast(err.message, "bad"); wocheAktualisieren(); }
   }
-  function move(id, dir) {
-    const el = $(`#week .post[data-id="${CSS.escape(id)}"]`);
+  function verschieben(id, richtung) {
+    const el = $(`#woche .post[data-id="${CSS.escape(id)}"]`);
     if (!el) return;
-    const ids = channelOrder(el.dataset.channel);
+    const ids = kanalReihenfolge(el.dataset.channel);
     const i = ids.indexOf(id);
-    const j = dir === "up" ? i - 1 : i + 1;
+    const j = richtung === "up" ? i - 1 : i + 1;
     if (i < 0 || j < 0 || j >= ids.length) return;
     [ids[i], ids[j]] = [ids[j], ids[i]];
-    reorder(el.dataset.channel, ids);
+    umsortieren(el.dataset.channel, ids);
   }
-  let dragId = null;
+  let zieht = null;
   document.addEventListener("dragstart", (e) => {
-    const grip = e.target.closest?.("[data-drag]");
-    if (!grip) return;
-    dragId = grip.dataset.drag;
-    grip.closest(".post").classList.add("is-dragging");
+    const griff = e.target.closest?.("[data-drag]");
+    if (!griff) return;
+    zieht = griff.dataset.drag;
+    griff.closest(".post").classList.add("is-dragging");
     e.dataTransfer.effectAllowed = "move";
-    try { e.dataTransfer.setData("text/plain", dragId); } catch { /* egal */ }
+    try { e.dataTransfer.setData("text/plain", zieht); } catch { /* egal */ }
   });
   document.addEventListener("dragover", (e) => {
-    if (!dragId) return;
-    const target = e.target.closest?.(".post[data-id]");
-    const source = $(`#week .post[data-id="${CSS.escape(dragId)}"]`);
-    if (!target || !source || target === source || target.dataset.channel !== source.dataset.channel) return;
+    if (!zieht) return;
+    const ziel = e.target.closest?.(".post[data-id]");
+    const quelle = $(`#woche .post[data-id="${CSS.escape(zieht)}"]`);
+    if (!ziel || !quelle || ziel === quelle || ziel.dataset.channel !== quelle.dataset.channel) return;
     e.preventDefault();
-    $$("#week .post.is-over").forEach((el) => el.classList.remove("is-over"));
-    target.classList.add("is-over");
+    $$("#woche .post.is-over").forEach((el) => el.classList.remove("is-over"));
+    ziel.classList.add("is-over");
   });
   document.addEventListener("drop", (e) => {
-    if (!dragId) return;
-    const target = e.target.closest?.(".post[data-id]");
-    const source = $(`#week .post[data-id="${CSS.escape(dragId)}"]`);
-    $$("#week .post.is-over, #week .post.is-dragging").forEach((el) => el.classList.remove("is-over", "is-dragging"));
-    if (!target || !source || target === source || target.dataset.channel !== source.dataset.channel) { dragId = null; return; }
+    if (!zieht) return;
+    const ziel = e.target.closest?.(".post[data-id]");
+    const quelle = $(`#woche .post[data-id="${CSS.escape(zieht)}"]`);
+    $$("#woche .post.is-over, #woche .post.is-dragging").forEach((el) => el.classList.remove("is-over", "is-dragging"));
+    if (!ziel || !quelle || ziel === quelle || ziel.dataset.channel !== quelle.dataset.channel) { zieht = null; return; }
     e.preventDefault();
-    const ids = channelOrder(source.dataset.channel);
-    const from = ids.indexOf(source.dataset.id);
-    const to = ids.indexOf(target.dataset.id);
-    if (from < 0 || to < 0) { dragId = null; return; }
-    ids.splice(from, 1);
-    ids.splice(to, 0, source.dataset.id);
-    dragId = null;
-    reorder(source.dataset.channel, ids);
+    const ids = kanalReihenfolge(quelle.dataset.channel);
+    const von = ids.indexOf(quelle.dataset.id);
+    const nach = ids.indexOf(ziel.dataset.id);
+    if (von < 0 || nach < 0) { zieht = null; return; }
+    ids.splice(von, 1);
+    ids.splice(nach, 0, quelle.dataset.id);
+    zieht = null;
+    umsortieren(quelle.dataset.channel, ids);
   });
-  document.addEventListener("dragend", () => { $$("#week .post.is-over, #week .post.is-dragging").forEach((el) => el.classList.remove("is-over", "is-dragging")); dragId = null; });
+  document.addEventListener("dragend", () => { $$("#woche .post.is-over, #woche .post.is-dragging").forEach((el) => el.classList.remove("is-over", "is-dragging")); zieht = null; });
 
   /* ================= Ereignisse ================= */
   document.addEventListener("submit", (e) => {
     const form = e.target;
     e.preventDefault();
-    if (form.id === "f-start") submitStart(form);
-    else if (form.id === "f-website") submitPreview(form, "website");
-    else if (form.id === "f-describe") submitPreview(form, "describe");
-    else if (form.id === "f-adjust") submitAdjust(form);
-    else if (form.dataset.rowForm) saveRow(form);
-    else if (form.id === "f-postnow") submitPostNow(form);
+    if (form.id === "f-email") emailAbsenden(form);
+    else if (form.id === "f-website") vorschauAbsenden(form, "website");
+    else if (form.id === "f-beschreibung") vorschauAbsenden(form, "beschreibung");
+    else if (form.id === "f-anders") andersAbsenden(form);
+    else if (form.dataset.zeileForm) zeileSpeichern(form);
+    else if (form.id === "f-jetzt") jetztPostenAbsenden(form);
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$("#sheet-overlay").hidden) closeSheet();
-    if (e.key === "Enter" && e.target.id === "chip-input") {
-      e.preventDefault();
-      addChip(e.target);
-    }
+    if (e.key === "Escape" && !$("#sheet-overlay").hidden) sheetSchliessen();
+    if (e.key === "Enter" && e.target.id === "chip-input") { e.preventDefault(); chipHinzu(e.target); }
   });
-  function addChip(input) {
+  function chipHinzu(input) {
     const form = input.closest("form");
-    const list = JSON.parse(form.pillars.value || "[]");
+    const liste = JSON.parse(form.pillars.value || "[]");
     const t = input.value.trim().slice(0, 60);
-    if (!t || list.includes(t) || list.length >= 6) { input.value = ""; return; }
-    list.push(t);
-    form.pillars.value = JSON.stringify(list);
+    if (!t || liste.includes(t) || liste.length >= 6) { input.value = ""; return; }
+    liste.push(t);
+    form.pillars.value = JSON.stringify(liste);
     input.value = "";
-    repaintChips(form);
+    chipsNeu(form);
   }
-  function repaintChips(form) {
-    const list = JSON.parse(form.pillars.value || "[]");
+  function chipsNeu(form) {
+    const liste = JSON.parse(form.pillars.value || "[]");
     const box = $("#chip-edit", form);
-    box.innerHTML = `${list.map((t, i) => `<span class="chip">${esc(t)}<button type="button" data-chip-remove="${i}" aria-label="${esc(t)} entfernen">×</button></span>`).join("")}<span class="chip add"><input id="chip-input" placeholder="Thema hinzufügen, Enter" aria-label="Thema hinzufügen" maxlength="60"></span>`;
+    box.innerHTML = `${liste.map((t, i) => `<span class="chip">${esc(t)}<button type="button" data-chip-remove="${i}" aria-label="${esc(t)} entfernen">×</button></span>`).join("")}<span class="chip add"><input id="chip-input" placeholder="Thema hinzufügen, Enter" aria-label="Thema hinzufügen" maxlength="60"></span>`;
     $("#chip-input", form).focus();
   }
 
   document.addEventListener("input", (e) => {
-    if (e.target.name === "accentColorPick") { const form = e.target.closest("form"); form.accentColor.value = e.target.value; $$(".swatch[data-swatch]", form).forEach((b) => b.setAttribute("aria-pressed", "false")); }
+    const pick = e.target.closest?.("[data-pick]");
+    if (pick) {
+      const form = pick.closest("form");
+      form[pick.dataset.pick].value = pick.value;
+      if (pick.dataset.pick === "gradientColor2") form.gradientEnabled.checked = true;
+      farbVorschauAktualisieren(form);
+    }
+    if (e.target.name === "gradientEnabled") {
+      const form = e.target.closest("form");
+      if (e.target.checked && !form.gradientColor2.value) form.gradientColor2.value = partnerVorschlaege(form.accentColor.value)[0];
+      farbVorschauAktualisieren(form);
+    }
   });
 
   document.addEventListener("click", async (e) => {
     const t = e.target;
-    const goBtn = t.closest("[data-go]");
-    if (goBtn) {
+    const gehe = t.closest("[data-go]");
+    if (gehe) {
       e.preventDefault();
-      const target = goBtn.dataset.go;
-      if (target === "home") { go(established() ? (onboardingDone() ? "dashboard" : "result") : "start"); return; }
-      if (target === "dashboard" && !onboardingDone()) { go("plan"); return; }
-      go(target);
-      if (goBtn.dataset.settingsTarget) setTimeout(() => $(`#${goBtn.dataset.settingsTarget}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      const ziel = gehe.dataset.go;
+      if (ziel === "home") { go(angemeldet() ? (eingerichtet() ? "dashboard" : "ergebnis") : "konto"); return; }
+      if (ziel === "dashboard" && !eingerichtet()) { go("plan"); return; }
+      go(ziel);
       return;
     }
+    const bald = t.closest("[data-auth-pending]");
+    if (bald) {
+      const p = S.authProviders.find((x) => x.id === bald.dataset.authPending);
+      toast(p?.note || "Dieser Anmeldeweg wird gerade eingerichtet. Nimm so lange den E-Mail-Weg.", "bad");
+      return;
+    }
+    if (t.closest("#ki-verbessern")) { kiVerbessern(); return; }
     if (t.closest("[data-more]")) { const post = t.closest(".post"); post.classList.toggle("is-open"); t.closest("[data-more]").textContent = post.classList.contains("is-open") ? "weniger" : "mehr"; return; }
-    const edit = t.closest("[data-edit]");
-    if (edit) { S.editing = edit.dataset.edit; render(); $(`#row-${S.editing} input, #row-${S.editing} textarea`)?.focus(); return; }
+    const stift = t.closest("[data-edit]");
+    if (stift) {
+      S.editing = stift.dataset.edit;
+      render();
+      const form = $(`[data-zeile-form="${S.editing}"]`);
+      if (S.editing === "farbe" && form) farbVorschauAktualisieren(form);
+      $(`#zeile-${S.editing} input, #zeile-${S.editing} textarea`)?.focus();
+      return;
+    }
     if (t.closest("[data-cancel-edit]")) { S.editing = null; render(); return; }
-    const chipRm = t.closest("[data-chip-remove]");
-    if (chipRm) { const form = chipRm.closest("form"); const list = JSON.parse(form.pillars.value || "[]"); list.splice(Number(chipRm.dataset.chipRemove), 1); form.pillars.value = JSON.stringify(list); repaintChips(form); return; }
+    const chipWeg = t.closest("[data-chip-remove]");
+    if (chipWeg) { const form = chipWeg.closest("form"); const liste = JSON.parse(form.pillars.value || "[]"); liste.splice(Number(chipWeg.dataset.chipRemove), 1); form.pillars.value = JSON.stringify(liste); chipsNeu(form); return; }
     const sw = t.closest("[data-swatch]");
-    if (sw) { const form = sw.closest("form"); form.accentColor.value = sw.dataset.swatch; $$(".swatch[data-swatch]", form).forEach((b) => b.setAttribute("aria-pressed", String(b === sw))); return; }
-    if (t.closest("#btn-adopt")) { adoptPlan(); return; }
-    if (t.closest("#btn-to-dashboard")) { go("dashboard"); return; }
-    if (t.closest("#btn-post-now")) { openPostNow(); return; }
-    if (t.closest("#sheet-close") || (t.id === "sheet-overlay")) { closeSheet(); return; }
+    if (sw) {
+      const form = sw.closest("form");
+      form[sw.dataset.swatch].value = sw.dataset.hex;
+      if (sw.dataset.swatch === "gradientColor2") form.gradientEnabled.checked = true;
+      $$(`[data-swatch="${sw.dataset.swatch}"]`, form).forEach((b) => b.setAttribute("aria-pressed", String(b === sw)));
+      farbVorschauAktualisieren(form);
+      return;
+    }
+    const richtung = t.closest("[data-richtung]");
+    if (richtung) {
+      const form = richtung.closest("form");
+      form.gradientDirection.value = richtung.dataset.richtung;
+      $$("[data-richtung]", form).forEach((b) => b.setAttribute("aria-pressed", String(b === richtung)));
+      farbVorschauAktualisieren(form);
+      return;
+    }
+    if (t.closest("#btn-plan-uebernehmen")) { planUebernehmen(); return; }
+    if (t.closest("#btn-zum-dashboard")) { go("dashboard"); return; }
+    if (t.closest("#btn-jetzt-posten")) { jetztPostenOeffnen(); return; }
+    if (t.closest("#sheet-close") || t.id === "sheet-overlay") { sheetSchliessen(); return; }
     const skip = t.closest("[data-skip]");
-    if (skip) { try { applyState(await api("POST", `/api/skip-provider/${skip.dataset.skip}`)); render(); } catch (err) { toast(err.message, "bad"); } return; }
-    const disc = t.closest("[data-disconnect]");
-    if (disc) { if (!confirm(`${prov(disc.dataset.disconnect)?.name || "Kanal"} wirklich trennen? Der Kanal wird im Plan abgeschaltet.`)) return; try { applyState(await api("POST", `/api/disconnect/${disc.dataset.disconnect}`)); render(); toast("Getrennt."); } catch (err) { toast(err.message, "bad"); } return; }
-    const appr = t.closest("[data-approve]");
-    if (appr) { busy(appr, true, "…"); try { await api("POST", `/api/approvals/${appr.dataset.approve}/approve`); toast("Freigegeben - wird in Kürze veröffentlicht."); await loadDashboardExtras(); } catch (err) { busy(appr, false); toast(err.message, "bad"); } return; }
-    const rej = t.closest("[data-reject]");
-    if (rej) { try { await api("POST", `/api/approvals/${rej.dataset.reject}/reject`); toast("Abgelehnt."); await loadDashboardExtras(); } catch (err) { toast(err.message, "bad"); } return; }
-    const apPlan = t.closest("[data-approve-plan]");
-    if (apPlan) { busy(apPlan, true, "…"); try { const { post } = await api("POST", `/api/planned-posts/${apPlan.dataset.approvePlan}/approve`); const i = S.status.posts.findIndex((p) => p.id === post.id); if (i >= 0) S.status.posts[i] = post; patchWeek(); toast("Freigegeben."); } catch (err) { busy(apPlan, false); toast(err.message, "bad"); } return; }
-    const skPlan = t.closest("[data-skip-plan]");
-    if (skPlan) { try { const { post } = await api("POST", `/api/planned-posts/${skPlan.dataset.skipPlan}/skip`); const i = S.status.posts.findIndex((p) => p.id === post.id); if (i >= 0) S.status.posts[i] = post; patchWeek(); toast("Übersprungen - an dem Tag geht nichts raus."); } catch (err) { toast(err.message, "bad"); } return; }
+    if (skip) { try { uebernehmen(await api("POST", `/api/skip-provider/${skip.dataset.skip}`)); render(); } catch (err) { toast(err.message, "bad"); } return; }
+    const trennen = t.closest("[data-disconnect]");
+    if (trennen) { if (!confirm(`${anbieter(trennen.dataset.disconnect)?.name || "Kanal"} wirklich trennen? Der Kanal wird im Plan abgeschaltet.`)) return; try { uebernehmen(await api("POST", `/api/disconnect/${trennen.dataset.disconnect}`)); render(); toast("Getrennt."); } catch (err) { toast(err.message, "bad"); } return; }
+    const frei = t.closest("[data-freigeben]");
+    if (frei) { beschaeftigt(frei, true, "…"); try { await api("POST", `/api/approvals/${frei.dataset.freigeben}/approve`); toast("Freigegeben - wird in Kürze veröffentlicht."); await dashboardNachladen(); } catch (err) { beschaeftigt(frei, false); toast(err.message, "bad"); } return; }
+    const ab = t.closest("[data-ablehnen]");
+    if (ab) { try { await api("POST", `/api/approvals/${ab.dataset.ablehnen}/reject`); toast("Abgelehnt."); await dashboardNachladen(); } catch (err) { toast(err.message, "bad"); } return; }
+    const freiPlan = t.closest("[data-freigeben-plan]");
+    if (freiPlan) { beschaeftigt(freiPlan, true, "…"); try { const { post } = await api("POST", `/api/planned-posts/${freiPlan.dataset.freigebenPlan}/approve`); const i = S.status.posts.findIndex((p) => p.id === post.id); if (i >= 0) S.status.posts[i] = post; wocheAktualisieren(); toast("Freigegeben."); } catch (err) { beschaeftigt(freiPlan, false); toast(err.message, "bad"); } return; }
+    const skipPlan = t.closest("[data-skip-plan]");
+    if (skipPlan) { try { const { post } = await api("POST", `/api/planned-posts/${skipPlan.dataset.skipPlan}/skip`); const i = S.status.posts.findIndex((p) => p.id === post.id); if (i >= 0) S.status.posts[i] = post; wocheAktualisieren(); toast("Übersprungen - an dem Tag geht nichts raus."); } catch (err) { toast(err.message, "bad"); } return; }
     const mv = t.closest("[data-move]");
-    if (mv) { move(mv.dataset.id, mv.dataset.move); return; }
-    if (t.closest("[data-replan]")) { try { await api("POST", "/api/start/replan"); ensurePolling(); toast("Wird geplant …"); } catch (err) { toast(err.message, "bad"); } return; }
+    if (mv) { verschieben(mv.dataset.id, mv.dataset.move); return; }
+    if (t.closest("[data-replan]")) { try { await api("POST", "/api/start/replan"); pollStarten(); toast("Wird geplant …"); } catch (err) { toast(err.message, "bad"); } return; }
     const pause = t.closest("[data-pause]");
-    if (pause) { try { applyState(await api("POST", "/api/pause", { paused: pause.dataset.pause === "1" })); render(); } catch (err) { toast(err.message, "bad"); } return; }
-    if (t.closest("#resend-verify")) { const b = t.closest("#resend-verify"); busy(b, true, "Wird gesendet …"); try { await api("POST", "/api/resend-verification"); toast(S.sandbox ? "Testversion: keine echte Mail, nur ein Log-Eintrag." : "Bestätigungsmail ist unterwegs."); } catch (err) { toast(err.message, "bad"); } busy(b, false); return; }
-    if (t.closest("#logout") || t.closest("#logout-other")) { try { await api("POST", "/api/logout"); } catch { /* egal */ } S.customer = null; S.connections = []; S.status = null; go("start"); return; }
-    if (t.closest("[data-retry]")) { if (S.customer) { try { await api("POST", "/api/start/replan"); } catch { /* egal */ } S.workingSince = Date.now(); } }
+    if (pause) { try { uebernehmen(await api("POST", "/api/pause", { paused: pause.dataset.pause === "1" })); render(); } catch (err) { toast(err.message, "bad"); } return; }
+    if (t.closest("#verify-neu")) { const b = t.closest("#verify-neu"); beschaeftigt(b, true, "Wird gesendet …"); try { await api("POST", "/api/resend-verification"); toast(S.sandbox ? "Testversion: keine echte Mail, nur ein Log-Eintrag." : "Bestätigungsmail ist unterwegs."); } catch (err) { toast(err.message, "bad"); } beschaeftigt(b, false); return; }
+    if (t.closest("#abmelden") || t.closest("#abmelden-anderes")) { try { await api("POST", "/api/logout"); } catch { /* egal */ } S.customer = null; S.connections = []; S.status = null; go("konto"); return; }
   });
 
   window.addEventListener("hashchange", () => {
-    if (!onboardingDone()) return;
+    if (!eingerichtet()) return;
     const h = location.hash.replace("#", "");
-    if ((h === "dashboard" || h === "settings") && S.screen !== h) go(h);
+    if ((h === "dashboard" || h === "einstellungen") && S.screen !== h) go(h);
   });
 
   /* ================= Start ================= */
   async function boot() {
-    injectImageFonts();
+    schriftenLaden();
     try {
       const p = await api("GET", "/api/providers");
       S.providers = p.providers || [];
@@ -953,41 +1143,48 @@
       $("#stage").innerHTML = `<div class="notice bad" role="alert">Pipeflow ist gerade nicht erreichbar. Bitte lade die Seite in ein paar Minuten neu.</div>`;
       return;
     }
-    try { applyState(await api("GET", "/api/me")); } catch { /* nicht angemeldet */ }
+    try { S.authProviders = (await api("GET", "/api/start/config")).authProviders || []; } catch { S.authProviders = []; }
+    try { uebernehmen(await api("GET", "/api/me")); } catch { /* nicht angemeldet */ }
 
     const q = new URLSearchParams(location.search);
-    const clean = () => history.replaceState(null, "", location.pathname + location.hash);
+    const sauber = () => history.replaceState(null, "", location.pathname + location.hash);
+    if (q.get("autherror")) {
+      const fn = FEHLER[q.get("autherror")] || FEHLER.failed;
+      const name = (S.authProviders.find((p) => p.id === q.get("provider"))?.name) || "";
+      S.notice = { kind: "bad", text: fn(name) };
+      sauber();
+    }
     if (S.customer) {
       S.email = S.customer.email;
-      await refreshStatus();
-      const pName = prov(q.get("provider"))?.name || "";
+      S.website = S.customer.website || "";
+      await statusHolen();
+      const pName = anbieter(q.get("provider"))?.name || "";
       if (q.get("connected") || q.get("error")) {
         const id = q.get("connected") || q.get("provider");
-        S.notice = q.get("connected") && prov(id)
-          ? { provider: id, kind: "ok", text: `${prov(id).name} verbunden als ${conn(id)?.accountName || "—"}.` }
-          : { provider: q.get("provider"), kind: "bad", text: (ERRORS[q.get("error")] || ERRORS.failed)(pName) };
-        clean();
-        if (onboardingDone()) go("settings", { keepNotice: true }); else go("connect", { keepNotice: true });
+        S.notice = q.get("connected") && anbieter(id)
+          ? { provider: id, kind: "ok", text: `${anbieter(id).name} verbunden als ${kanal(id)?.accountName || "—"}.` }
+          : { provider: q.get("provider"), kind: "bad", text: (FEHLER[q.get("error")] || FEHLER.failed)(pName) };
+        sauber();
+        go(eingerichtet() ? "einstellungen" : "verbinden", { keepNotice: true });
         return;
       }
       if (q.get("verified")) {
-        clean();
+        sauber();
         S.notice = { kind: "ok", text: "E-Mail-Adresse bestätigt - danke. Die restlichen Bilder werden jetzt erstellt." };
-        go(onboardingDone() ? "dashboard" : "result", { keepNotice: true });
+        go(eingerichtet() ? "dashboard" : "ergebnis", { keepNotice: true });
         return;
       }
       const h = location.hash.replace("#", "");
-      if (onboardingDone()) { go(h === "settings" ? "settings" : h === "dashboard" ? "dashboard" : "welcome"); return; }
-      // Mitten im Onboarding wiedergekommen: dort weiter, wo etwas zu sehen ist.
+      if (eingerichtet()) { go(h === "einstellungen" ? "einstellungen" : h === "dashboard" ? "dashboard" : "willkommen"); return; }
       const job = S.status?.job;
-      const running = job && !["done", "error", "idle"].includes(job.phase);
-      if (S.status?.posts?.length) go("result");
-      else if (running) { S.workingSince = Date.now(); go("working"); }
-      else { try { await api("POST", "/api/start/replan"); } catch { /* egal */ } S.workingSince = Date.now(); go("working"); }
+      const laeuft = job && !["done", "error", "idle"].includes(job.phase);
+      if (S.status?.posts?.length) go("ergebnis");
+      else if (laeuft) { S.arbeitSeit = Date.now(); go("arbeitet"); }
+      else go("website", { keepNotice: true });
       return;
     }
-    if (q.get("error")) { S.notice = { kind: "bad", text: (ERRORS[q.get("error")] || ERRORS.failed)("") }; clean(); }
-    go("start", { keepNotice: true });
+    if (q.get("error")) { S.notice = { kind: "bad", text: (FEHLER[q.get("error")] || FEHLER.failed)("") }; sauber(); }
+    go("konto", { keepNotice: true });
     if (S.notice) toast(S.notice.text, "bad");
   }
 

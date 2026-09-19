@@ -21,11 +21,13 @@ export interface TierFeatures {
   formatOptions: boolean;
   /** Kommentar- und Bewertungs-Automatik. */
   automations: boolean;
+  /** Eigener Farbverlaufs-Picker mit freier Farbwahl (Grundstufe: die Farben der Website). */
+  freieFarbwahl: boolean;
 }
 
 const FEATURES_BY_TIER: Record<PlanTier, TierFeatures> = {
-  basic: { weekdayMatrix: false, multiThemes: false, analytics: false, formatOptions: false, automations: false },
-  pro: { weekdayMatrix: true, multiThemes: true, analytics: true, formatOptions: true, automations: true },
+  basic: { weekdayMatrix: false, multiThemes: false, analytics: false, formatOptions: false, automations: false, freieFarbwahl: true },
+  pro: { weekdayMatrix: true, multiThemes: true, analytics: true, formatOptions: true, automations: true, freieFarbwahl: true },
 };
 
 export function normalizeTier(raw: string | null | undefined): PlanTier {

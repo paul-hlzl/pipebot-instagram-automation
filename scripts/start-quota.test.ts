@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decidePreviewQuota, normalizeDomain, type PreviewLimits } from "../src/panel/start-quota.js";
 
-const limits: PreviewLimits = { perIpPerDay: 3, perDomainPerDay: 2, globalPerDay: 40, imagesUnverified: 3, adjustUnverified: 1, postsUnverified: 14 };
+const limits: PreviewLimits = { perAccountPerDay: 3, perIpPerDay: 3, perDomainPerDay: 2, globalPerDay: 40, imagesUnverified: 3, adjustUnverified: 1, postsUnverified: 14 };
 
 test("frei, solange alle Zaehler unter den Grenzen liegen", () => {
   assert.deepEqual(decidePreviewQuota({ ip: 2, domain: 1, global: 39 }, limits), { ok: true });

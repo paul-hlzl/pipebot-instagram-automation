@@ -180,3 +180,32 @@ Port 3111, keine KI-Aufrufe). Bericht: `docs/EASY_ONBOARDING_REPORT.md`.
 
 `SANDBOX_KEY_A` und `SANDBOX_KEY_B` waren am 19.09.2026 beide ungueltig (Login antwortete
 `?error=login`) und wurden neu erzeugt; alte Datei: `/root/sandbox-keys.env.bak-20260919`.
+
+## Nachtrag 19.09.2026: Anmeldung, Markenfarben, dunkle Fassung
+
+Die neue Oberflaeche hat jetzt einen eigenen Konto-Bildschirm mit Google, Microsoft und Apple
+(`src/panel/auth-providers.ts`). **Ohne hinterlegte Zugangsdaten sind alle drei als "kommt noch"
+gekennzeichnet**, der E-Mail-Weg ist der Rueckfallweg. Scharf wird ein Anbieter allein durch zwei
+Umgebungsvariablen, ohne Code-Aenderung:
+
+```
+AUTH_GOOGLE_CLIENT_ID=...        AUTH_GOOGLE_CLIENT_SECRET=...
+AUTH_MICROSOFT_CLIENT_ID=...     AUTH_MICROSOFT_CLIENT_SECRET=...
+```
+
+Weiterleitungsadresse fuer die Sandbox:
+`https://mcp.pipebot.at/panel/sandbox/auth/<anbieter>/callback`.
+
+Zum Testen ohne echte Zugangsdaten lassen sich die Anbieter-Endpunkte umlenken
+(`AUTH_GOOGLE_AUTHORIZE_URL`, `_TOKEN_URL`, `_USERINFO_URL`) - genau das macht
+`npm run test:auth` mit einem eigenen Attrappen-Anbieter auf Port 3113.
+
+Weitere neue Skripte: `npm run test:start` (HTTP, erzeugt EINE echte Vorschau),
+`npm run test:start-browser` (Chromium 360/1440), `npm run test:prod-copy`,
+`npm run test:start-quota`, `npm run brand-colors:proof` (Markenfarben an fuenf Websites,
+rendert echte Beitragsbilder ohne fal.ai-Kosten).
+
+**Kostenhinweis fuer kuenftige Arbeiten:** bei eingeschaltetem Farbverlauf rendert
+`generateImageUrl` den Hintergrund lokal und ruft fal.ai NICHT auf - solche Bilder kosten
+nichts. Seit 19.09.2026 gibt die Funktion das auch zurueck (`costUsd`), und `planning.ts` bucht
+nur noch, was wirklich angefallen ist.
