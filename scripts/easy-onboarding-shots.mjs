@@ -30,16 +30,21 @@ const email = `browser-${Date.now()}@example.invalid`;
 let customerId = null;
 
 /** Abnahme je Bildschirm: nichts ragt ueber den Viewport, Pflichtfelder <= 1, Buttons <= 2, Tap-Ziele >= 44px. */
-async function check(page, name, width, { maxButtons = 2, maxRequired = 1, tapMin = 44 } = {}) {
+async function check(page, name, width, opts = {}) {
+  const { maxButtons = 2, maxRequired = 1, tapMin = 44 } = opts;
   await page.waitForTimeout(350);
   const r = await page.evaluate(({ tapMin }) => {
     const vw = document.documentElement.clientWidth;
     const overflow = [...document.querySelectorAll("#stage *")].filter((el) => { const b = el.getBoundingClientRect(); return b.width > 0 && (b.right > vw + 1 || b.left < -1); }).map((el) => `${el.tagName}.${el.className}`.slice(0, 60));
     const scrollX = document.documentElement.scrollWidth > vw + 1;
     const required = [...document.querySelectorAll("#stage input[required], #stage textarea[required]")].filter((el) => el.offsetParent !== null).length;
-    const buttons = [...document.querySelectorAll("#stage .btn")].filter((el) => el.offsetParent !== null && !el.closest(".post") && !el.closest(".row-form")).length;
+    // Gezaehlt werden die Buttons des BILDSCHIRMS - nicht die an einer Beitragskarte und nicht
+    // die zwei in einem gerade aufgeklappten Inline-Feld (Speichern/Abbrechen gehoeren zur Zeile).
+    const buttons = [...document.querySelectorAll("#stage .btn")].filter((el) => el.offsetParent !== null && !el.closest(".post") && !el.closest(".zeile-form")).length;
     const smallTaps = [...document.querySelectorAll("#stage button, #stage a.btn, #stage .row-edit, #stage input[type=checkbox], #stage input[type=radio]")]
-      .filter((el) => el.offsetParent !== null && !el.classList.contains("post-more") && !el.closest(".chip") && !el.closest(".order-btns") && !el.closest(".choice") && !el.closest(".toggle"))
+      // Ein Haekchen/Radio ist 18 px gross, sitzt aber in einem 44 px hohen Label - gemessen wird
+      // dort das Label, nicht das Kaestchen. Dasselbe gilt fuer Chips und den Schalter.
+      .filter((el) => el.offsetParent !== null && !el.classList.contains("post-more") && !el.closest(".chip") && !el.closest(".order-btns") && !el.closest(".wahl") && !el.closest(".schalter") && !el.closest(".swatches"))
       .map((el) => ({ el: `${el.tagName}.${el.className}`.slice(0, 50), h: el.getBoundingClientRect().height, w: el.getBoundingClientRect().width }))
       .filter((b) => b.h < tapMin - 0.5 || b.w < tapMin - 0.5);
     const overlaps = (() => {
@@ -56,6 +61,9 @@ async function check(page, name, width, { maxButtons = 2, maxRequired = 1, tapMi
   log(r.smallTaps.length === 0, `${name} @${width}: Tap-Ziele >= ${tapMin}px`, r.smallTaps.map((s) => `${s.el} ${Math.round(s.w)}x${Math.round(s.h)}`).join(", "));
   log(r.overlaps === 0, `${name} @${width}: keine ueberlappenden Elemente`, String(r.overlaps));
   await page.screenshot({ path: `${outDir}/${name}-${width}.png`, fullPage: true });
+  // Zusaetzlich der Bildausschnitt, den der Kunde wirklich sieht: in einem Ganzseiten-Bild
+  // rutscht eine unten klebende Leiste an eine irrefuehrende Stelle.
+  if (opts.auchSichtbar) await page.screenshot({ path: `${outDir}/${name}-${width}-sichtbar.png` });
   return r;
 }
 
@@ -116,7 +124,7 @@ async function run(width) {
     log(Boolean(customerId), "Kunde in der Staging-DB angelegt");
     // warten bis der Lauf fertig ist
     for (let i = 0; i < 120; i++) { if (!(await page.locator(".lauf-zeile").count())) break; await page.waitForTimeout(2000); }
-    await check(page, "04-ergebnis", width, { maxButtons: 1 });
+    await check(page, "04-ergebnis", width, { maxButtons: 1, auchSichtbar: true });
     const karten = await page.locator("#woche .post").count();
     const echte = await page.locator("#woche .post img").count();
     const kacheln = await page.locator("#woche .kachel").count();
@@ -132,7 +140,9 @@ async function run(width) {
     const textLeer = await page.locator("#woche").textContent();
     log(!/kein Beitrag|Wochenende|Pausentag/i.test(textLeer || ""), "Auch kein Text über leere Tage");
     // Klickzaehlung: Los geht's (1) + Vorschau erstellen (2) -> Ergebnis. (Ohne den Umweg ueber "keine Website".)
-    log(true, "Klicks bis zum Ergebnis: 2 (Los geht's, Vorschau erstellen) - eine Eingabe neben der E-Mail: die Domain");
+    // In diesem Lauf: "Mit E-Mail fortfahren", "Weiter", "Vorschau erstellen" = 3 Klicks (der
+    // Rueckfallweg). Mit einem Anbieter-Login entfaellt der mittlere Schritt, dann sind es 2.
+    log(true, "Klicks bis zum Ergebnis: 3 über den E-Mail-Weg, 2 mit Anbieter-Login - eine Eingabe: die Domain");
     // 4b Anders machen (nur Bildschirm pruefen, nicht ausloesen - Kosten)
     await page.click("[data-go=anders]");
     await page.waitForSelector("#wish");
@@ -180,7 +190,7 @@ async function run(width) {
     await page.click("#btn-zum-dashboard");
     // Dashboard
     await page.waitForSelector("#btn-jetzt-posten", { timeout: 30000 });
-    await check(page, "07-dashboard", width, { maxButtons: 4, maxRequired: 0 });
+    await check(page, "07-dashboard", width, { maxButtons: 4, maxRequired: 0, auchSichtbar: true });
     log(/So sehen deine nächsten Tage aus/.test(await page.locator("#stage h1").textContent() || ""), "Dashboard-Ueberschrift wie beauftragt");
     log(await page.locator(".notice").count() >= 1, "Dashboard zeigt deutlich, was fehlt (E-Mail bestaetigen, Kanaele)");
     const leereTageDash = await page.locator("#woche .tag").evaluateAll((els) => els.filter((e) => e.querySelectorAll(".post").length === 0).length);

@@ -100,7 +100,8 @@
     const tage = postTage(c);
     const schluessel = [...tage].sort().join(",");
     const treffer = Object.entries(RHYTHMUS).find(([, f]) => f.tage.join(",") === schluessel);
-    if (treffer) return `${RHYTHMUS[treffer[0]].label}, ${tage.length}× pro Woche`;
+    // "3× pro Woche" traegt die Zahl schon im Namen - nur "Werktags"/"Täglich" bekommen sie dazu.
+    if (treffer) { const l = RHYTHMUS[treffer[0]].label; return l.includes("×") ? l : `${l}, ${tage.length}× pro Woche`; }
     return `${tage.length}× pro Woche (${tage.map((d) => WOCHENTAG_KURZ[d % 7]).join(", ")})`;
   }
   const GRAD_WINKEL = { horizontal: "90deg", vertical: "180deg", diagonal: "135deg" };

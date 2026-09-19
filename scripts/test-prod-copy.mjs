@@ -82,7 +82,8 @@ try {
     ok(`Migration ${t}: keine Spalte entfernt`, removed.length === 0, removed.join(","));
   }
   const added = schemaAfter.customers.filter((c) => !schemaBefore.customers.includes(c));
-  ok("Migration customers: nur ui_mode/plan_tier/login_link_* hinzugefuegt", added.sort().join(",") === "login_link_expires_at,login_link_token_hash,plan_tier,ui_mode", added.join(","));
+  const erwartet = ["auth_provider", "auth_subject", "login_link_expires_at", "login_link_token_hash", "plan_tier", "ui_mode"];
+  ok(`Migration customers: nur die ${erwartet.length} neuen Spalten hinzugefuegt, alle NULL-bar`, added.sort().join(",") === erwartet.join(","), added.join(","));
   ok("Tabelle start_previews angelegt", Boolean(after.prepare("SELECT name FROM sqlite_master WHERE name = 'start_previews'").get()));
   const countsAfter = Object.fromEntries(Object.keys(countsBefore).map((t) => [t, after.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n]));
   ok("Keine Zeile verloren (customers, planned_posts, pending_approvals, posts, connections, content_pillars)", JSON.stringify(countsBefore) === JSON.stringify(countsAfter), `${JSON.stringify(countsBefore)} -> ${JSON.stringify(countsAfter)}`);

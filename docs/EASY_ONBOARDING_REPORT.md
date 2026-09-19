@@ -241,21 +241,35 @@ gegengeprüft. Bedienung: Ziehen am Griff und Pfeile hoch/runter (44 px, auch mi
 | `npm run test:auth` (Anmeldung Ende zu Ende gegen Attrappen-Anbieter) | **21 passed, 0 failed** |
 | `npm run test:start-quota` (Kostenschutz-Logik) | **6 passed, 0 failed** |
 | `npm run test:start` (HTTP gegen Staging, echte Vorschau) | **60 passed, 0 failed** |
-| `npm run test:start-browser` (Chromium 360 und 1440 px, jeder Bildschirm) | siehe unten |
+| `npm run test:start-browser` (Chromium 360 und 1440 px, jeder Bildschirm) | **141 Prüfungen, 0 Probleme** |
 | `npm run test:prod-copy` (Sandbox-Build gegen Kopie der Produktions-DB) | **64 passed, 0 failed** |
 | `npm run test:panel` (bestehende Suite, 251 Prüfungen) | **251 passed, 0 failed** |
 | `npm run test:backoff` | **15 passed, 0 failed** |
 | `npm run audit:panel` | ein Befund, **vorbestehend auch auf `main`** (87 `ob-*`-Klassen; die Prüfung liest `onboarding.css` nicht). Beide Oberflächen sind erfasst: jeder API-Aufruf hat eine Route, jede Route wird aufgerufen. |
 | `npm run test:onboarding` (klassisches Onboarding) | **schlägt fehl, vorbestehend**: das Skript sucht `#fp-progress`, das es seit dem Umbau vom 18.09. auch auf `main` nicht mehr gibt. Am klassischen Panel wurde in diesem Auftrag nichts geändert. |
 
+Was der Browser-Lauf im Einzelnen belegt: drei Anmeldewege sichtbar und ehrlich als „kommt
+noch" gekennzeichnet, Kopfzeile mit Produktname und Zusatzzeile auf jedem Bildschirm, fünf
+Fortschrittsschritte einschließlich „Farben übernommen", erster fertiger Beitrag nach 4
+Sekunden, drei echte Bilder und sieben Platzhalter vor der Bestätigung, **kein leerer Tag** im
+Ergebnis und im Dashboard, die Vorschaukarten ändern sich beim Ziehen am Farbregler live mit,
+Umsortieren per Pfeil vom Server bestätigt, nach der Bestätigung null Platzhalter übrig. Je
+Bildschirm geprüft: nichts über den Rand, höchstens ein Pflichtfeld, Tap-Ziele ab 44 px, keine
+Überlappung, keine JavaScript-Fehler.
+
 Unterwegs gefunden und behoben, damit es nicht wie „lief sofort" aussieht: `/start` ohne Slash
 wurde hinter dem Sandbox-Proxy falsch umgeleitet; das Polling endete stumm beim Wechsel von
 „Es arbeitet" auf „Ergebnis"; jedes Neuzeichnen blendete den Bildschirm neu ein (Flackern);
 das Turnstile-Token war beim schnellen Tippen noch nicht da; Tap-Ziele unter 44 px im Dashboard;
-Kanaltexte in der Sie-Form; die Kostenbuchung für lokal gerenderte Bilder; und der
+Kanaltexte in der Sie-Form; die Kostenbuchung für lokal gerenderte Bilder; der
 Einmal-Anmeldelink statt des Ersetzens des dauerhaften Zugangslinks (die erste Fassung hätte
 jedem Fremden erlaubt, den gespeicherten Link eines Kunden zu entwerten - der Test hat es
-aufgedeckt).
+aufgedeckt); „Mit Microsoft fortfahren" brach bei 360 px zweizeilig um; und die Rhythmus-Zeile
+zeigte „3× pro Woche, 3× pro Woche", weil die Zahl zweimal angehängt wurde.
+
+Ein Lauf davor meldete einen einzelnen 502-Fehler - den hatte ich selbst verursacht, weil ich
+den Sandbox-Prozess mitten im Browser-Test neu gestartet habe. Der abschließende Lauf ist
+ungestört gelaufen.
 
 ---
 
