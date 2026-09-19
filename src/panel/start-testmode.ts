@@ -32,8 +32,15 @@ function kundeLaden(id: string): CustomerRow {
 /** Testkunden sind 24 Stunden gueltig; aeltere raeumt der naechste Einstieg weg. */
 const TEST_TTL_MS = 24 * 3_600_000;
 
+/** Laeuft dieser Prozess als Sandbox? Einzige Quelle fuer alle Sandbox-only-Wege hier.
+ *  Produktion setzt PANEL_SANDBOX nie - und koennte es nicht unbemerkt, weil dieselbe
+ *  Variable das Testversion-Band ueber dem Kundenpanel einschaltet (siehe start-quota.ts). */
+export function sandboxBetrieb(): boolean {
+  return process.env.PANEL_SANDBOX === "true";
+}
+
 export function testmodusMoeglich(): boolean {
-  return process.env.PANEL_SANDBOX === "true" && Boolean(process.env.PANEL_TEST_KEY);
+  return sandboxBetrieb() && Boolean(process.env.PANEL_TEST_KEY);
 }
 
 function schluesselStimmt(eingabe: string): boolean {
@@ -67,6 +74,43 @@ export function testkundeLoeschen(customerId: string): void {
     db.prepare("DELETE FROM customers WHERE id = ?").run(customerId);
   });
   loeschen();
+}
+
+/**
+ * Setzt ein angemeldetes Sandbox-Konto auf Anfang: alles, was aus der Website-Analyse und der
+ * Planung entstanden ist, faellt weg, der Kunde und seine Sitzung bleiben (Auftrag 19.09.2026).
+ *
+ * Bewusst NICHT geloescht: `sessions` (sonst fliegt der Angemeldete raus statt neu anzufangen),
+ * `connections` und `oauth_states` (die Kanalverbindungen sind nicht Teil der Woche, und in der
+ * Sandbox liessen sie sich gar nicht neu herstellen).
+ *
+ * Nur Sandbox. Der Aufrufer prueft das; hier steht die Sperre trotzdem noch einmal, weil diese
+ * Funktion Kundendaten wegwirft und niemals aus Versehen in Produktion laufen darf.
+ */
+const NICHT_LOESCHEN = new Set(["sessions", "connections", "oauth_states"]);
+
+export function kontoZuruecksetzen(customerId: string): void {
+  if (!sandboxBetrieb()) throw new Error("Abgelehnt: Zuruecksetzen gibt es nur in der Sandbox.");
+  const row = db.prepare("SELECT id FROM customers WHERE id = ?").get(customerId) as { id: string } | undefined;
+  if (!row) throw new Error(`Abgelehnt: ${customerId} gibt es nicht.`);
+  const zuruecksetzen = db.transaction(() => {
+    for (const tabelle of tabellenMitKunde()) {
+      if (NICHT_LOESCHEN.has(tabelle)) continue;
+      db.prepare(`DELETE FROM ${tabelle} WHERE customer_id = ?`).run(customerId);
+    }
+    // Alles, was die Website-Analyse gesetzt hat, zurueck auf den Zustand direkt nach dem
+    // Anlegen. `tour_done_at = NULL` ist der Schalter, der die Oberflaeche wieder bei der
+    // Website-Frage beginnen laesst (siehe boot() in start.js).
+    db.prepare(
+      `UPDATE customers SET tour_done_at = NULL, website = NULL, industry = NULL, about = NULL,
+         tone = 'sachlich', custom_hashtags = NULL, avoid_topics = NULL, watermark_text = NULL,
+         accent_color = NULL, gradient_color2 = NULL, gradient_enabled = 0, gradient_direction = 'diagonal',
+         branding_last_changed_at = NULL, skipped_providers = NULL, customer_paused = 0, updated_at = ?
+       WHERE id = ?`,
+    ).run(nowIso(), customerId);
+  });
+  zuruecksetzen();
+  console.log(`[testmodus] Sandbox-Konto zurueckgesetzt: ${customerId}`);
 }
 
 export function alteTestkundenAufraeumen(now: number = Date.now()): number {
@@ -124,20 +168,31 @@ export function registerTestmodeRoutes(router: Router, ctx: TestmodusKontext): v
   });
 
   // ---------- Zuruecksetzen: ein Klick, wieder von vorne ----------
+  // Der Einstieg braucht einen Schluessel, das Zuruecksetzen nicht: wer hier ankommt, ist
+  // bereits angemeldet. Nur die Sandbox-Bedingung gilt - in Produktion existiert die Route nicht.
   router.post("/api/start/test/reset", (req, res) => {
-    if (!testmodusMoeglich()) {
+    if (!sandboxBetrieb()) {
       res.status(404).json({ error: "Nicht gefunden." });
       return;
     }
     const c = ctx.currentCustomer(req);
-    if (!istTestkunde(c)) {
-      res.status(403).json({ error: "Das geht nur in einem Testlauf." });
+    if (!c) {
+      res.status(401).json({ error: "Bitte melde dich zuerst an." });
       return;
     }
-    testkundeLoeschen(c!.id);
-    const neu = testkundeAnlegen(ctx.trialDays());
-    ctx.startSession(res, neu.id, req);
-    res.json({ status: "reset", ...(ctx.publicState(neu) as object) });
+    // Zwei Faelle, ein Knopf. Testlauf: der Wegwerfkunde wird ersetzt. Angemeldetes
+    // Sandbox-Konto: der Kunde bleibt samt Sitzung, nur seine Woche und alles aus der
+    // Website-Analyse fallen weg (Auftrag 19.09.2026).
+    if (istTestkunde(c)) {
+      testkundeLoeschen(c.id);
+      const frisch = testkundeAnlegen(ctx.trialDays());
+      ctx.startSession(res, frisch.id, req);
+      res.json({ status: "reset", art: "testlauf", ...(ctx.publicState(frisch) as object) });
+      return;
+    }
+    kontoZuruecksetzen(c.id);
+    const wieder = db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow;
+    res.json({ status: "reset", art: "konto", ...(ctx.publicState(wieder) as object) });
   });
 
   // ---------- Testlauf beenden ----------

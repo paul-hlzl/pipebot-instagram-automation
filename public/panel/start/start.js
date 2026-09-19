@@ -174,11 +174,24 @@
       : `<button type="button" class="btn secondary sm" data-go="einstellungen">Einstellungen</button>`;
   }
 
-  /** Zeigt die Testlauf-Leiste, sobald die Sitzung einem Testkunden gehoert. */
+  /**
+   * Die Leiste erscheint in der Sandbox fuer JEDE angemeldete Sitzung (Ansage vom 19.09.2026),
+   * nicht nur fuer Testlaeufe. "Neu starten" wirft in beiden Faellen alles weg und beginnt bei
+   * der Website-Frage; nur was genau weggeworfen wird, ist verschieden - beim Testlauf der
+   * Wegwerfkunde selbst, beim angemeldeten Konto nur dessen Woche und Analyse.
+   * "Beenden" gibt es nur beim Testlauf; ein angemeldetes Konto meldet sich normal ab.
+   */
   function testleiste() {
     const bar = $("#testleiste");
     if (!bar) return;
-    bar.hidden = !S.customer?.isTest;
+    const zeigen = Boolean(S.sandbox && S.customer);
+    bar.hidden = !zeigen;
+    if (!zeigen) return;
+    const test = Boolean(S.customer.isTest);
+    $("#testleiste-text").innerHTML = test
+      ? `Testlauf<span class="testleiste-zusatz"> &middot; z\u00e4hlt nicht als Kunde, keine Limits</span>`
+      : `Sandbox<span class="testleiste-zusatz"> &middot; \u201eNeu starten\u201c verwirft die Daten dieses Kontos</span>`;
+    $("#test-ende").hidden = !test;
   }
 
   async function testNeu() {
@@ -190,7 +203,7 @@
       S.website = ""; S.beschreibung = ""; S.poll = null;
       uebernehmen(r);
       go("website");
-      toast("Frischer Testlauf. Alles von vorne.");
+      toast(r.art === "konto" ? "Konto geleert. Alles von vorne." : "Frischer Testlauf. Alles von vorne.");
     } catch (err) {
       toast(err.message, "bad");
     } finally {

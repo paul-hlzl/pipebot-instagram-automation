@@ -40,6 +40,17 @@ bei der Website-Frage. Oben sitzt eine schmale graue Leiste:
 - **Neu starten** - wirft den laufenden Testlauf weg und faengt sofort neu an.
 - **Beenden** - wirft ihn weg und meldet ab.
 
+Seit dem 19.09.2026 erscheint die Leiste in der Sandbox fuer **jede angemeldete
+Sitzung**, nicht nur fuer Testlaeufe. Bei einem normalen Konto (etwa nach
+Google-Anmeldung) wirft "Neu starten" die Woche, die Saeulen und alles aus der
+Website-Analyse weg und beginnt wieder bei der Website-Frage; der Kunde und
+seine Sitzung bleiben bestehen, er wird nicht abgemeldet. Kanalverbindungen
+bleiben ebenfalls stehen - sie sind nicht Teil der Woche und liessen sich in der
+Sandbox gar nicht neu herstellen. "Beenden" gibt es weiterhin nur beim
+Testlauf. Die Route ist an `sandboxBetrieb()` gebunden und existiert in
+Produktion nicht; `kontoZuruecksetzen()` wirft zusaetzlich, wenn sie ausserhalb
+der Sandbox aufgerufen wird.
+
 Ein erneuter Aufruf des Einstiegslinks macht dasselbe wie "Neu starten".
 
 ## Kosten

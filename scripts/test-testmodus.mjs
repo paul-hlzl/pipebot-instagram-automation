@@ -109,9 +109,41 @@ console.log("\nZuruecksetzen (Zusage 2):");
   const st = await (await call("GET", "/api/start/status", { cookie: cookie2 })).json();
   ok("Der neue Durchlauf ist wieder leer", (st.posts || []).length === 0 && st.customer?.isTest === true);
 
+  console.log("\nNeu starten fuer ein angemeldetes Sandbox-Konto (Ansage 19.09.2026):");
+  {
+    const mail = `reset-${Date.now()}@example.invalid`;
+    const r = await call("POST", "/api/start/email", { body: { email: mail } });
+    const ck = cookieOf(r);
+    const kid = db.prepare("SELECT id FROM customers WHERE email = ?").get(mail).id;
+    db.prepare(`UPDATE customers SET tour_done_at = ?, website = 'beispiel.at', industry = 'Test',
+      about = 'Text aus der Analyse', accent_color = '#a36629', gradient_color2 = '#56441a',
+      gradient_enabled = 1 WHERE id = ?`).run(new Date().toISOString(), kid);
+    const jetzt = new Date().toISOString();
+    db.prepare("INSERT INTO content_pillars (id, customer_id, title, description, weight, created_at, updated_at) VALUES (?,?,?,?,1,?,?)").run(`pil_${Date.now()}`, kid, "Thema", "Beschreibung", jetzt, jetzt);
+    db.prepare("INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(`plp_${Date.now()}`, kid, "ig_feed", jetzt.slice(0, 10), "planned", "Kopf", "Text", jetzt, jetzt);
+    const vorher = await (await call("GET", "/api/me", { cookie: ck })).json();
+    ok("Vorbereitetes Konto ist eingerichtet und hat eine Woche", vorher.customer.tourDone === true && db.prepare("SELECT COUNT(*) n FROM planned_posts WHERE customer_id = ?").get(kid).n === 1);
+    ok("Es ist ausdruecklich KEIN Testlauf", vorher.customer.isTest !== true);
+
+    const res = await call("POST", "/api/start/test/reset", { cookie: ck });
+    const body = await res.json();
+    ok("Zuruecksetzen wird angenommen", res.status === 200 && body.art === "konto", `${res.status} ${body.art}`);
+    ok("Das Konto bleibt bestehen", db.prepare("SELECT COUNT(*) n FROM customers WHERE id = ?").get(kid).n === 1);
+    ok("Die Sitzung bleibt bestehen", db.prepare("SELECT COUNT(*) n FROM sessions WHERE customer_id = ?").get(kid).n >= 1);
+    const nach = db.prepare("SELECT tour_done_at, website, industry, about, accent_color, gradient_enabled FROM customers WHERE id = ?").get(kid);
+    ok("Beginnt wieder bei der Website-Frage (tour_done_at leer)", nach.tour_done_at === null, String(nach.tour_done_at));
+    ok("Website, Branche, Beschreibung und Farben sind weg", !nach.website && !nach.industry && !nach.about && !nach.accent_color && nach.gradient_enabled === 0, JSON.stringify(nach));
+    ok("Woche und Saeulen sind weg",
+      db.prepare("SELECT COUNT(*) n FROM planned_posts WHERE customer_id = ?").get(kid).n === 0
+      && db.prepare("SELECT COUNT(*) n FROM content_pillars WHERE customer_id = ?").get(kid).n === 0);
+    db.prepare("DELETE FROM sessions WHERE customer_id = ?").run(kid);
+    db.prepare("DELETE FROM customers WHERE id = ?").run(kid);
+  }
+
   console.log("\nSchutz vor Missbrauch:");
   const ohne = await call("POST", "/api/start/test/reset");
-  ok("Zuruecksetzen ohne Testsitzung -> 403", ohne.status === 403, String(ohne.status));
+  ok("Zuruecksetzen ohne Anmeldung -> 401", ohne.status === 401, String(ohne.status));
 
   // Aufraeumen
   const id2 = db.prepare("SELECT id FROM customers WHERE status = 'test' ORDER BY created_at DESC").get()?.id;
