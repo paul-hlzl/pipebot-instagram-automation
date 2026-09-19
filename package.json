@@ -30,6 +30,7 @@
     "test:ladebildschirm": "node scripts/test-ladebildschirm.mjs",
     "test:ladezustand": "node scripts/test-ladezustand.mjs",
     "test:marke": "node scripts/test-markenauftritt.mjs",
+    "test:produktionskopie": "node scripts/test-produktionskopie.mjs",
     "test:sperren": "node scripts/test-sperren.mjs",
     "test:sprache": "node scripts/test-sprache.mjs",
     "test:aufhaenger": "node scripts/test-aufhaenger.mjs",
