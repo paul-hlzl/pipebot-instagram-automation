@@ -38,7 +38,7 @@
 
 :root {
   /* --- sechs benannte Werte, mehr hat das Interface nicht --- */
-  --grund:       #ffffff;  /* Seitenhintergrund */
+  --grund:       #faf9f7;  /* Seitenhintergrund: ruhiges Papier, damit weisse Karten tragen */
   --flaeche:     #fbfbfa;  /* Karten, Felder, alles Erhobene */
   --linie:       #e5e5e2;  /* Trennlinien und Raender */
   --text:        #0d0d0d;  /* Fliesstext und Ueberschriften */
@@ -46,6 +46,11 @@
   --aktion:      #0d0d0d;  /* Flaeche der Hauptaktion: schwarze Pille */
   --aktion-text: #ffffff;  /* Schrift darauf */
   --wash:        #f2f2f0;  /* neutrale Hinterlegung, z. B. hinter einem Bild */
+  /* Einfallendes Licht: zwei sehr schwache Lichtkegel oben. Ohne erkannte Markenfarben ein
+     neutraler Grauton; sobald die Website Farben hergibt, setzt start.js diese beiden Werte
+     auf die Marke um - mit niedriger Deckkraft, damit es Licht bleibt und kein Hintergrund. */
+  --licht-1: rgba(13, 13, 13, .05);
+  --licht-2: rgba(13, 13, 13, .03);
   /* Zwei Signalfarben, ausschliesslich Bedeutung, nie Dekoration */
   --gut:     #137a3f;
   --schlecht:#b42318;
@@ -75,7 +80,17 @@
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; background: var(--grund); }
 body {
-  margin: 0; background: var(--grund); color: var(--text);
+  margin: 0; color: var(--text);
+  /* Die Lichtkegel haengen am SEITENANFANG, nicht am Fenster (kein background-attachment:
+     fixed): auf langen Seiten scrollt das Licht weg, statt ueber den Beitragskarten zu liegen,
+     und am Handy spart es das staendige Neuzeichnen. rgba(255,255,255,0) statt `transparent`,
+     weil Safari `transparent` als Schwarz interpoliert und dann ein grauer Schleier entsteht. */
+  background-color: var(--grund);
+  background-image:
+    radial-gradient(120% 70% at 12% -2%, var(--licht-1), rgba(255, 255, 255, 0) 72%),
+    radial-gradient(95% 55% at 96% 2%, var(--licht-2), rgba(255, 255, 255, 0) 66%);
+  background-repeat: no-repeat;
+  background-size: 100% 900px, 100% 760px;
   font-family: var(--sans); font-size: var(--t-body); line-height: 1.5;
   letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -140,7 +155,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .field { margin-top: 26px; }
 .field label { display: block; font-size: var(--t-small); color: var(--text-2); margin-bottom: 8px; }
 .input, .textarea {
-  width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--flaeche);
+  width: 100%; font: inherit; font-size: 16px; color: var(--text); background: #fff;
   border: 1px solid var(--linie); border-radius: 12px; min-height: 54px; padding: 0 16px;
   transition: border-color 120ms, box-shadow 120ms;
 }
@@ -186,7 +201,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .auth-btn {
   display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%;
   min-height: 54px; padding: 0 16px; border-radius: 999px; cursor: pointer; font-size: 15px; font-weight: 500;
-  background: var(--flaeche); color: var(--text); border: 1px solid var(--linie); text-decoration: none;
+  background: #fff; color: var(--text); border: 1px solid var(--linie); text-decoration: none;
   white-space: nowrap; transition: border-color 120ms, background 120ms;
 }
 /* Bei 360 px muss „Mit Microsoft fortfahren" samt Hinweis in EINE Zeile passen. */
@@ -211,7 +226,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 /* --- Karte „Weiter als …" --- */
 .konto-karte {
   margin-top: 30px; width: 100%; display: flex; align-items: center; gap: 14px; text-align: left;
-  border: 1px solid var(--linie); border-radius: 16px; padding: 16px; background: var(--flaeche); cursor: pointer;
+  border: 1px solid var(--linie); border-radius: 16px; padding: 16px; background: #fff; cursor: pointer;
   transition: border-color 120ms;
 }
 .konto-karte:hover { border-color: var(--text-2); }
@@ -252,7 +267,9 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 }
 
 .post {
-  border: 1px solid var(--linie); border-radius: 16px; overflow: hidden; background: var(--flaeche);
+  /* Reines Weiss, nicht die leicht getoente Flaeche: im oberen Lichtbereich wuerde eine
+     Beitragskarte sonst mit dem Hintergrund verschwimmen. */
+  border: 1px solid var(--linie); border-radius: 16px; overflow: hidden; background: #fff;
   animation: auf var(--dauer) var(--kurve) both; display: grid; align-content: start;
 }
 .post-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 10px; font-size: var(--t-micro); font-weight: 500; }
@@ -312,13 +329,13 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .zeile-form .input { min-height: 48px; }
 .zeile-form-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--linie); border-radius: 999px; padding: 7px 13px; font-size: var(--t-small); background: var(--flaeche); min-height: 38px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--linie); border-radius: 999px; padding: 7px 13px; font-size: var(--t-small); background: #fff; min-height: 38px; }
 .chip button { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-2); font-size: 17px; line-height: 1; min-width: 26px; min-height: 26px; }
 .chip.add { padding: 0; }
 .chip.add input { border: 0; background: transparent; font: inherit; font-size: 14px; padding: 7px 13px; min-width: 150px; outline: none; color: var(--text); }
 .chip.add:focus-within { border-color: var(--aktion); }
 .wahl { display: grid; gap: 8px; }
-.wahl label { display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 9px 13px; border: 1px solid var(--linie); border-radius: 12px; cursor: pointer; background: var(--flaeche); }
+.wahl label { display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 9px 13px; border: 1px solid var(--linie); border-radius: 12px; cursor: pointer; background: #fff; }
 .wahl label:has(input:checked) { border-color: var(--aktion); box-shadow: 0 0 0 1px var(--aktion); }
 .wahl input { width: 18px; height: 18px; accent-color: var(--aktion); margin: 0; flex: none; }
 .wahl small { color: var(--text-2); display: block; }
@@ -345,7 +362,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 
 /* --- Bildschirm 6: Verbinden --- */
 .connect-liste { margin-top: 24px; display: grid; gap: 18px; }
-.connect { border: 1px solid var(--linie); border-radius: 16px; padding: 16px; display: grid; gap: 10px; background: var(--flaeche); }
+.connect { border: 1px solid var(--linie); border-radius: 16px; padding: 16px; display: grid; gap: 10px; background: #fff; }
 .connect .btn { width: 100%; min-height: 54px; font-size: 16px; }
 .connect .logo { width: 22px; height: 22px; flex: none; }
 .connect-state { display: flex; align-items: center; gap: 8px; color: var(--gut); font-size: var(--t-small); }
@@ -354,7 +371,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 
 /* --- Dashboard --- */
 .dash-kopf { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-.notice { margin-top: 18px; border: 1px solid var(--linie); border-left: 3px solid var(--text-2); border-radius: 12px; padding: 13px 15px; font-size: var(--t-small); display: grid; gap: 6px; background: var(--flaeche); }
+.notice { margin-top: 18px; border: 1px solid var(--linie); border-left: 3px solid var(--text-2); border-radius: 12px; padding: 13px 15px; font-size: var(--t-small); display: grid; gap: 6px; background: #fff; }
 .notice.bad { border-left-color: var(--schlecht); }
 .notice.ok { border-left-color: var(--gut); }
 .notice .link { padding: 2px 0; min-height: var(--tap); font-size: 14px; }
@@ -367,7 +384,7 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 
 /* --- Sheet --- */
 .sheet-overlay { position: fixed; inset: 0; background: rgba(13,13,13,.35); z-index: 200; display: grid; align-items: end; }
-.sheet { background: var(--flaeche); border: 1px solid var(--linie); border-bottom: 0; border-radius: 20px 20px 0 0; padding: 22px var(--rand) max(22px, env(safe-area-inset-bottom)); max-height: 88vh; overflow: auto; position: relative; animation: hoch var(--dauer) var(--kurve) both; }
+.sheet { background: #fff; border: 1px solid var(--linie); border-bottom: 0; border-radius: 20px 20px 0 0; padding: 22px var(--rand) max(22px, env(safe-area-inset-bottom)); max-height: 88vh; overflow: auto; position: relative; animation: hoch var(--dauer) var(--kurve) both; }
 @keyframes hoch { from { transform: translateY(26px); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (min-width: 720px) { .sheet-overlay { align-items: center; justify-items: center; } .sheet { border-radius: 20px; border-bottom: 1px solid var(--linie); width: 480px; } }
 .sheet-close { position: absolute; right: 12px; top: 12px; width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--linie); background: transparent; color: var(--text); font-size: 20px; cursor: pointer; }

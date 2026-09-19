@@ -56,7 +56,7 @@
   const eingerichtet = () => Boolean(S.customer && S.customer.tourDone);
   const kanal = (id) => S.connections.find((c) => c.provider === id);
   const anbieter = (id) => S.providers.find((p) => p.id === id);
-  const uebernehmen = (d) => { if (!d || !d.customer) return; S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer.skippedProviders || []); };
+  const uebernehmen = (d) => { if (!d || !d.customer) return; S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer.skippedProviders || []); lichtSetzen(); };
 
   /* ================= API ================= */
   async function api(method, url, body) {
@@ -116,6 +116,22 @@
     return an && zwei ? `linear-gradient(${GRAD_WINKEL[richtung] || GRAD_WINKEL.diagonal}, ${hex}, ${zwei})` : hex;
   };
   const kachelSchrift = (c = S.customer) => { const f = SCHRIFTEN[c?.fontChoice] || SCHRIFTEN.inter; return `font-family:"${f[0]}";font-weight:${f[2]}`; };
+
+  /**
+   * Speist die beiden Lichtkegel des Seitenhintergrunds aus den erkannten Markenfarben. Sehr
+   * niedrige Deckkraft: es soll wie einfallendes Licht wirken, nicht wie eine farbige Flaeche.
+   * Ohne erkannte Farben bleibt der neutrale Grauton aus der CSS-Datei stehen.
+   */
+  function lichtSetzen() {
+    const c = S.customer;
+    const wurzel = document.documentElement;
+    const zuRgb = (hex) => { const n = parseInt(String(hex || "").slice(1), 16); return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255] : null; };
+    const eins = c && c.gradientEnabled ? zuRgb(c.accentColor) : null;
+    if (!eins) { wurzel.style.removeProperty("--licht-1"); wurzel.style.removeProperty("--licht-2"); return; }
+    const zwei = zuRgb(c.gradientColor2) || eins;
+    wurzel.style.setProperty("--licht-1", `rgba(${eins.join(", ")}, .13)`);
+    wurzel.style.setProperty("--licht-2", `rgba(${zwei.join(", ")}, .085)`);
+  }
 
   function schriftenLaden() {
     if ($("#pf-bildschriften")) return;
@@ -937,6 +953,13 @@
     };
     const hg = kachelHintergrund(S.customer, q);
     $$("[data-kachel]").forEach((el) => { el.style.background = hg; });
+    // Das Licht im Seitenhintergrund zieht live mit, sonst passt es nach dem Speichern nicht mehr.
+    const rgb = (hex) => { const n = parseInt(String(hex || "").slice(1), 16); return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(", ") : null; };
+    const a1 = rgb(q.accentColor);
+    if (a1 && q.gradientEnabled) {
+      document.documentElement.style.setProperty("--licht-1", `rgba(${a1}, .13)`);
+      document.documentElement.style.setProperty("--licht-2", `rgba(${rgb(q.gradientColor2) || a1}, .085)`);
+    }
     const v = $("#picker-vorschau", form);
     if (v) v.style.background = hg;
     const box = $("#partner-vorschlaege", form);
