@@ -221,6 +221,16 @@ export function registerStartRoutes(router: Router, ctx: StartContext): void {
         res.json({ status: "known", mailed: false });
         return;
       }
+      // Aus dem Anmelde-Bildschirm ("Ich habe schon ein Konto") darf NIE ein Konto entstehen -
+      // sonst legt ein Tippfehler in der Adresse stillschweigend ein zweites an, und der Kunde
+      // steht vor einem leeren Dashboard und sucht seine Beitraege.
+      if (str(req.body?.modus, 20) === "anmelden") {
+        res.status(404).json({
+          error: "Zu dieser Adresse gibt es noch kein Konto. Prüfe die Schreibweise - oder leg in einer Minute ein neues an.",
+          unbekannt: true,
+        });
+        return;
+      }
       if (ctx.rateLimited(`start-signup:${ctx.clientIp(req)}`, 5, 24 * 3_600_000)) {
         res.status(429).json({ error: "Von deinem Anschluss wurden heute schon mehrere Konten angelegt. Bitte versuche es morgen noch einmal." });
         return;

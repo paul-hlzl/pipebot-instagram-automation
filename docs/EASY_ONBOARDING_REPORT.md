@@ -393,7 +393,25 @@ Umgebung: nichts zwingend (alle Deckel haben Standardwerte); für den Login zus�
 
 ---
 
-## 10. Offene Entscheidungen für dich
+## 10. Abweichung vom Auftrag, auf deine Ansage
+
+Abschnitt 5 des Auftrags verlangt für Bildschirm 1 ausdrücklich: „Kein sichtbarer Unterschied
+zwischen ‚Registrieren' und ‚Anmelden' - das System erkennt selbst, ob es das Konto schon
+kennt." Umgesetzt war das zuerst genau so, später mit einem erklärenden Satz für Wiederkehrende.
+Am 19.09.2026 hast du nach Rückfrage entschieden, dass es einen **sichtbaren eigenen Einstieg**
+geben soll. Gebaut ist er jetzt: „Schon ein Konto? Hier anmelden" führt auf einen eigenen
+Anmelde-Bildschirm.
+
+Damit daraus keine Falle wird, unterscheidet sich der Anmelde-Bildschirm serverseitig vom
+Anlegen: mit `modus: "anmelden"` legt `/api/start/email` **kein** Konto an. Eine unbekannte
+Adresse bekommt stattdessen eine klare Meldung samt Ausweg („Konto anlegen"). Ohne diese
+Trennung hätte ein Tippfehler in der Adresse stillschweigend ein zweites, leeres Konto erzeugt -
+der Kunde stünde vor einem leeren Dashboard und suchte seine Beiträge. Geprüft: unbekannte
+Adresse im Anmelde-Modus, Kundenzahl vorher und nachher identisch (25/25).
+
+---
+
+## 11. Offene Entscheidungen für dich
 
 1. **Anbieter-Apps anlegen** (Abschnitt 1). Ohne sie bleibt der Hauptweg der E-Mail-Weg.
 2. **Apple ja oder nein** - 99 USD im Jahr plus halbjährlich neu zu erzeugendes Secret.
@@ -416,7 +434,7 @@ Umgebung: nichts zwingend (alle Deckel haben Standardwerte); für den Login zus�
 
 ---
 
-## 11. Was ich NICHT im echten Browser getestet habe
+## 12. Was ich NICHT im echten Browser getestet habe
 
 - **Die echte Anmeldung bei Google, Microsoft oder Apple.** Getestet ist der komplette Ablauf
   gegen einen selbst gebauten, regelkonformen Anbieter - nicht gegen Google.
@@ -441,7 +459,7 @@ Umgebung: nichts zwingend (alle Deckel haben Standardwerte); für den Login zus�
 
 ---
 
-## 12. Rollback in einem Satz
+## 13. Rollback in einem Satz
 
 `cp /root/staging.ecosystem.json.bak-20260919 /root/staging.ecosystem.json && pm2 delete
 instagram-mcp-staging && pm2 start /root/staging.ecosystem.json && pm2 save && rm -r

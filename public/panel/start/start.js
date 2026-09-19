@@ -130,7 +130,7 @@
     const stage = $("#stage");
     stage.classList.toggle("breit", ["ergebnis", "dashboard", "einstellungen", "plan"].includes(S.screen));
     const html = {
-      konto: kontoHtml, email: emailHtml, gesendet: gesendetHtml, willkommen: willkommenHtml,
+      konto: kontoHtml, anmelden: anmeldenHtml, email: emailHtml, gesendet: gesendetHtml, willkommen: willkommenHtml,
       website: websiteHtml, beschreibung: beschreibungHtml, arbeitet: arbeitetHtml,
       ergebnis: ergebnisHtml, anders: andersHtml, plan: planHtml, verbinden: verbindenHtml,
       dashboard: dashboardHtml, einstellungen: einstellungenHtml, fehler: fehlerHtml,
@@ -196,11 +196,37 @@
                unter dem Trenner und die ruhigere Gestaltung - nicht eine andere Breite. -->
           <button type="button" class="auth-btn mail-weg" data-go="email">Mit E-Mail fortfahren</button>
         </div>
-        <!-- Wiederkehrende brauchen keinen eigenen Weg, nur die Gewissheit, dass derselbe Knopf
-             auch anmeldet (Auftrag: kein sichtbarer Unterschied zwischen Registrieren und
-             Anmelden). Deshalb ein Satz statt eines zweiten Einstiegs. -->
-        <p class="auth-schon">Schon ein Konto? Dieselben Knöpfe melden dich an - wir erkennen dich an deiner Adresse.</p>
+        <!-- Eigener Einstieg fuer Wiederkehrende, auf Ansage vom 19.09.2026. Der Auftrag wollte
+             ausdruecklich KEINEN sichtbaren Unterschied zwischen Registrieren und Anmelden -
+             Paul hat sich nach Ruecksprache bewusst dagegen entschieden. Technisch macht es
+             keinen Unterschied: dieselben Anbieter-Knoepfe, nur der E-Mail-Weg legt drueben
+             kein Konto an (modus=anmelden, siehe start-routes.ts). -->
+        <p class="auth-schon">Schon ein Konto? <button type="button" class="link auth-link" data-go="anmelden">Hier anmelden</button></p>
         <p class="hint">Mit dem Fortfahren stimmst du zu, dass Pipeline AI Solutions deine Angaben speichert, um Beiträge für dich vorzubereiten. <a href="${esc(MOUNT || "/panel")}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a></p>
+      </section>`;
+  }
+
+  function anmeldenHtml() {
+    const liste = S.authProviders.filter((p) => p.available);
+    return `
+      <section class="hero">
+        <!-- "Willkommen zurück" gehoert dem Bildschirm, auf dem wir den Kunden bereits erkannt
+             haben (gueltige Sitzung). Hier wissen wir noch nicht, wer kommt - also die Handlung. -->
+        <h1>Anmelden</h1>
+        <p class="lede">Melde dich so an, wie du dein Konto angelegt hast. Es entsteht dabei nichts Neues.</p>
+        ${liste.length ? `<div class="auth-liste">
+          ${liste.map((p) => `<a class="auth-btn" href="${esc(MOUNT)}/auth/${esc(p.id)}">${AUTH_LOGO[p.id] || ""}Mit ${esc(p.name)} anmelden</a>`).join("")}
+        </div>
+        <div class="auth-trenner">oder</div>` : ""}
+        <form id="f-anmelden" novalidate>
+          <div class="field" style="margin-top:0">
+            <label for="email">E-Mail-Adresse</label>
+            <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="du@deine-firma.at" value="${esc(S.email || "")}" required autofocus>
+            <p class="error" id="err-email" aria-live="assertive"></p>
+          </div>
+          <div class="actions"><button class="btn lg" type="submit">Anmeldelink schicken</button></div>
+          <p class="auth-schon">Noch kein Konto? <button type="button" class="link auth-link" data-go="konto">Hier geht's los</button></p>
+        </form>
       </section>`;
   }
 
@@ -771,7 +797,7 @@
     else { btn.textContent = btn.dataset.label || btn.textContent; btn.classList.remove("is-busy"); }
   }
 
-  async function emailAbsenden(form) {
+  async function emailAbsenden(form, modus) {
     const email = form.email.value.trim();
     feldFehler("email", "");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { feldFehler("email", "Das sieht nicht nach einer E-Mail-Adresse aus. Bitte prüfe die Eingabe."); return; }
@@ -779,13 +805,18 @@
     const btn = $("button[type=submit]", form);
     beschaeftigt(btn, true, "Wird geprüft …");
     try {
-      const r = await api("POST", "/api/start/email", { email });
+      const r = await api("POST", "/api/start/email", modus ? { email, modus } : { email });
       if (r.status === "known") { S.mailGeschickt = r.mailed; go("gesendet"); return; }
       uebernehmen(r);
       go("website");
     } catch (err) {
       beschaeftigt(btn, false);
       feldFehler("email", err.message);
+      // Unbekannte Adresse im Anmelde-Bildschirm: der Weg nach vorn ist ein neues Konto.
+      if (err.data?.unbekannt) {
+        const box = $("#err-email");
+        if (box) box.innerHTML += ` <button type="button" class="link auth-link" data-go="email">Konto anlegen</button>`;
+      }
     }
   }
 
@@ -1023,6 +1054,7 @@
     const form = e.target;
     e.preventDefault();
     if (form.id === "f-email") emailAbsenden(form);
+    else if (form.id === "f-anmelden") emailAbsenden(form, "anmelden");
     else if (form.id === "f-website") vorschauAbsenden(form, "website");
     else if (form.id === "f-beschreibung") vorschauAbsenden(form, "beschreibung");
     else if (form.id === "f-anders") andersAbsenden(form);
