@@ -146,9 +146,12 @@ console.log("\nZuruecksetzen (Zusage 2):");
   ok("Zuruecksetzen ohne Anmeldung -> 401", ohne.status === 401, String(ohne.status));
 
   // Aufraeumen
+  // Gezielt DIESEN Testkunden pruefen, nicht die Gesamtzahl: ein paralleler Browserlauf oder
+  // ein Rest aus einem abgebrochenen Durchgang haette die Zaehlung sonst rot gefaerbt, ohne
+  // dass am Beenden etwas kaputt waere.
   const id2 = db.prepare("SELECT id FROM customers WHERE status = 'test' ORDER BY created_at DESC").get()?.id;
-  if (id2) await call("POST", "/api/start/test/end", { cookie: cookie2 });
-  ok("Beenden raeumt den Testkunden weg", db.prepare("SELECT COUNT(*) n FROM customers WHERE status = 'test'").get().n === 0);
+  await call("POST", "/api/start/test/end", { cookie: cookie2 });
+  ok("Beenden raeumt genau diesen Testkunden weg", Boolean(id2) && db.prepare("SELECT COUNT(*) n FROM customers WHERE id = ?").get(id2).n === 0, String(id2));
 }
 
 console.log(fehler ? `\n${fehler} Problem(e)` : "\nalles gruen");
