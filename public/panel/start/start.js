@@ -1089,12 +1089,21 @@
     }
   }
   const turnstileToken = () => { try { return S.turnstileToken || (S.turnstileWidget != null && window.turnstile ? window.turnstile.getResponse(S.turnstileWidget) : "") || ""; } catch { return S.turnstileToken || ""; } };
-  async function aufTurnstileWarten() {
+  /**
+   * Wartet auf die Bot-Pruefung. 25 Sekunden statt 8: auf app.pipeflow.at hat die Pruefung beim
+   * ersten Besuch messbar laenger gebraucht (19.09.2026), und der Kunde bekam dann eine Absage
+   * an der wichtigsten Stelle des ganzen Wegs. Wer wartet, sieht den Knopf arbeiten - hier darf
+   * es ruhig ein paar Sekunden dauern, aber es darf nicht scheitern. Der Aufrufer sagt ueber
+   * `melden`, wie der Knopf beschriftet ist, solange gewartet wird.
+   */
+  async function aufTurnstileWarten(melden) {
     if (!S.turnstileSiteKey || (S.customer && S.customer.authProvider)) return "";
-    const frist = Date.now() + 8000;
+    const frist = Date.now() + 25000;
+    let gemeldet = false;
     while (Date.now() < frist) {
       const t = turnstileToken();
       if (t) return t;
+      if (!gemeldet && Date.now() > frist - 22000) { gemeldet = true; melden?.(); }
       await new Promise((r) => setTimeout(r, 200));
     }
     return "";
@@ -1315,13 +1324,14 @@
       S.beschreibung = beschreibung; S.website = ""; body.description = beschreibung;
     }
     beschaeftigt(btn, true, art === "website" ? "Website wird gelesen …" : "Wird gelesen …");
-    const token = await aufTurnstileWarten();
+    const token = await aufTurnstileWarten(() => beschaeftigt(btn, true, "Sicherheitsprüfung läuft …"));
     if (token) body["cf-turnstile-response"] = token;
     else if (S.turnstileSiteKey && S.customer && !S.customer.authProvider) {
       beschaeftigt(btn, false);
       feldFehler(art === "website" ? "website" : "description", "Die Sicherheitsprüfung ist noch nicht durch. Bitte kurz warten und noch einmal tippen.");
       return;
     }
+    if (token) beschaeftigt(btn, true, art === "website" ? "Website wird gelesen …" : "Wird gelesen …");
     S.arbeitSeit = Date.now();
     S.jobFertigSeit = 0;
     try {

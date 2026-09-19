@@ -23,7 +23,11 @@ const BASE = process.env.STAGING_URL ?? "https://mcp.pipebot.at";
 const MOUNT = process.env.STAGING_MOUNT ?? "/panel/sandbox";
 const WEBSITE = process.env.TEST_WEBSITE ?? "channoine-mayr.at";
 const SHOTS = "docs/easy-onboarding/durchgang";
-const db = new Database("/root/mcp-server/data/panel-staging.db");
+// Standard ist die Sandbox. Fuer den Abnahmelauf auf der neuen Adresse werden BASE, MOUNT und
+// die Datenbank ueber Umgebungsvariablen umgestellt (STAGING_URL, STAGING_MOUNT, STAGING_DB).
+const db = new Database(process.env.STAGING_DB ?? "/root/mcp-server/data/panel-staging.db");
+/** Pfad ohne Basisadresse - MOUNT kann leer sein, dann traegt der Host die Trennung. */
+const ohneBasis = (u) => (MOUNT ? (u.split(MOUNT)[1] ?? u) : (u.split(new URL(BASE).host)[1] ?? u));
 
 let fehler = 0;
 const offen = [];
@@ -175,7 +179,7 @@ for (const breite of [360, 1440]) {
   const jsFehler = [];
   const httpFehler = [];
   page.on("pageerror", (e) => jsFehler.push(e.message));
-  page.on("response", (r) => { if (r.status() >= 400 && r.url().includes("/api/")) httpFehler.push(`${r.status()} ${r.url().split(MOUNT)[1] ?? r.url()}`); });
+  page.on("response", (r) => { if (r.status() >= 400 && r.url().includes("/api/")) httpFehler.push(`${r.status()} ${ohneBasis(r.url())}`); });
   const shot = (name) => page.screenshot({ path: `${SHOTS}/${breite}-${name}.png`, fullPage: true });
 
   // --- Einstieg
