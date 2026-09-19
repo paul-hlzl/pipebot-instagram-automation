@@ -37,6 +37,14 @@ const kundenVorher = (() => { const q = new Database(KOPIE, { readonly: true });
 console.log(`Kopie angelegt: ${kundenVorher.k} Kunden, ${kundenVorher.p} geplante Beitraege`);
 
 const kind = spawn("node", ["/root/mcp-sandbox/dist/index.js"], { cwd: "/root/mcp-sandbox", env, stdio: ["ignore", "pipe", "pipe"] });
+// Zweiter Prozess, gleiche Produktionskonfiguration, nur ohne Bot-Pruefung - fuer den
+// Deckel-Nachweis weiter unten (Port 3178, dieselbe Kopie).
+const envOhneBot = { ...env, PORT: "3178", PANEL_BASE_URL: "http://127.0.0.1:3178" };
+// Leer setzen, nicht loeschen: der Prozess liest die .env selbst nach, und dotenv ueberschreibt
+// nur, was noch gar nicht gesetzt ist.
+envOhneBot.TURNSTILE_SECRET_KEY = ""; envOhneBot.TURNSTILE_SITE_KEY = "";
+const kind2 = spawn("node", ["/root/mcp-sandbox/dist/index.js"], { cwd: "/root/mcp-sandbox", env: envOhneBot, stdio: ["ignore", "pipe", "pipe"] });
+const BASE2 = "http://127.0.0.1:3178";
 let log = "";
 kind.stdout.on("data", (d) => { log += d; });
 kind.stderr.on("data", (d) => { log += d; });
@@ -64,6 +72,39 @@ try {
   console.log("\nProduktionsverhalten der Grenzen");
   const prov = await (await fetch(`${BASE}/panel/api/providers`)).json();
   ok("Kein Sandbox-Band, Grenzen an, kein Testmodus", prov.sandbox === false && prov.previewLimitsOff === false && prov.testmodeAvailable === false, JSON.stringify({ sandbox: prov.sandbox, off: prov.previewLimitsOff, test: prov.testmodeAvailable }));
+
+  console.log("\nKostendeckel: greifen sie hier wirklich?");
+  {
+    // Nicht nur die Meldung pruefen, sondern den Deckel selbst zuschlagen lassen. Kein einziger
+    // KI-Aufruf: die Absage faellt VOR der Analyse, es entstehen keine Kosten.
+    // Einzige Abweichung von der Produktionskonfiguration in diesem Abschnitt: die Bot-Pruefung
+    // (Turnstile) ist fuer den zweiten Prozess aus, sonst kommt ein Skript gar nicht erst bis zum
+    // Deckel - sie sitzt davor und ist ein eigener Schutz.
+    const mail = `deckel-${Date.now()}@example.invalid`;
+    const anlegen = await fetch(`${BASE2}/panel/api/start/email`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: mail }) });
+    const ck = (anlegen.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("pp_session=")) ?? "";
+    const kid = db.prepare("SELECT id FROM customers WHERE email=?").get(mail)?.id ?? "cus_deckel";
+    const seed = (ip, domain, kunde) => db.prepare("INSERT INTO start_previews (id, ip, domain, email, customer_id, kind, created_at) VALUES (?,?,?,?,?, 'preview', ?)")
+      .run(`prev_deckel_${Math.random().toString(36).slice(2, 11)}`, ip, domain, "seed@example.invalid", kunde, new Date(Date.now() - 60_000).toISOString());
+    const vorschau = (koerper) => fetch(`${BASE2}/panel/api/start/preview`, { method: "POST", headers: { "content-type": "application/json", cookie: ck, "x-forwarded-for": "203.0.113.9" }, body: JSON.stringify(koerper) });
+
+    for (let i = 0; i < 6; i++) seed("203.0.113.9", "deckel-test.example", kid);
+    for (let i = 0; i < 45; i++) seed(`198.51.100.${i}`, `d${i}.example`, "cus_deckel_fremd");
+    const abgewiesen = await vorschau({ website: "deckel-test.example" });
+    const text = await abgewiesen.text();
+    ok("Die Vorschau wird abgewiesen, sobald die Zaehler ueber der Grenze stehen (429)", abgewiesen.status === 429, `${abgewiesen.status} ${text.slice(0, 90)}`);
+    ok("Die Absage nennt dem Kunden einen Zeitpunkt statt einer Fehlernummer", /morgen|Stunde|Uhr|spaeter|später/i.test(text), text.slice(0, 120));
+    ok("Kein einziger Analyse-Aufruf dabei bezahlt", db.prepare("SELECT COUNT(*) n FROM usage_costs WHERE customer_id=?").get(kid).n === 0);
+
+    const testEinstieg = await fetch(`${BASE2}/panel/start/test?key=beliebig`, { redirect: "manual" });
+    // 404 oder 401: die Route ist gar nicht da, der Aufruf faellt durch. Entscheidend ist, dass
+    // keine Sitzung entsteht.
+    const testCookie = (testEinstieg.headers.getSetCookie?.() ?? []).some((c) => c.startsWith("pp_session="));
+    ok("Der Testmodus-Einstieg gibt es hier nicht und legt keine Sitzung an", [401, 404].includes(testEinstieg.status) && !testCookie, `${testEinstieg.status}, Cookie ${testCookie}`);
+
+    db.prepare("DELETE FROM start_previews WHERE id LIKE 'prev_deckel_%'").run();
+    db.prepare("DELETE FROM customers WHERE email=?").run(mail);
+  }
 
   console.log("\nJeder bestehende Kunde: Anmeldung, Zustand, Woche");
   const kunden = db.prepare("SELECT id, company, ui_mode FROM customers WHERE status='active' ORDER BY created_at").all();
@@ -112,7 +153,7 @@ try {
   await browser.close();
   db.close();
 } finally {
-  kind.kill("SIGTERM");
+  kind.kill("SIGTERM"); kind2.kill("SIGTERM");
   await new Promise((x) => setTimeout(x, 800));
   for (const f of [KOPIE, `${KOPIE}-wal`, `${KOPIE}-shm`]) { try { fs.unlinkSync(f); } catch { /* weg */ } }
   console.log("\nKopie geloescht, Prozess beendet.");

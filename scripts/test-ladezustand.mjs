@@ -56,7 +56,8 @@ for (const [breite, hoehe] of [[360, 780], [1440, 900]]) {
   await page.fill("#website", WEBSITE);
   const t0 = Date.now();
   await page.click("#btn-vorschau");
-  await page.waitForSelector(".steps", { timeout: 20000 });
+  // Seit dem neuen Ladebildschirm (19.09.2026) heisst der Block .lade-zeile, nicht mehr .steps.
+  await page.waitForSelector(".lade-zeile", { timeout: 20000 });
   const tLade = Date.now();
   await page.waitForSelector(".streifen", { timeout: 120000 });
   const tFertig = Date.now();

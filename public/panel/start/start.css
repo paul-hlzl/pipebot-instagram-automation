@@ -303,7 +303,9 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .post-h { font-size: 17px; font-weight: 500; }
 .post-c { color: var(--text-2); font-size: var(--t-small); line-height: 1.55; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .post.is-open .post-c { display: block; }
-.post-more { justify-self: start; padding: 4px 0; min-height: 32px; font-size: var(--t-small); }
+.post-more { justify-self: start; padding: 11px 0; min-height: 44px; font-size: var(--t-small); }
+/* 44 px auch hier: der Textaufklapper war mit 32 px die einzige Flaeche unter der Grenze
+   (gemessen am 19.09.2026 im Durchgang). Die Schrift bleibt klein, nur die Flaeche waechst. */
 .post-actions { display: flex; flex-wrap: wrap; gap: 8px 10px; padding: 0 14px 14px; align-items: center; }
 .post-actions .link { padding: 6px 0; min-height: var(--tap); font-size: 14px; }
 .griff { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--t-micro); cursor: grab; touch-action: none; min-height: var(--tap); padding: 0 6px; border-radius: 8px; }

@@ -13,6 +13,7 @@
  * Verlauf - es deckt "falsch getippt", mehr nicht. Die Herkunft wird dabei NIE auf 'auto'
  * zurueckgesetzt: was der Kunde einmal angefasst hat, bleibt geschuetzt, auch nach Rueckgaengig.
  */
+import express from "express";
 import type { Request, Response, Router } from "express";
 import sharp from "sharp";
 import { db, nowIso, type CustomerRow } from "./db.js";
@@ -135,26 +136,6 @@ export function registerWocheRoutes(router: Router, ctx: WocheKontext): void {
   });
 
   // ---------- Eigenes Bild ----------
-  router.post("/api/planned-posts/:id/image", async (req, res) => {
-    const k = mitKunde(req, res); if (!k) return;
-    if (!AENDERBAR.has(k.plan.status)) { res.status(400).json({ error: "Dieser Beitrag lässt sich nicht mehr ändern." }); return; }
-    if (ctx.rateLimited(`bild:${k.c.id}`, 30, 3_600_000)) { res.status(429).json({ error: "Zu viele Bilder in kurzer Zeit." }); return; }
-    const m = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.image ?? ""));
-    if (!m) { res.status(400).json({ error: "Bitte ein Bild als PNG, JPEG oder WebP wählen." }); return; }
-    try {
-      const roh = Buffer.from(m[2], "base64");
-      // Auf ein sauberes Quadrat bringen - dieselbe Groesse, die Pipeflow selbst erzeugt.
-      const fertig = await sharp(roh).rotate().resize(1080, 1080, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
-      const url = await uploadImageBase64(fertig.toString("base64"));
-      merken(k.plan.id, "Eigenes Bild");
-      db.prepare("UPDATE planned_posts SET image_url = ?, image_source = 'kunde', updated_at = ? WHERE id = ?").run(url, nowIso(), k.plan.id);
-      kundenarbeit(k.plan.id);
-      antwort(res, k.plan.id);
-    } catch {
-      res.status(400).json({ error: "Das Bild konnte nicht verarbeitet werden." });
-    }
-  });
-
   // ---------- Eigener Beitrag ----------
   router.post("/api/planned-posts", async (req, res) => {
     const c = ctx.currentCustomer(req);
@@ -202,5 +183,45 @@ export function registerWocheRoutes(router: Router, ctx: WocheKontext): void {
       .run(status, s.scheduled_for, s.headline, s.caption, s.image_url, s.image_source, s.accent_color_used, nowIso(), k.plan.id);
     db.prepare("DELETE FROM planned_post_undo WHERE post_id = ?").run(k.plan.id);
     res.json({ post: getPlannedPost(k.plan.id), label: u.label });
+  });
+}
+
+/**
+ * Die Bildroute wird SEPARAT montiert, und zwar VOR dem globalen 50-KB-Parser in router.ts.
+ * Ein eigener Parser an der Route selbst genuegt nicht: der globale Parser laeuft frueher und
+ * hat den Koerper dann schon abgelehnt (gemessen am 19.09.2026 mit einem 11,8-MB-Handyfoto:
+ * "entity.too.large", limit 51200). Der Browser verkleinert vorher auf 1080x1080, die 8 MB sind
+ * die Reserve fuer Geraete, die das nicht koennen.
+ */
+export function registerWocheBildRoute(router: Router, ctx: WocheKontext): void {
+  const mitKunde = (req: Request, res: Response): { c: CustomerRow; plan: PlannedPost } | null => {
+    const c = ctx.currentCustomer(req);
+    if (!c) { res.status(401).json({ error: "Nicht angemeldet." }); return null; }
+    const plan = getPlannedPost(String(req.params.id ?? ""));
+    if (!plan || plan.customerId !== c.id) { res.status(404).json({ error: "Dieser Beitrag existiert nicht." }); return null; }
+    return { c, plan };
+  };
+  const antwort = (res: Response, id: string) => res.json({ post: getPlannedPost(id) });
+  // Eigener Bild-Parser: der globale Parser in router.ts steht bei 50 KB, ein Bild sprengt das
+  // sofort (413, fuer den Kunden ein nichtssagender Fehler). Der Browser schickt hier ~200 KB,
+  // 8 MB sind die Reserve fuer Clients, die nicht verkleinern koennen.
+  router.post("/api/planned-posts/:id/image", express.json({ limit: "8mb" }), async (req, res) => {
+    const k = mitKunde(req, res); if (!k) return;
+    if (!AENDERBAR.has(k.plan.status)) { res.status(400).json({ error: "Dieser Beitrag lässt sich nicht mehr ändern." }); return; }
+    if (ctx.rateLimited(`bild:${k.c.id}`, 30, 3_600_000)) { res.status(429).json({ error: "Zu viele Bilder in kurzer Zeit." }); return; }
+    const m = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.image ?? ""));
+    if (!m) { res.status(400).json({ error: "Bitte ein Bild als PNG, JPEG oder WebP wählen." }); return; }
+    try {
+      const roh = Buffer.from(m[2], "base64");
+      // Auf ein sauberes Quadrat bringen - dieselbe Groesse, die Pipeflow selbst erzeugt.
+      const fertig = await sharp(roh).rotate().resize(1080, 1080, { fit: "cover", position: "attention" }).jpeg({ quality: 90 }).toBuffer();
+      const url = await uploadImageBase64(fertig.toString("base64"));
+      merken(k.plan.id, "Eigenes Bild");
+      db.prepare("UPDATE planned_posts SET image_url = ?, image_source = 'kunde', updated_at = ? WHERE id = ?").run(url, nowIso(), k.plan.id);
+      kundenarbeit(k.plan.id);
+      antwort(res, k.plan.id);
+    } catch {
+      res.status(400).json({ error: "Das Bild konnte nicht verarbeitet werden." });
+    }
   });
 }

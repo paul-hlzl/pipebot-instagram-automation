@@ -70,7 +70,7 @@ import { analyzeWebsite } from "../website-analyze.js";
 import { generateImageUrl } from "../fal.js";
 import { registerStartRoutes } from "./start-routes.js";
 import { registerTestmodeRoutes, testmodusMoeglich } from "./start-testmode.js";
-import { registerWocheRoutes, merken } from "./woche-routes.js";
+import { registerWocheRoutes, registerWocheBildRoute, merken } from "./woche-routes.js";
 import { limitsAusgeschaltet } from "./start-quota.js";
 import { runBackfillJob } from "./start-jobs.js";
 import { featuresForTier, normalizeTier } from "./tiers.js";
@@ -715,6 +715,10 @@ export function createPanelRouter(): Router {
       res.json(publicState(db.prepare("SELECT * FROM customers WHERE id = ?").get(c.id) as CustomerRow));
     }),
   );
+
+  // Eigenes Beitragsbild: braucht einen groesseren Koerper als 50 KB und muss darum - wie die
+  // Sprachaufnahme oben - VOR dem globalen Parser stehen.
+  registerWocheBildRoute(router, { currentCustomer, rateLimited });
 
   router.use(express.json({ limit: "50kb" }));
 

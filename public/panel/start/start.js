@@ -1567,10 +1567,39 @@
     try { const { post } = await api("POST", "/api/planned-posts", body); sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(post.id, "Eigener Beitrag eingeplant"); }
     catch (err) { $("#err-eigen").textContent = err.message; } finally { beschaeftigt(btn, false); }
   }
+  /**
+   * Bringt ein beliebiges Kundenbild auf 1080x1080, BEVOR es den Browser verlaesst.
+   * Vorher stand hier eine Absage ab 2,5 MB - ein Foto vom Handy hat 4 bis 12 MB, der Kunde
+   * kam also mit dem normalsten Bild der Welt nicht durch. Jetzt rechnet der Browser es
+   * herunter (mittiger Ausschnitt, dieselbe Kante wie der Server) und schickt ~200 KB.
+   */
+  async function bildVerkleinern(datei) {
+    // Kein URL.createObjectURL: unsere Inhaltsrichtlinie erlaubt bei Bildern nur 'self', data: und
+    // den Medien-Server - eine blob:-Adresse wird vom Browser stillschweigend verworfen (gemessen
+    // am 19.09.2026). createImageBitmap braucht gar keine Adresse; der Rueckfallweg nimmt data:.
+    let bild, breite, hoehe;
+    try {
+      bild = await createImageBitmap(datei);
+      breite = bild.width; hoehe = bild.height;
+    } catch {
+      const dataUrl = await new Promise((f, r) => { const fr = new FileReader(); fr.onload = () => f(fr.result); fr.onerror = () => r(new Error("Die Datei liess sich nicht lesen.")); fr.readAsDataURL(datei); });
+      bild = await new Promise((f, r) => { const img = new Image(); img.onload = () => f(img); img.onerror = () => r(new Error("Diese Datei ist kein Bild, das dein Browser lesen kann.")); img.src = dataUrl; });
+      breite = bild.naturalWidth; hoehe = bild.naturalHeight;
+    }
+    if (!breite || !hoehe) throw new Error("Diese Datei ist kein Bild, das dein Browser lesen kann.");
+    const K = 1080;
+    const seite = Math.min(breite, hoehe);
+    const cv = document.createElement("canvas"); cv.width = K; cv.height = K;
+    cv.getContext("2d").drawImage(bild, (breite - seite) / 2, (hoehe - seite) / 2, seite, seite, 0, 0, K, K);
+    if (bild.close) bild.close();
+    return cv.toDataURL("image/jpeg", 0.9);
+  }
   async function bildHochladen(id, datei) {
     if (!datei) return;
-    if (datei.size > 2.5 * 1024 * 1024) { $("#err-bearbeiten").textContent = "Bitte ein Bild bis 2,5 MB."; return; }
-    const dataUrl = await new Promise((f, r) => { const fr = new FileReader(); fr.onload = () => f(fr.result); fr.onerror = r; fr.readAsDataURL(datei); });
+    $("#err-bearbeiten").textContent = "Bild wird vorbereitet …";
+    let dataUrl;
+    try { dataUrl = await bildVerkleinern(datei); $("#err-bearbeiten").textContent = ""; }
+    catch (err) { $("#err-bearbeiten").textContent = err.message; return; }
     try { const { post } = await api("POST", `/api/planned-posts/${id}/image`, { image: dataUrl }); sheetSchliessen(); await postAktualisieren(post); rueckAnbieten(id, "Eigenes Bild gesetzt"); }
     catch (err) { $("#err-bearbeiten").textContent = err.message; }
   }
