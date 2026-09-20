@@ -686,12 +686,19 @@
     if (p.origin === "kunde" && !p.pillarTitle && p.status !== "rejected" && p.status !== "published") return ["eigen", "Eigener Beitrag"];
     return ZUSTAND[p.status] || ["geplant", p.status];
   }
+  /** Geht bei diesem Beitrag ueberhaupt ein Bild mit? Bei LinkedIn haengt das an der
+   *  Einstellung "mit Bild / nur Text mit Hashtags" (20.09.2026). */
+  function mitBild(p) {
+    return !(p.channel === "linkedin" && S.customer?.linkedinImageMode === "text");
+  }
   function postHtml(p, opts = {}) {
     const meta = KANAL[p.channel] || KANAL.ig_feed;
     const c = S.customer;
     const wm = (c && (c.watermarkText || c.company)) || "";
     const [zk, zt] = zustandVon(p);
-    const medien = p.imageUrl
+    const medien = !mitBild(p)
+      ? ""
+      : p.imageUrl
       ? `<img src="${esc(p.imageUrl)}" alt="Beitragsbild: ${esc(p.headline || "")}" loading="lazy">`
       : `<div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div><span class="kachel-notiz">${c?.emailVerified || bilderKostenlos() ? "Bild wird gerade erstellt" : "Bild folgt nach der Bestätigung"}</span>`;
     const aenderbar = ["planned", "edited", "approved"].includes(p.status);
@@ -705,7 +712,7 @@
     }
     return `<article class="post${p.status === "rejected" ? " ist-uebersprungen" : ""}" data-id="${esc(p.id)}">
       <div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><span class="zust ${zk}"><i></i>${zt}</span></div>
-      <div class="media ${meta.format}">${medien}</div>
+      ${medien ? `<div class="media ${meta.format}">${medien}</div>` : ""}
       <div class="post-body"><h3 class="post-h">${esc(p.headline || "")}</h3>${p.caption ? `<p class="post-c">${esc(p.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}</div>
       ${aktionen ? `<div class="post-actions">${aktionen}</div>` : ""}
     </article>`;
@@ -859,6 +866,11 @@
          ${stufe.weekdayMatrix ? "" : `<span class="small muted">Einzelne Wochentage je Kanal gibt es in der nächsten Stufe.</span>`}`)}
       ${planZeile("farbe", "Farbe", `<span class="punkt" style="background:${esc(kachelHintergrund(c))}"></span>${esc((c.accentColor || STANDARD_AKZENT).toUpperCase())}${c.gradientEnabled && c.gradientColor2 ? ` → ${esc(c.gradientColor2.toUpperCase())}` : ""}${S.status?.summary?.colors?.gradientEnabled ? `<br><span class="muted">von deiner Website übernommen</span>` : ""}`,
         pickerHtml(c))}
+      ${c.linkedinEnabled ? planZeile("linkedinbild", "LinkedIn-Beiträge", `${c.linkedinImageMode === "text" ? "Nur Text mit Hashtags" : "Mit Bild"}`,
+        `<div class="wahl">
+           <label><input type="radio" name="linkedinImageMode" value="bild" ${c.linkedinImageMode === "text" ? "" : "checked"}><span>Mit Bild<small>wie bei Instagram, in deinen Markenfarben</small></span></label>
+           <label><input type="radio" name="linkedinImageMode" value="text" ${c.linkedinImageMode === "text" ? "checked" : ""}><span>Nur Text mit Hashtags<small>kein Bild, reiner Textbeitrag</small></span></label>
+         </div>`) : ""}
       ${planZeile("freigabe", "Freigabe", `${c.approvalMode ? "An" : "Aus"}<br><span class="muted">${c.approvalMode ? "Jeder Beitrag wartet auf dein OK, bevor er rausgeht." : "Beiträge gehen zur geplanten Zeit automatisch raus."}</span>`,
         `<label class="schalter"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Freigabe an - jeder Beitrag wartet auf dein OK</span></label>
          <span class="small muted">Aus heißt: Beiträge gehen zur geplanten Zeit automatisch raus. Du siehst sie trotzdem vorher in der Übersicht.</span>`)}
@@ -884,6 +896,7 @@
     const meta = KANAL[p.channel] || KANAL.ig_feed;
     const c = S.customer;
     const wm = (c && (c.watermarkText || c.company)) || "";
+    if (!mitBild(p)) return `<article class="post"><div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><time>${esc(kurzDatum(p.scheduledFor))}</time></div><div class="post-body"><h3 class="post-h">${esc(p.headline || "")}</h3><p class="small muted">Nur Text mit Hashtags</p></div></article>`;
     return `<article class="post"><div class="post-meta"><span class="chan ${esc(p.channel)}">${esc(meta.label)}</span><time>${esc(kurzDatum(p.scheduledFor))}</time></div>
       <div class="media ${meta.format}"><div class="kachel" data-kachel style="background:${esc(kachelHintergrund())}"><span class="kachel-h" style="${kachelSchrift()}">${esc(p.headline || "")}</span><span class="kachel-wm" style="${kachelSchrift()}">${esc(wm)}</span></div></div></article>`;
   }
@@ -1053,9 +1066,11 @@
         const meta = KANAL[a.channel] || KANAL.ig_feed;
         return `<article class="post is-open" data-approval="${esc(a.id)}">
           <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(zeitpunkt(a.createdAt))}</time></div>
-          ${a.imageUrl
-            ? `<button type="button" class="media media-taste ${meta.format}" data-auf aria-expanded="true" aria-label="Beitrag ein- oder ausklappen"><img src="${esc(a.imageUrl)}" alt="Beitragsbild: ${esc(a.headline || "")}" loading="lazy"></button>`
-            : `<div class="media ${meta.format}"><div class="skeleton">Kein Bild</div></div>`}
+          ${!mitBild(a)
+            ? ""
+            : a.imageUrl
+              ? `<button type="button" class="media media-taste ${meta.format}" data-auf aria-expanded="true" aria-label="Beitrag ein- oder ausklappen"><img src="${esc(a.imageUrl)}" alt="Beitragsbild: ${esc(a.headline || "")}" loading="lazy"></button>`
+              : `<div class="media ${meta.format}"><div class="skeleton">Kein Bild</div></div>`}
           <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-auf aria-expanded="true">weniger zeigen</button>` : ""}</div>
           <div class="post-actions"><button type="button" class="btn sm" data-freigeben="${esc(a.id)}">Freigeben</button><button type="button" class="link" data-ablehnen="${esc(a.id)}">Ablehnen</button></div>
         </article>`;
@@ -1435,6 +1450,7 @@
       if (patch.gradientEnabled && !patch.gradientColor2) { fehlerEl.textContent = "Bitte eine zweite Farbe wählen oder den Verlauf ausschalten."; return; }
     }
     if (id === "freigabe") { patch.approvalMode = form.approvalMode.checked; }
+    if (id === "linkedinbild") { patch.linkedinImageMode = $("input[name=linkedinImageMode]:checked", form)?.value === "text" ? "text" : "bild"; }
     const btn = $("button[type=submit]", form);
     beschaeftigt(btn, true, "Speichern …");
     try {

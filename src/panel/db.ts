@@ -447,6 +447,11 @@ migrateColumns("customers", [
   // /{comment-id}/replies, 'approval' legt sie stattdessen wie ein Beitrags-Entwurf zur Freigabe
   // ab - gleiches Grundprinzip wie approval_mode bei Beitraegen, aber ein eigener Schalter (ein
   // Kunde kann Beitraege automatisch, Kommentare aber nur mit Freigabe wollen, oder umgekehrt).
+  // 20.09.2026: LinkedIn mit Bild oder nur Text mit Hashtags. Bis dahin galt fuer Panel-Kunden
+  // ausnahmslos "immer mit Bild" (Bugreport 13.09., assertLinkedInHasImage) - das war eine
+  // Entscheidung fuer alle statt einer Wahl des Kunden. Standard bleibt 'bild', ein bestehender
+  // Kunde merkt also nichts. Instagram hat die Wahl bewusst nicht: dort geht ohne Bild nichts.
+  ["linkedin_image_mode", "TEXT NOT NULL DEFAULT 'bild'"],
   ["comment_automation_enabled", "INTEGER NOT NULL DEFAULT 0"],
   ["comment_automation_mode", "TEXT NOT NULL DEFAULT 'approval'"],
   // Panel v11: Erst-Rundgang genau einmal pro Kunde zeigen. Bewusst serverseitig und nicht im
@@ -756,6 +761,7 @@ export interface CustomerRow {
   pause_from: string | null;
   pause_until: string | null;
   approval_mode: number;
+  linkedin_image_mode: string;
   active_theme_id: string | null;
   logo_url: string | null;
   email_verified: number;

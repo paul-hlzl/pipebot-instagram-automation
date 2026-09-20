@@ -43,7 +43,7 @@ import {
 } from "./credentials.js";
 import { isPostingDayForChannel, nextViennaWeekly, planWindowEnd, viennaDateStr, viennaWeekday, type PostingChannel } from "./schedule.js";
 import { wochenfarbe } from "./brand-colors.js";
-import { darfNeuGeschriebenWerden } from "./credentials.js";
+import { darfNeuGeschriebenWerden, linkedinNurText } from "./credentials.js";
 import { sprachFehler } from "./sprache.js";
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
@@ -454,7 +454,12 @@ export async function mitKundenmarke(
   headline: string | undefined,
   imageUrl: string | undefined,
 ): Promise<string | undefined> {
-  if (!customerId || !headline || !imageUrl) return imageUrl;
+  if (!customerId) return imageUrl;
+  // "Nur Text mit Hashtags": dann geht gar kein Bild mit - auch keines, das die Routine
+  // mitschickt. Damit ist die Markenfrage bei LinkedIn in diesem Fall gegenstandslos. Diese
+  // Pruefung steht VOR der Ueberschrift: ein LinkedIn-Beitrag hat oft gar keine.
+  if (channel === "linkedin" && linkedinNurText(customerId)) return undefined;
+  if (!headline || !imageUrl) return imageUrl;
   const branding = resolveImageBranding(customerId);
   if (!branding.gradient || !branding.accentColor) return imageUrl;
   const freigegeben = db
@@ -601,6 +606,9 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
     { channel: "linkedin", enabled: Boolean(row.linkedin_enabled) },
   ];
 
+  // Steht LinkedIn auf "nur Text mit Hashtags", entsteht fuer diesen Kanal von vornherein kein
+  // Bild - nicht eines, das spaeter weggelassen wird. Das spart den Aufruf und die Kosten.
+  const linkedinOhneBild = linkedinNurText(row.id);
   // Erst alle offenen Slots einsammeln (inkl. Saeulen-Zuweisung in Planreihenfolge - dieselbe
   // Rotation wie bisher, nur vorab statt unmittelbar vor jeder Generierung), dann abarbeiten.
   let skippedExisting = 0;
@@ -625,7 +633,9 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
       }
       const pillar = pickWeightedPillar(pillars, lastPillarTitle);
       if (pillar) lastPillarTitle = pillar.title;
-      const withImage = opts.imageBudget == null || slots.filter((s) => s.withImage).length < opts.imageBudget;
+      const withImage = channel === "linkedin" && linkedinOhneBild
+        ? false
+        : opts.imageBudget == null || slots.filter((s) => s.withImage).length < opts.imageBudget;
       slots.push({ channel, dateStr, pillar, withImage });
     }
   }
@@ -689,7 +699,8 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
 export async function recolorPlannedPosts(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
   const today = viennaDateStr();
   const to = planWindowEnd();
-  const rows = listPlannedPosts(row.id, today, to).filter((p) => p.headline && p.imageUrl && ["planned", "edited", "approved"].includes(p.status) && p.imageSource !== "kunde");
+  const ohneBild = linkedinNurText(row.id);
+  const rows = listPlannedPosts(row.id, today, to).filter((p) => p.headline && p.imageUrl && ["planned", "edited", "approved"].includes(p.status) && p.imageSource !== "kunde" && !(ohneBild && p.channel === "linkedin"));
   if (!rows.length) return { filled: 0, failed: 0 };
   const branding = resolveImageBranding(row.id);
   let filled = 0;
@@ -729,7 +740,9 @@ export interface BackfillResult {
 export async function backfillMissingImages(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
   const today = viennaDateStr();
   const to = planWindowEnd();
-  const rows = listPlannedPostsWithoutImage(row.id, today, to).filter((p) => p.headline);
+  // Kein Bild nachtragen, wo bewusst keines hingehoert (LinkedIn auf "nur Text").
+  const ohneBild = linkedinNurText(row.id);
+  const rows = listPlannedPostsWithoutImage(row.id, today, to).filter((p) => p.headline && !(ohneBild && p.channel === "linkedin"));
   if (!rows.length) return { filled: 0, failed: 0 };
   const branding = resolveImageBranding(row.id);
   let filled = 0;

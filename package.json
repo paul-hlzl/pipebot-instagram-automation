@@ -47,7 +47,8 @@
     "test:planweite": "node --import tsx --test scripts/planweite.test.ts",
     "test:freigabe": "node scripts/test-freigabe.mjs",
     "test:wochenlauf": "node scripts/test-wochenlauf.mjs",
-    "test:marke-anfrage": "node scripts/test-marke-anfrage.mjs"
+    "test:marke-anfrage": "node scripts/test-marke-anfrage.mjs",
+    "test:linkedin-text": "node scripts/test-linkedin-textmodus.mjs"
   },
   "keywords": [
     "mcp",

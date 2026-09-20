@@ -942,8 +942,22 @@ export function assertRequiredElements(customerId: string | undefined, ...texts:
  * führt. Call this from every LinkedIn-bound save/publish path (save_pending_approval,
  * submitPlannedPostForApproval, publish_linkedin_post) before the actual save/network call.
  */
-export function assertLinkedInHasImage(channel: string, imageUrl: string | null | undefined): void {
+/**
+ * Veroeffentlicht dieser Kunde LinkedIn-Beitraege nur als Text mit Hashtags? (Einstellung vom
+ * 20.09.2026, Standard 'bild'.) Bewusst eine Abfrage an genau einer Stelle: sowohl die Planung
+ * (kein Bild erzeugen, spart Kosten) als auch das Veroeffentlichen (Text statt Bildbeitrag)
+ * haengen daran, und beide muessen dasselbe sehen.
+ */
+export function linkedinNurText(customerId?: string | null): boolean {
+  if (!customerId) return false;
+  const row = db.prepare("SELECT linkedin_image_mode FROM customers WHERE id = ?").get(customerId) as { linkedin_image_mode?: string } | undefined;
+  return row?.linkedin_image_mode === "text";
+}
+
+export function assertLinkedInHasImage(channel: string, imageUrl: string | null | undefined, customerId?: string | null): void {
   if (channel !== "linkedin") return;
+  // Steht die Einstellung auf "nur Text", ist ein fehlendes Bild kein Fehler, sondern der Wunsch.
+  if (linkedinNurText(customerId)) return;
   if (!imageUrl || !imageUrl.trim()) {
     throw new Error(
       "LinkedIn-Beiträge brauchen immer ein Bild (dieselbe Bildgenerierung wie für den Instagram-Feed - " +
@@ -1694,7 +1708,7 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
   const checkTexts = plan.channel === "ig_story" ? [plan.headline ?? undefined] : [plan.headline ?? undefined, plan.caption ?? undefined];
   assertNoBannedWords(plan.customerId, ...checkTexts);
   assertRequiredElements(plan.customerId, ...checkTexts);
-  assertLinkedInHasImage(plan.channel, plan.imageUrl);
+  assertLinkedInHasImage(plan.channel, plan.imageUrl, plan.customerId);
 
   const provider = plan.channel === "linkedin" ? "linkedin" : "instagram";
   const approval = savePendingApproval({

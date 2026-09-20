@@ -258,6 +258,8 @@ interface BriefingInput {
   activeWeekdays: string; instagramWeekdays: string; linkedinWeekdays: string;
   pauseFrom: string; pauseUntil: string;
   approvalMode: boolean;
+  /** 'bild' (Standard) oder 'text' - nur fuer LinkedIn, siehe db.ts. */
+  linkedinImageMode: string;
   notifyOnPublish: boolean;
   notifyWeeklyReport: boolean;
   commentAutomationEnabled: boolean;
@@ -339,6 +341,7 @@ function parseBriefing(body: Record<string, unknown>): { data: BriefingInput; er
     pauseFrom: str(body.pauseFrom, 10),
     pauseUntil: str(body.pauseUntil, 10),
     approvalMode: bool(body.approvalMode, false),
+    linkedinImageMode: str(body.linkedinImageMode, 10) === "text" ? "text" : "bild",
     notifyOnPublish: bool(body.notifyOnPublish, false),
     notifyWeeklyReport: bool(body.notifyWeeklyReport, false),
     commentAutomationEnabled: bool(body.commentAutomationEnabled, false),
@@ -475,6 +478,7 @@ function publicState(c: CustomerRow) {
       activeWeekdays: c.active_weekdays, instagramWeekdays: c.instagram_weekdays, linkedinWeekdays: c.linkedin_weekdays,
       pauseFrom: c.pause_from, pauseUntil: c.pause_until,
       approvalMode: Boolean(c.approval_mode),
+      linkedinImageMode: c.linkedin_image_mode === "text" ? "text" : "bild",
       notifyOnPublish: Boolean(c.notify_on_publish),
       notifyWeeklyReport: Boolean(c.notify_weekly_report),
       commentAutomationEnabled: Boolean(c.comment_automation_enabled),
@@ -1165,7 +1169,7 @@ export function createPanelRouter(): Router {
       `INSERT INTO customers (id, company, contact_name, email, website, industry, about, tone, frequency, post_time,
          accent_color, watermark_text, avoid_topics, cta_preference, trial_ends_at,
          ig_feed_enabled, ig_story_enabled, linkedin_enabled, hashtag_pref, emojis_enabled, language, banned_words, required_elements, custom_hashtags,
-         active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode, notify_on_publish, notify_weekly_report,
+         active_weekdays, instagram_weekdays, linkedin_weekdays, pause_from, pause_until, approval_mode, linkedin_image_mode, notify_on_publish, notify_weekly_report,
          gradient_enabled, gradient_color2, gradient_direction, font_choice,
          comment_automation_enabled, comment_automation_mode,
          google_review_automation_enabled, google_review_mode, google_review_posts_enabled, google_review_post_min_stars,
@@ -1177,7 +1181,7 @@ export function createPanelRouter(): Router {
       data.tone, data.frequency, data.postTime,
       data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null, trialEndsAt,
       data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null, data.customHashtags || null,
-      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
+      data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.linkedinImageMode, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
       data.gradientEnabled ? 1 : 0, data.gradientColor2 || null, data.gradientDirection, data.fontChoice,
       data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
       data.googleReviewAutomationEnabled ? 1 : 0, data.googleReviewMode, data.googleReviewPostsEnabled ? 1 : 0, data.googleReviewPostMinStars,
@@ -1246,7 +1250,7 @@ export function createPanelRouter(): Router {
       `UPDATE customers SET company=?, contact_name=?, email=?, website=?, industry=?, about=?, tone=?, frequency=?, post_time=?,
          accent_color=?, watermark_text=?, avoid_topics=?, cta_preference=?,
          ig_feed_enabled=?, ig_story_enabled=?, linkedin_enabled=?, hashtag_pref=?, emojis_enabled=?, language=?, banned_words=?, required_elements=?, custom_hashtags=?,
-         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, notify_on_publish=?, notify_weekly_report=?,
+         active_weekdays=?, instagram_weekdays=?, linkedin_weekdays=?, pause_from=?, pause_until=?, approval_mode=?, linkedin_image_mode=?, notify_on_publish=?, notify_weekly_report=?,
          comment_automation_enabled=?, comment_automation_mode=?,
          google_review_automation_enabled=?, google_review_mode=?, google_review_posts_enabled=?, google_review_post_min_stars=?,
          video_enabled=?, video_weekdays=?, video_post_time=?, video_length_seconds=?, video_zoom_direction=?, video_voice=?, video_voice_enabled=?,
@@ -1260,7 +1264,7 @@ export function createPanelRouter(): Router {
         data.tone, data.frequency, data.postTime,
         data.accentColor || null, data.watermarkText || null, data.avoidTopics || null, data.ctaPreference || null,
         data.igFeedEnabled ? 1 : 0, data.igStoryEnabled ? 1 : 0, data.linkedinEnabled ? 1 : 0, data.hashtagPreference, data.emojisEnabled ? 1 : 0, data.language, data.bannedWords || null, data.requiredElements || null, data.customHashtags || null,
-        data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
+        data.activeWeekdays || null, data.instagramWeekdays || null, data.linkedinWeekdays || null, data.pauseFrom || null, data.pauseUntil || null, data.approvalMode ? 1 : 0, data.linkedinImageMode, data.notifyOnPublish ? 1 : 0, data.notifyWeeklyReport ? 1 : 0,
         data.commentAutomationEnabled ? 1 : 0, data.commentAutomationMode,
         data.googleReviewAutomationEnabled ? 1 : 0, data.googleReviewMode, data.googleReviewPostsEnabled ? 1 : 0, data.googleReviewPostMinStars,
         data.videoEnabled ? 1 : 0, data.videoWeekdays || null, data.videoPostTime || null, data.videoLengthSeconds, data.videoZoomDirection, data.videoVoice, data.videoVoiceEnabled ? 1 : 0,

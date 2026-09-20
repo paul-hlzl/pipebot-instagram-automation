@@ -31,6 +31,7 @@ import {
   PROVIDER_FOR_CHANNEL,
   type PublishChannel,
   assertLinkedInHasImage,
+  linkedinNurText,
   assertNoBannedWords,
   assertRequiredElements,
   getCustomerOverview,
@@ -706,15 +707,16 @@ function createServer(): McpServer {
     },
     async ({ text, customer_id, pillar_title }) => {
       try {
-        if (customer_id) {
+        if (customer_id && !linkedinNurText(customer_id)) {
           // Bugreport 2026-09-13: panel customers got an inconsistent mix of image and plain-text
-          // LinkedIn posts. Decision: panel customers always get an image (see
-          // assertLinkedInHasImage) - this plain-text tool stays available ONLY for the operator's
-          // own account (no customer_id), which deliberately posts text-only some days per
-          // linkedin-styleguide.md. Panel customers must use publish_linkedin_image_post instead.
+          // LinkedIn posts. Seit 20.09.2026 entscheidet das nicht mehr die Routine, sondern der
+          // Kunde in seinen Einstellungen (linkedin_image_mode). Steht dort 'bild' - der Standard -,
+          // gilt die alte Regel unveraendert: immer mit Bild, dieses Werkzeug bleibt dem eigenen
+          // Account vorbehalten (der laut linkedin-styleguide.md bewusst auch Text-Tage hat).
           throw new Error(
             "Für Panel-Kunden (customer_id gesetzt) immer publish_linkedin_image_post verwenden, nie " +
-              "publish_linkedin_post - LinkedIn-Beiträge brauchen für Kunden immer ein Bild.",
+              "publish_linkedin_post - LinkedIn-Beiträge brauchen für Kunden immer ein Bild. " +
+              "Ausnahme: Kunden, die in ihren Einstellungen \"nur Text\" gewählt haben.",
           );
         }
         assertChannelEnabled(customer_id, "linkedin");
@@ -753,6 +755,20 @@ function createServer(): McpServer {
     },
     async ({ text, image_url, image_base64, alt_text, customer_id, pillar_title }) => {
       try {
+        // Hat der Kunde "nur Text mit Hashtags" gewaehlt, geht der Beitrag ohne Bild raus - auch
+        // wenn die Routine eines mitschickt. Die Einstellung des Kunden entscheidet, nicht der
+        // Aufrufer; sonst haenge die Wahl daran, welches Werkzeug die Routine gerade nimmt.
+        if (linkedinNurText(customer_id)) {
+          assertChannelEnabled(customer_id, "linkedin");
+          assertNoBannedWords(customer_id, text);
+          assertRequiredElements(customer_id, text);
+          const nurTextCreds = await resolveLinkedInCredentials(customer_id);
+          const nurText = await publishLinkedInPost({ text }, nurTextCreds);
+          if (customer_id) {
+            logPost(customer_id, "linkedin", { externalPostId: nurText.postId ?? undefined, caption: text, pillarTitle: pillar_title, channel: "linkedin" });
+          }
+          return textResult(nurText);
+        }
         const hasUrl = Boolean(image_url?.trim());
         const hasB64 = Boolean(image_base64?.trim());
         if (hasUrl === hasB64) {
@@ -933,7 +949,7 @@ function createServer(): McpServer {
         const checkTexts = channel === "ig_story" ? [headline] : [headline, caption];
         assertNoBannedWords(customer_id, ...checkTexts);
         assertRequiredElements(customer_id, ...checkTexts);
-        assertLinkedInHasImage(channel, image_url);
+        assertLinkedInHasImage(channel, image_url, customer_id);
         const provider = channel === "linkedin" ? "linkedin" : "instagram";
         // Marke erzwingen, BEVOR der Kunde es zu sehen bekommt (siehe mitKundenmarke).
         const markenBild = await mitKundenmarke(customer_id, channel, headline, image_url);
