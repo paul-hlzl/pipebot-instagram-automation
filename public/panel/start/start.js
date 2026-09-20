@@ -1044,13 +1044,19 @@
           </div>`;
         }).join("")}</div>`
       : "";
+    // Die faellige Karte steht OFFEN da: ganzer Text mit Hashtags, Bild ungeschnitten in dem
+    // Seitenverhaeltnis, in dem es wirklich rausgeht (20.09.2026). Wer vor dem Freigeben nur
+    // einen Ausschnitt sieht, gibt etwas frei, das er nicht gelesen hat. Einklappen geht ueber
+    // dieselbe Schaltflaeche - und das Bild selbst ist die zweite, grosse Tippflaeche dafuer.
     const faelligHtml = liste.length
       ? `<div class="tag-posts">${liste.map((a) => {
         const meta = KANAL[a.channel] || KANAL.ig_feed;
-        return `<article class="post" data-approval="${esc(a.id)}">
+        return `<article class="post is-open" data-approval="${esc(a.id)}">
           <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(zeitpunkt(a.createdAt))}</time></div>
-          <div class="media ${meta.format}">${a.imageUrl ? `<img src="${esc(a.imageUrl)}" alt="" loading="lazy">` : `<div class="skeleton">Kein Bild</div>`}</div>
-          <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}</div>
+          ${a.imageUrl
+            ? `<button type="button" class="media media-taste ${meta.format}" data-auf aria-expanded="true" aria-label="Beitrag ein- oder ausklappen"><img src="${esc(a.imageUrl)}" alt="Beitragsbild: ${esc(a.headline || "")}" loading="lazy"></button>`
+            : `<div class="media ${meta.format}"><div class="skeleton">Kein Bild</div></div>`}
+          <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-auf aria-expanded="true">weniger zeigen</button>` : ""}</div>
           <div class="post-actions"><button type="button" class="btn sm" data-freigeben="${esc(a.id)}">Freigeben</button><button type="button" class="link" data-ablehnen="${esc(a.id)}">Ablehnen</button></div>
         </article>`;
       }).join("")}</div>`
@@ -1800,6 +1806,17 @@
     if (t.closest("#test-ende")) { testEnde(); return; }
     if (t.closest("#ki-verbessern")) { kiVerbessern(); return; }
     if (t.closest("[data-more]")) { const post = t.closest(".post"); post.classList.toggle("is-open"); t.closest("[data-more]").textContent = post.classList.contains("is-open") ? "weniger" : "mehr"; return; }
+    // Freigabekarte auf-/zuklappen: Bild und Textzeile schalten dasselbe. Getrennt von
+    // [data-more], weil dort die Beschriftung IN die geklickte Flaeche geschrieben wird - beim
+    // Bildknopf wuerde das das Bild ersetzen.
+    if (t.closest("[data-auf]")) {
+      const post = t.closest(".post");
+      const offen = post.classList.toggle("is-open");
+      post.querySelectorAll("[data-auf]").forEach((b) => b.setAttribute("aria-expanded", String(offen)));
+      const zeile = post.querySelector(".post-more");
+      if (zeile) zeile.textContent = offen ? "weniger zeigen" : "Ganzen Beitrag zeigen";
+      return;
+    }
     const stift = t.closest("[data-edit]");
     if (stift) {
       S.editing = stift.dataset.edit;

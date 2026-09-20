@@ -306,6 +306,14 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .post-c { color: var(--text-2); font-size: var(--t-small); line-height: 1.55; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .post.is-open .post-c { display: block; }
 .post-more { justify-self: start; padding: 11px 0; min-height: 44px; font-size: var(--t-small); }
+
+/* Freigabekarte (20.09.2026): offen zeigt sie den Beitrag so, wie er rausgeht - ganzer Text mit
+   Hashtags und das Bild ungeschnitten. Zugeklappt bleibt sie der kurze Ueberblick. Nur hier,
+   damit die Wochenansicht ihre ruhigen gleich hohen Karten behaelt. */
+.media-taste { display: block; width: 100%; padding: 0; border: 0; background: var(--wash); cursor: pointer; }
+.media-taste:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+#freigaben-abschnitt .post.is-open .media { aspect-ratio: auto; }
+#freigaben-abschnitt .post.is-open .media img { height: auto; object-fit: contain; }
 /* 44 px auch hier: der Textaufklapper war mit 32 px die einzige Flaeche unter der Grenze
    (gemessen am 19.09.2026 im Durchgang). Die Schrift bleibt klein, nur die Flaeche waechst. */
 .post-actions { display: flex; flex-wrap: wrap; gap: 8px 10px; padding: 0 14px 14px; align-items: center; }

@@ -23,6 +23,10 @@ const id = db.prepare("SELECT id FROM customers WHERE status='test' ORDER BY cre
 const jetzt = new Date().toISOString();
 db.prepare("UPDATE customers SET company='Channoine Mayr', email_verified=1, tour_done_at=?, approval_mode=1, ig_feed_enabled=1, ig_story_enabled=0, linkedin_enabled=1 WHERE id=?").run(jetzt, id);
 
+/** Ein echtes, quadratisches Beitragsbild (1024x1024) - nur so laesst sich pruefen, ob die
+ *  offene Karte es ungeschnitten zeigt. */
+const BILD = "https://pub-ca94c8f7d991428986a52fce66b47718.r2.dev/posts/2026-09-19T18-59-00-359Z-d74b7401-98f9-492e-b11d-eb318c63ee56.jpg";
+const LANGER_TEXT = "Pipeline AI Solutions unterstützt kleine und mittlere Unternehmen dabei, online sichtbar zu werden. 🚀 Von der Strategie über das Design bis zur technischen Umsetzung arbeiten wir direkt mit dir zusammen.\n\nMehr über uns im Link in der Bio. 🔗\n\n#webdesign #automatisierung";
 const KOEPFE = ["Beauty Advisor Ausbildung starten", "Starke Abwehr für jede Lebensphase", "Wissen, das Frauen verändert"];
 function aufbauen() {
   db.prepare("DELETE FROM planned_posts WHERE customer_id=?").run(id);
@@ -34,8 +38,8 @@ function aufbauen() {
     return pid;
   });
   const aid = `appr_f${Date.now()}`;
-  db.prepare("INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, status, created_at, updated_at) VALUES (?,?,?,?,?,?,'pending',?,?)")
-    .run(aid, id, "instagram", "ig_feed", "Jetzt fällig: Wer wir sind", "Dieser wartet schon in der Warteschlange.", jetzt, jetzt);
+  db.prepare("INSERT INTO pending_approvals (id, customer_id, provider, channel, headline, caption, image_url, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,'pending',?,?)")
+    .run(aid, id, "instagram", "ig_feed", "Jetzt fällig: Wer wir sind", LANGER_TEXT, BILD, jetzt, jetzt);
   return { geplant, aid };
 }
 
@@ -81,6 +85,38 @@ for (const breite of [360, 1440]) {
   // 3) Kein seitliches Überlaufen
   const ueberlauf = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   ok("Keine Querscrollleiste", ueberlauf <= 0, `${ueberlauf}px`);
+
+  // 3b) Die faellige Karte steht offen: ganzer Text mit Hashtags, Bild ungeschnitten
+  const offen = await page.evaluate(() => {
+    const k = document.querySelector("#freigaben-abschnitt .post[data-approval]");
+    const t = k.querySelector(".post-c");
+    const img = k.querySelector(".media img");
+    const b = img.getBoundingClientRect();
+    return {
+      klasse: k.classList.contains("is-open"),
+      ganzerText: t.scrollHeight - t.clientHeight <= 1,
+      hashtags: t.textContent.includes("#webdesign"),
+      bildVerhaeltnis: b.width ? Math.abs(b.width / b.height - img.naturalWidth / img.naturalHeight) : 9,
+      schalter: k.querySelector(".post-more")?.textContent.trim(),
+      knopfHoehe: Math.round(k.querySelector("[data-auf].media-taste")?.getBoundingClientRect().height ?? 0),
+    };
+  });
+  ok("Freigabekarte steht offen, ganzer Text samt Hashtags sichtbar", offen.klasse && offen.ganzerText && offen.hashtags, JSON.stringify(offen));
+  ok("Bild ungeschnitten - angezeigtes Verhältnis gleich dem echten", offen.bildVerhaeltnis < 0.02, `Abweichung ${offen.bildVerhaeltnis.toFixed(3)}`);
+  ok("Schalter heißt 'weniger zeigen' und das Bild ist die große Tippfläche", offen.schalter === "weniger zeigen" && offen.knopfHoehe >= 44, `${offen.schalter} / ${offen.knopfHoehe}px`);
+
+  // 3c) Zuklappen und wieder aufklappen - an Ort und Stelle, ohne Neuladen
+  await page.locator("#freigaben-abschnitt .post[data-approval] .media-taste").click();
+  await page.waitForTimeout(250);
+  const zu = await page.evaluate(() => {
+    const k = document.querySelector("#freigaben-abschnitt .post[data-approval]");
+    const t = k.querySelector(".post-c");
+    return { klasse: k.classList.contains("is-open"), gekuerzt: t.scrollHeight - t.clientHeight > 1, schalter: k.querySelector(".post-more")?.textContent.trim(), bildDa: Boolean(k.querySelector(".media img")) };
+  });
+  ok("Tipp aufs Bild klappt zu, der Schalter lädt zum Öffnen ein, das Bild bleibt", !zu.klasse && zu.gekuerzt && zu.schalter === "Ganzen Beitrag zeigen" && zu.bildDa, JSON.stringify(zu));
+  await page.locator("#freigaben-abschnitt .post[data-approval] .post-more").click();
+  await page.waitForTimeout(250);
+  ok("Wieder offen", await page.evaluate(() => document.querySelector("#freigaben-abschnitt .post[data-approval]").classList.contains("is-open")));
 
   // 4) Freigeben wirkt - geplanter Beitrag
   await page.locator(`#freigaben-abschnitt [data-freigeben-plan="${geplant[0]}"]`).click();

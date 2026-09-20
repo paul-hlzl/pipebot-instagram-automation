@@ -50,7 +50,7 @@ import {
   submitPlannedPostForApproval,
   startTokenRefreshSchedule,
 } from "./panel/credentials.js";
-import { ensureFreshPlannedPost, getFreshApprovedPendingPosts } from "./panel/planning.js";
+import { ensureFreshPlannedPost, getFreshApprovedPendingPosts, mitKundenmarke } from "./panel/planning.js";
 import {
   checkLinkedInToken,
   publishLinkedInImagePost,
@@ -258,10 +258,13 @@ function createServer(): McpServer {
         assertChannelEnabled(customer_id, "ig_feed");
         assertNoBannedWords(customer_id, headline, caption);
         assertRequiredElements(customer_id, headline, caption);
+        // Marke erzwingen - ausser bei einem Bild, das der Kunde schon freigegeben hat
+        // (das prueft mitKundenmarke selbst, siehe planning.ts).
+        const bild = (await mitKundenmarke(customer_id, "ig_feed", headline, imageUrl)) ?? imageUrl;
         const creds = await resolveInstagramCredentials(customer_id);
-        const result = await publishImageToInstagram(imageUrl, caption, creds, customer_id);
+        const result = await publishImageToInstagram(bild, caption, creds, customer_id);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl, pillarTitle: pillar_title, channel: "ig_feed" });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, caption, imageUrl: bild, pillarTitle: pillar_title, channel: "ig_feed" });
         }
         return textResult(result);
       } catch (error) {
@@ -576,10 +579,11 @@ function createServer(): McpServer {
         assertChannelEnabled(customer_id, "ig_story");
         assertNoBannedWords(customer_id, headline);
         assertRequiredElements(customer_id, headline);
+        const bild = (await mitKundenmarke(customer_id, "ig_story", headline, imageUrl)) ?? imageUrl;
         const creds = await resolveInstagramCredentials(customer_id);
-        const result = await publishStoryToInstagram(imageUrl, creds);
+        const result = await publishStoryToInstagram(bild, creds);
         if (customer_id) {
-          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl, pillarTitle: pillar_title, channel: "ig_story" });
+          logPost(customer_id, "instagram", { externalPostId: result.postId, headline, imageUrl: bild, pillarTitle: pillar_title, channel: "ig_story" });
         }
         return textResult(result);
       } catch (error) {
@@ -931,13 +935,15 @@ function createServer(): McpServer {
         assertRequiredElements(customer_id, ...checkTexts);
         assertLinkedInHasImage(channel, image_url);
         const provider = channel === "linkedin" ? "linkedin" : "instagram";
+        // Marke erzwingen, BEVOR der Kunde es zu sehen bekommt (siehe mitKundenmarke).
+        const markenBild = await mitKundenmarke(customer_id, channel, headline, image_url);
         const approval = savePendingApproval({
           customerId: customer_id,
           provider,
           channel,
           headline,
           caption,
-          imageUrl: image_url,
+          imageUrl: markenBild,
           pillarTitle: pillar_title,
         });
         if (!approval) {

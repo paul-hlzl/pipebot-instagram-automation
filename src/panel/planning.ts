@@ -425,6 +425,53 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
   return { updated, skipped, errors };
 }
 
+/**
+ * Erzwingt die Marke des Kunden auf einem Bild, das die Routine erzeugt hat (20.09.2026).
+ *
+ * Der Befund: ein ueber "Jetzt posten" angefragter Beitrag kam im HAUS-Aussehen heraus - dunkler
+ * Standardhintergrund, Wasserzeichen "Pipeline" - obwohl der Kunde Markenfarben hat. Ursache ist
+ * nicht ein anderes Bild-Verfahren (beide Wege rufen generateImageUrl), sondern dass
+ * `customer_id` an den Bild-Werkzeugen OPTIONAL ist: ohne sie liefert resolveImageBranding ein
+ * leeres Branding, also den eigenen Account-Stil. Beleg am Beitrag vom 19.09.: Wasserzeichen
+ * "Pipeline" statt Firma/Logo, Eckpixel #000513 statt des Verlaufs #01444c -> #123acf.
+ *
+ * Die Reparatur sitzt deshalb an der Engstelle im Server und nicht im Routine-Prompt (der ist
+ * tabu und koennte es morgen wieder anders machen): jedes Werkzeug, das einen Beitrag in die
+ * Freigabe legt oder veroeffentlicht, MUSS die customer_id mitbringen - dort weiss der Server,
+ * wem der Beitrag gehoert, und rendert das Bild aus derselben Ueberschrift mit der Marke neu.
+ *
+ * Drei bewusste Grenzen:
+ * - Nur mit Markenfarben (Farbverlauf): dann rendert der Server lokal, das kostet nichts. Ohne
+ *   Farben waere jedes Neu-Rendern ein zweiter fal.ai-Aufruf; dort bleibt es beim gelieferten
+ *   Bild (offener Punkt, Kosten ~0,003 USD je Anfrage, Entscheidung liegt bei Paul).
+ * - Was der Kunde schon freigegeben hat, wird NIE ersetzt - sonst veroeffentlichte K1 ein
+ *   anderes Bild als das, auf das der Kunde getippt hat.
+ * - Ein Fehlschlag gibt das urspruengliche Bild zurueck: lieber Haus-Aussehen als kein Beitrag.
+ */
+export async function mitKundenmarke(
+  customerId: string | undefined,
+  channel: PlannableChannel,
+  headline: string | undefined,
+  imageUrl: string | undefined,
+): Promise<string | undefined> {
+  if (!customerId || !headline || !imageUrl) return imageUrl;
+  const branding = resolveImageBranding(customerId);
+  if (!branding.gradient || !branding.accentColor) return imageUrl;
+  const freigegeben = db
+    .prepare("SELECT 1 AS x FROM pending_approvals WHERE customer_id = ? AND image_url = ? LIMIT 1")
+    .get(customerId, imageUrl) as { x: number } | undefined;
+  if (freigegeben) return imageUrl;
+  try {
+    const generated = await generateImageUrl(headline, CHANNEL_IMAGE_FORMAT[channel], branding);
+    logUsageCost(customerId, "marke-erzwungen", generated.costUsd);
+    console.log(`[panel] ${customerId}: Bild fuer "${headline}" mit den Markenfarben neu gerendert (${channel}).`);
+    return generated.imageUrl;
+  } catch (err) {
+    console.error(`[panel] ${customerId}: Markenbild konnte nicht neu gerendert werden, es bleibt beim gelieferten:`, err instanceof Error ? err.message : err);
+    return imageUrl;
+  }
+}
+
 export interface PlanningRunSummary {
   startedAt: string;
   finishedAt: string;
