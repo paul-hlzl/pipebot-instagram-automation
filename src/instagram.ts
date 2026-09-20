@@ -155,13 +155,16 @@ export async function getPublishingLimit(creds?: InstagramCredentials): Promise<
 }
 
 export interface MediaSample {
+  /** Beitrags-ID bei Instagram - gebraucht, um nach einer Fehlerantwort nachzusehen (siehe
+   *  veroeffentlicheEinmal). Aeltere Aufrufer benutzen nur caption/timestamp. */
+  id: string | null;
   caption: string | null;
   mediaType: string;
   timestamp: string;
 }
 
 interface GraphMediaResponse {
-  data?: { caption?: string; media_type?: string; timestamp?: string }[];
+  data?: { id?: string; caption?: string; media_type?: string; timestamp?: string }[];
 }
 
 /**
@@ -174,16 +177,70 @@ export async function getRecentMedia(creds: InstagramCredentials, limit = 10): P
   const { data } = await withRetry(
     () =>
       client().get<GraphMediaResponse>(`${GRAPH_BASE}/${igUserId}/media`, {
-        params: { ...tokenParams(creds), fields: "caption,media_type,timestamp", limit },
+        params: { ...tokenParams(creds), fields: "id,caption,media_type,timestamp", limit },
       }),
     2,
     "Instagram media",
   );
   return (data.data ?? []).map((m) => ({
+    id: m.id ?? null,
     caption: m.caption ?? null,
     mediaType: m.media_type ?? "IMAGE",
     timestamp: m.timestamp ?? "",
   }));
+}
+
+/**
+ * Veroeffentlicht genau EINMAL - und sieht bei einer Fehlerantwort nach, ob es trotzdem
+ * draussen ist (20.09.2026).
+ *
+ * Der Vorfall: `publishImageToInstagram` hatte Container anlegen, warten UND veroeffentlichen
+ * zusammen in `withRetry(..., 2)`. Instagram antwortete auf `media_publish` mit 403
+ * ("We restrict certain activity to protect our community", code 4/2207051), hatte den Beitrag
+ * aber veroeffentlicht. Der Wiederholungsversuch legte einen ZWEITEN Container an und postete
+ * ein zweites Mal - zwei identische Beitraege im Feed eines echten Kunden, und weil beide
+ * Versuche fuer uns wie ein Fehlschlag aussahen, wurde nichts protokolliert und die Freigabe
+ * blieb offen (der naechste Lauf haette einen dritten gepostet).
+ *
+ * Daraus zwei Regeln, die hier zusammenkommen:
+ *   1. Wiederholt wird nur, was wiederholbar IST - Container anlegen und auf ihn warten. Ein
+ *      unveroeffentlichter Container verfaellt von selbst, er kostet nichts.
+ *   2. `media_publish` laeuft genau einmal. Geht es schief, wird nicht noch einmal gepostet,
+ *      sondern NACHGESEHEN: steht der Beitrag mit genau diesem Text in den letzten Beitraegen
+ *      des Kontos, war die Fehlerantwort gelogen und wir melden Erfolg (samt ID, damit er
+ *      protokolliert wird). Nur wenn wirklich nichts da ist, fliegt der Fehler weiter.
+ */
+export async function veroeffentlicheEinmal(schritte: {
+  vorbereiten: () => Promise<string>;
+  posten: (containerId: string) => Promise<string>;
+  nachsehen: () => Promise<string | null>;
+  label: string;
+}): Promise<{ postId: string; containerId: string; nachtraeglichGefunden: boolean }> {
+  const containerId = await withRetry(schritte.vorbereiten, 2, `${schritte.label} (Container)`);
+  try {
+    const postId = await schritte.posten(containerId);
+    return { postId, containerId, nachtraeglichGefunden: false };
+  } catch (fehler) {
+    let gefunden: string | null = null;
+    try {
+      gefunden = await schritte.nachsehen();
+    } catch (nachschauFehler) {
+      console.error(`${schritte.label}: Nachsehen nach dem Fehlschlag nicht moeglich:`, nachschauFehler instanceof Error ? nachschauFehler.message : nachschauFehler);
+    }
+    if (gefunden) {
+      console.error(`${schritte.label}: Fehlerantwort beim Veroeffentlichen, der Beitrag ist aber draussen (${gefunden}) - KEIN zweiter Versuch.`);
+      return { postId: gefunden, containerId, nachtraeglichGefunden: true };
+    }
+    throw fehler;
+  }
+}
+
+/** Steht ein Beitrag mit genau diesem Text in den letzten Beitraegen des Kontos? */
+async function findeVeroeffentlichten(caption: string, creds: InstagramCredentials | undefined, seitMs: number): Promise<string | null> {
+  if (!creds) return null;
+  const letzte = await getRecentMedia(creds, 5);
+  const treffer = letzte.find((m) => (m.caption ?? "") === caption && Date.parse(m.timestamp || "") >= seitMs - 120_000);
+  return treffer?.id ?? null;
 }
 
 export async function assertPublishingQuota(creds?: InstagramCredentials): Promise<PublishingLimit> {
@@ -369,16 +426,18 @@ export async function publishImageToInstagram(
 
   await assertPublishingQuota(creds);
 
-  const result = await withRetry(
-    async () => {
+  const begonnen = Date.now();
+  const einmal = await veroeffentlicheEinmal({
+    vorbereiten: async () => {
       const containerId = await createMediaContainer(imageUrl, caption, creds);
       await waitForContainer(containerId, creds);
-      const postId = await publishContainer(containerId, creds);
-      return { postId, containerId, hostedImageUrl: imageUrl };
+      return containerId;
     },
-    2,
-    "Instagram publish",
-  );
+    posten: (containerId) => publishContainer(containerId, creds),
+    nachsehen: () => findeVeroeffentlichten(caption, creds, begonnen),
+    label: "Instagram publish",
+  });
+  const result = { postId: einmal.postId, containerId: einmal.containerId, hostedImageUrl: imageUrl };
 
   writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);
 
@@ -413,9 +472,11 @@ export async function publishCarouselToInstagram(
   const duplicateWarning = checkRecentDuplicate(customerId);
   await assertPublishingQuota(creds);
 
-  const result = await withRetry(
-    async () => {
-      const childContainerIds: string[] = [];
+  const begonnen = Date.now();
+  let childContainerIds: string[] = [];
+  const einmal = await veroeffentlicheEinmal({
+    vorbereiten: async () => {
+      childContainerIds = [];
       for (const imageUrl of imageUrls) {
         const childId = await createCarouselChildContainer(imageUrl, creds);
         await waitForContainer(childId, creds);
@@ -423,12 +484,13 @@ export async function publishCarouselToInstagram(
       }
       const containerId = await createCarouselContainer(childContainerIds, caption, creds);
       await waitForContainer(containerId, creds);
-      const postId = await publishContainer(containerId, creds);
-      return { postId, containerId, hostedImageUrl: imageUrls[0], childContainerIds };
+      return containerId;
     },
-    2,
-    "Instagram carousel publish",
-  );
+    posten: (containerId) => publishContainer(containerId, creds),
+    nachsehen: () => findeVeroeffentlichten(caption, creds, begonnen),
+    label: "Instagram carousel publish",
+  });
+  const result = { postId: einmal.postId, containerId: einmal.containerId, hostedImageUrl: imageUrls[0], childContainerIds };
 
   writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);
 
@@ -510,16 +572,18 @@ export async function publishReelToInstagram(
   const duplicateWarning = checkRecentDuplicate(customerId);
   await assertPublishingQuota(creds);
 
-  const result = await withRetry(
-    async () => {
+  const begonnen = Date.now();
+  const einmal = await veroeffentlicheEinmal({
+    vorbereiten: async () => {
       const containerId = await createReelContainer(videoUrl, caption, creds);
       await waitForVideoContainer(containerId, creds);
-      const postId = await publishContainer(containerId, creds);
-      return { postId, containerId, hostedImageUrl: videoUrl };
+      return containerId;
     },
-    2,
-    "Instagram Reel publish",
-  );
+    posten: (containerId) => publishContainer(containerId, creds),
+    nachsehen: () => findeVeroeffentlichten(caption, creds, begonnen),
+    label: "Instagram Reel publish",
+  });
+  const result = { postId: einmal.postId, containerId: einmal.containerId, hostedImageUrl: videoUrl };
 
   writeLastPost({ timestamp: new Date().toISOString(), postId: result.postId, caption }, customerId);
   return duplicateWarning ? { ...result, warning: duplicateWarning } : result;
@@ -531,16 +595,19 @@ export async function publishStoryToInstagram(
 ): Promise<PublishResult> {
   await assertPublishingQuota(creds);
 
-  return withRetry(
-    async () => {
+  // Stories stehen nicht in der /media-Liste, hier laesst sich nichts nachsehen. Der zweite
+  // Versuch entfaellt trotzdem: lieber eine Story zu wenig als zwei identische im Kanal.
+  const einmal = await veroeffentlicheEinmal({
+    vorbereiten: async () => {
       const containerId = await createStoryMediaContainer(imageUrl, creds);
       await waitForContainer(containerId, creds);
-      const postId = await publishContainer(containerId, creds);
-      return { postId, containerId, hostedImageUrl: imageUrl };
+      return containerId;
     },
-    2,
-    "Instagram story publish",
-  );
+    posten: (containerId) => publishContainer(containerId, creds),
+    nachsehen: async () => null,
+    label: "Instagram story publish",
+  });
+  return { postId: einmal.postId, containerId: einmal.containerId, hostedImageUrl: imageUrl };
 }
 
 export async function refreshAccessToken(): Promise<{

@@ -49,7 +49,8 @@
     "test:wochenlauf": "node scripts/test-wochenlauf.mjs",
     "test:marke-anfrage": "node scripts/test-marke-anfrage.mjs",
     "test:linkedin-text": "node scripts/test-linkedin-textmodus.mjs",
-    "test:kanalplanung": "node scripts/test-kanalplanung.mjs"
+    "test:kanalplanung": "node scripts/test-kanalplanung.mjs",
+    "test:veroeffentlichen": "node --import tsx --test scripts/veroeffentlichen.test.ts"
   },
   "keywords": [
     "mcp",
