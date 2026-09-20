@@ -311,6 +311,18 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
    Hashtags und das Bild ungeschnitten. Zugeklappt bleibt sie der kurze Ueberblick. Nur hier,
    damit die Wochenansicht ihre ruhigen gleich hohen Karten behaelt. */
 .media-taste { display: block; width: 100%; padding: 0; border: 0; background: var(--wash); cursor: pointer; }
+
+/* Das Freigabefenster (20.09.2026): zugeklappt eine Zeile, offen die Beitraege. */
+.frei-kopf { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 11px 0; background: none; border: 0; border-bottom: 1px solid var(--linie); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.frei-kopf-text { font-size: var(--t-small); color: var(--text-2); }
+.frei-kopf-text strong { color: var(--text); font-weight: 500; }
+.frei-pfeil { transition: transform var(--dauer) var(--kurve); color: var(--text-2); }
+.frei-pfeil.ist-auf { transform: rotate(180deg); }
+.frei-zeile .frei-txt { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.frei-h { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
+.frei-voll { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 4px; animation: klappt var(--dauer) var(--kurve) both; }
+.frei-bild { width: 100%; max-width: 420px; height: auto; border-radius: 12px; display: block; }
+.frei-voll .post-c { display: block; }
 .media-taste:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 #freigaben-abschnitt .post.is-open .media { aspect-ratio: auto; }
 #freigaben-abschnitt .post.is-open .media img { height: auto; object-fit: contain; }

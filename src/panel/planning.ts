@@ -31,6 +31,7 @@ import {
   overwritePendingApprovalContent,
   overwritePlannedPostContent,
   pickWeightedPillar,
+  PROVIDER_FOR_CHANNEL,
   resolveImageBranding,
   scheduleInputFor,
   setPlannedPostImage,
@@ -604,10 +605,28 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
   const concurrency = Math.max(1, opts.concurrency ?? 1);
   const feature = opts.feature ?? "planned-post";
 
+  /**
+   * Fuer welche Kanaele ueberhaupt geplant wird (20.09.2026).
+   *
+   * Der Schalter allein genuegt nicht mehr. Bis dahin wurde fuer jeden eingeschalteten Kanal
+   * geplant, auch fuer einen, der nie verbunden war - der Kunde bekam LinkedIn-Beitraege zur
+   * Freigabe vorgelegt, die nirgends hin konnten. Die Routine prueft den Verbindungsstatus
+   * NIRGENDS (sie sieht nur die Schalter, siehe disconnectProvider), also muss die Planung es tun.
+   *
+   * Solange der Kunde noch GAR KEINE Verbindung hat, wird weiter fuer alles geplant, was
+   * eingeschaltet ist: das ist das Onboarding, und dort ist die volle Woche der ganze Sinn -
+   * sie entsteht, bevor irgendetwas verbunden ist. Sobald die erste Verbindung steht, ist er
+   * durch, und ein unverbundener Kanal ist eine Entscheidung, keine offene Baustelle.
+   */
+  const verbunden = new Set(
+    (db.prepare("SELECT provider FROM connections WHERE customer_id = ?").all(row.id) as { provider: string }[]).map((r) => r.provider),
+  );
+  const imOnboarding = verbunden.size === 0;
+  const nutzbar = (channel: PlannableChannel): boolean => imOnboarding || verbunden.has(PROVIDER_FOR_CHANNEL[channel]);
   const channelDefs: { channel: PlannableChannel; enabled: boolean }[] = [
-    { channel: "ig_feed", enabled: Boolean(row.ig_feed_enabled) },
-    { channel: "ig_story", enabled: Boolean(row.ig_story_enabled) },
-    { channel: "linkedin", enabled: Boolean(row.linkedin_enabled) },
+    { channel: "ig_feed", enabled: Boolean(row.ig_feed_enabled) && nutzbar("ig_feed") },
+    { channel: "ig_story", enabled: Boolean(row.ig_story_enabled) && nutzbar("ig_story") },
+    { channel: "linkedin", enabled: Boolean(row.linkedin_enabled) && nutzbar("linkedin") },
   ];
 
   // Steht LinkedIn auf "nur Text mit Hashtags", entsteht fuer diesen Kanal von vornherein kein

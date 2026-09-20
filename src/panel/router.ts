@@ -2172,6 +2172,16 @@ export function createPanelRouter(): Router {
         now,
       });
       console.log(`[panel] ${stored.customer_id} hat ${provider.name} verbunden (${result.accountName})`);
+      // Sofort nachplanen (20.09.2026): fuer einen unverbundenen Kanal wird nicht mehr geplant
+      // (planning.ts) - der Kunde saehe nach dem Verbinden sonst bis Sonntag keinen einzigen
+      // Beitrag auf diesem Kanal. Fire-and-forget, der Connect-Flow darf daran nie haengen.
+      {
+        const frisch = db.prepare("SELECT * FROM customers WHERE id = ?").get(stored.customer_id) as CustomerRow | undefined;
+        if (frisch && frisch.email_verified && !frisch.customer_paused && anthropicAvailable() && !isJobRunning(frisch.id)) {
+          console.log(`[panel] ${frisch.id}: Kanal verbunden - Woche wird nachgeplant.`);
+          runPlanWeekJob(frisch.id, "replan", { concurrency: 3, feature: "verbunden-nachplanen" });
+        }
+      }
       if (pid === "instagram") {
         // Panel v11: Webhook-Abo fuer sofortige Kommentar-Antworten - best-effort, darf den
         // Connect-Flow nie blockieren (der Cron-Fallback deckt den Kunden trotzdem ab, siehe

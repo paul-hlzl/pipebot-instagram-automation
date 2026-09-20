@@ -47,6 +47,9 @@
 
   const S = {
     screen: "konto", gerendert: null, providers: [], authProviders: [], aiAvailable: false, turnstileSiteKey: null, sandbox: false,
+    // Freigabefenster: null = noch nicht angefasst (dann entscheidet "ist etwas faellig?"),
+    // sonst die Wahl des Kunden. zeilenAuf merkt sich die aufgeklappten geplanten Zeilen.
+    freigabenOffen: null, zeilenAuf: new Set(),
     customer: null, connections: [], skipped: new Set(),
     status: null, approvals: [], verlauf: null,
     notice: null, grenze: null, tagWahl: null, jobFertigSeit: 0, vorladen: false, wochenSig: "", editing: null, poll: null, arbeitSeit: 0, turnstileWidget: null, turnstileToken: "",
@@ -55,6 +58,16 @@
   const angemeldet = () => Boolean(S.customer);
   const eingerichtet = () => Boolean(S.customer && S.customer.tourDone);
   const kanal = (id) => S.connections.find((c) => c.provider === id);
+  /* Welcher Anbieter gehoert zu welchem Kanal - dieselbe Zuordnung wie PROVIDER_FOR_CHANNEL
+   * auf dem Server. Ein Beitrag auf einem unverbundenen Kanal kann nirgends hin; das Panel sagt
+   * das jetzt, statt einen Freigeben-Knopf anzubieten (20.09.2026). */
+  const ANBIETER_VON_KANAL = { ig_feed: "instagram", ig_story: "instagram", linkedin: "linkedin" };
+  const kanalVerbunden = (channel) => kanal(ANBIETER_VON_KANAL[channel] || "instagram")?.status === "ok";
+  function verbindenLinkHtml(channel) {
+    const id = ANBIETER_VON_KANAL[channel] || "instagram";
+    const name = anbieter(id)?.name || (KANAL[channel]?.label ?? id);
+    return `<a class="link stark" href="${esc(MOUNT)}/connect/${esc(id)}?return=start">${esc(name)} verbinden</a>`;
+  }
   const anbieter = (id) => S.providers.find((p) => p.id === id);
   const uebernehmen = (d) => { if (!d || !d.customer) return; S.customer = d.customer; S.connections = d.connections || []; S.skipped = new Set(d.customer.skippedProviders || []); lichtSetzen(); };
 
@@ -709,7 +722,7 @@
     if (p.status === "rejected") aktionen = `<button type="button" class="link" data-unskip="${esc(p.id)}">Doch posten</button>`;
     else if (aenderbar) {
       const erste = c?.approvalMode && ["planned", "edited"].includes(p.status)
-        ? `<button type="button" class="link stark" data-freigeben-plan="${esc(p.id)}">Freigeben</button><button type="button" class="link" data-bearbeiten="${esc(p.id)}">Bearbeiten</button>`
+        ? `${kanalVerbunden(p.channel) ? `<button type="button" class="link stark" data-freigeben-plan="${esc(p.id)}">Freigeben</button>` : verbindenLinkHtml(p.channel)}<button type="button" class="link" data-bearbeiten="${esc(p.id)}">Bearbeiten</button>`
         : `<button type="button" class="link stark" data-bearbeiten="${esc(p.id)}">Bearbeiten</button><button type="button" class="link leise" data-skip-plan="${esc(p.id)}">Überspringen</button>`;
       aktionen = `${erste}<button type="button" class="link mehr" data-mehr="${esc(p.id)}" aria-label="Weitere Möglichkeiten">···</button>`;
     }
@@ -1033,53 +1046,69 @@
       </section>`;
   }
   /* -------------------- Das Freigabefenster (20.09.2026) --------------------
-   * Der Abschnitt steht immer an derselben Stelle, solange die Freigabe an ist. Vorher
-   * verschwand er, sobald die Warteschlange leer war - der Kunde sah dann nirgends, was ansteht,
-   * obwohl die geplanten Beitraege alle auf sein OK warteten.
+   * Der Abschnitt steht immer an derselben Stelle, solange die Freigabe an ist - vorher
+   * verschwand er, sobald die Warteschlange leer war, und der Kunde sah nirgends, was ansteht.
    *
-   * Oben die faelligen aus der Warteschlange (die legt die Routine erst kurz vor dem
-   * Veroeffentlichen an), darunter die geplanten mit Datum. Freigeben geht fuer beide, ueber die
-   * zwei Endpunkte, die es schon gibt. Die geplanten bewusst als schmale Zeilen und nicht als
-   * Karten: bei zwei Wochen Planweite sind das bis zu zwanzig, und die Wochenansicht direkt
-   * darunter zeigt dieselben Beitraege ohnehin schon mit Bild. */
+   * Zugeklappt ist er eine Zeile: "10 Beitraege warten auf deine Freigabe". So bleibt die
+   * Uebersicht ruhig und die Woche steht weiter oben. Ein Tipp klappt ihn auf. AUSNAHME: liegt
+   * ein FAELLIGER Beitrag in der Warteschlange, steht er offen - der wartet auf eine Handlung
+   * jetzt, nicht irgendwann, und den soll der Kunde sehen, ohne zu suchen.
+   *
+   * Offen: oben die faelligen als ganze Karte (Text mit Hashtags, Bild ungeschnitten), darunter
+   * die geplanten als Zeilen mit kleinem Vorschaubild, die sich auf Tipp an Ort und Stelle zum
+   * ganzen Beitrag aufklappen. Freigeben geht fuer beide - ausser der Kanal ist nicht verbunden,
+   * dann steht dort der Weg zum Verbinden statt eines Knopfes, der nichts bewirken kann. */
   function freigabenHtml() {
     if (!S.customer?.approvalMode) return "";
     const liste = S.approvals || [];
     const geplant = (S.status?.posts || [])
       .filter((p) => ["planned", "edited"].includes(p.status) && aktiveKanaele().includes(p.channel))
       .sort((a, b) => (a.scheduledFor === b.scheduledFor ? KANAL_REIHE.indexOf(a.channel) - KANAL_REIHE.indexOf(b.channel) : a.scheduledFor < b.scheduledFor ? -1 : 1));
-    const kopf = `<div class="abschnitt-kopf"><h2>Wartet auf deine Freigabe</h2><span class="small muted">${liste.length + geplant.length || ""}</span></div>`;
-    if (!liste.length && !geplant.length) return `${kopf}<p class="leer">Gerade wartet nichts auf dich.</p>`;
-    const geplantHtml = geplant.length
-      ? `<div class="plan">${geplant.map((p) => {
-          const meta = KANAL[p.channel] || KANAL.ig_feed;
-          return `<div class="zeile">
-            <span class="zeile-k">${esc(langDatum(p.scheduledFor))} · ${esc(meta.label)}</span>
-            <div class="zeile-v">${esc(p.headline || "(ohne Titel)")}</div>
-            <button type="button" class="btn secondary sm" data-freigeben-plan="${esc(p.id)}">Freigeben</button>
-          </div>`;
-        }).join("")}</div>`
-      : "";
-    // Die faellige Karte steht OFFEN da: ganzer Text mit Hashtags, Bild ungeschnitten in dem
-    // Seitenverhaeltnis, in dem es wirklich rausgeht (20.09.2026). Wer vor dem Freigeben nur
-    // einen Ausschnitt sieht, gibt etwas frei, das er nicht gelesen hat. Einklappen geht ueber
-    // dieselbe Schaltflaeche - und das Bild selbst ist die zweite, grosse Tippflaeche dafuer.
-    const faelligHtml = liste.length
-      ? `<div class="tag-posts">${liste.map((a) => {
-        const meta = KANAL[a.channel] || KANAL.ig_feed;
-        return `<article class="post is-open" data-approval="${esc(a.id)}">
-          <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(zeitpunkt(a.createdAt))}</time></div>
-          ${!mitBild(a)
-            ? ""
-            : a.imageUrl
-              ? `<button type="button" class="media media-taste ${meta.format}" data-auf aria-expanded="true" aria-label="Beitrag ein- oder ausklappen"><img src="${esc(a.imageUrl)}" alt="Beitragsbild: ${esc(a.headline || "")}" loading="lazy"></button>`
-              : `<div class="media ${meta.format}"><div class="skeleton">Kein Bild</div></div>`}
-          <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-auf aria-expanded="true">weniger zeigen</button>` : ""}</div>
-          <div class="post-actions"><button type="button" class="btn sm" data-freigeben="${esc(a.id)}">Freigeben</button><button type="button" class="link" data-ablehnen="${esc(a.id)}">Ablehnen</button></div>
-        </article>`;
-      }).join("")}</div>`
-      : "";
-    return `${kopf}${faelligHtml}${geplantHtml}`;
+    const gesamt = liste.length + geplant.length;
+    if (!gesamt) {
+      return `<div class="abschnitt-kopf"><h2>Wartet auf deine Freigabe</h2></div><p class="leer">Gerade wartet nichts auf dich.</p>`;
+    }
+    // Voreinstellung: offen, solange etwas faellig ist. Danach entscheidet der Kunde.
+    const offen = S.freigabenOffen === null || S.freigabenOffen === undefined ? liste.length > 0 : S.freigabenOffen;
+    const kopf = `<button type="button" class="frei-kopf" data-freigaben-auf aria-expanded="${offen}">
+      <span class="frei-kopf-text"><strong>${gesamt} ${gesamt === 1 ? "Beitrag wartet" : "Beiträge warten"}</strong> auf deine Freigabe</span>
+      <span class="frei-pfeil${offen ? " ist-auf" : ""}" aria-hidden="true">⌄</span>
+    </button>`;
+    if (!offen) return kopf;
+
+    const faelligHtml = liste.map((a) => {
+      const meta = KANAL[a.channel] || KANAL.ig_feed;
+      return `<article class="post is-open" data-approval="${esc(a.id)}">
+        <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(zeitpunkt(a.createdAt))}</time></div>
+        ${!mitBild(a)
+          ? ""
+          : a.imageUrl
+            ? `<button type="button" class="media media-taste ${meta.format}" data-auf aria-expanded="true" aria-label="Beitrag ein- oder ausklappen"><img src="${esc(a.imageUrl)}" alt="Beitragsbild: ${esc(a.headline || "")}" loading="lazy"></button>`
+            : `<div class="media ${meta.format}"><div class="skeleton">Kein Bild</div></div>`}
+        <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-auf aria-expanded="true">weniger zeigen</button>` : ""}</div>
+        <div class="post-actions">${kanalVerbunden(a.channel) ? `<button type="button" class="btn sm" data-freigeben="${esc(a.id)}">Freigeben</button>` : verbindenLinkHtml(a.channel)}<button type="button" class="link" data-ablehnen="${esc(a.id)}">Ablehnen</button></div>
+      </article>`;
+    }).join("");
+
+    const zeilenHtml = geplant.map((p) => {
+      const meta = KANAL[p.channel] || KANAL.ig_feed;
+      const auf = S.zeilenAuf.has(p.id);
+      const bild = mitBild(p) && p.imageUrl;
+      return `<div class="zeile frei-zeile">
+        <span class="zeile-k">${esc(langDatum(p.scheduledFor))} · ${esc(meta.label)}</span>
+        <button type="button" class="frei-txt" data-plan-auf="${esc(p.id)}" aria-expanded="${auf}">
+          ${bild ? `<img class="bild-klein" src="${esc(p.imageUrl)}" alt="" loading="lazy">` : `<span class="bild-klein leer"></span>`}
+          <span class="frei-h">${esc(p.headline || "(ohne Titel)")}</span>
+        </button>
+        ${kanalVerbunden(p.channel) ? `<button type="button" class="btn secondary sm" data-freigeben-plan="${esc(p.id)}">Freigeben</button>` : verbindenLinkHtml(p.channel)}
+        ${auf ? `<div class="frei-voll">
+          ${bild ? `<img class="frei-bild" src="${esc(p.imageUrl)}" alt="Beitragsbild: ${esc(p.headline || "")}" loading="lazy">` : ""}
+          ${p.caption ? `<p class="post-c">${esc(p.caption)}</p>` : `<p class="small muted">Noch kein Text.</p>`}
+        </div>` : ""}
+      </div>`;
+    }).join("");
+
+    return `${kopf}${faelligHtml ? `<div class="tag-posts">${faelligHtml}</div>` : ""}${zeilenHtml ? `<div class="plan">${zeilenHtml}</div>` : ""}`;
   }
 
   function einstellungenHtml() {
@@ -1828,6 +1857,20 @@
     // Freigabekarte auf-/zuklappen: Bild und Textzeile schalten dasselbe. Getrennt von
     // [data-more], weil dort die Beschriftung IN die geklickte Flaeche geschrieben wird - beim
     // Bildknopf wuerde das das Bild ersetzen.
+    if (t.closest("[data-freigaben-auf]")) {
+      const kopfEl = t.closest("[data-freigaben-auf]");
+      S.freigabenOffen = kopfEl.getAttribute("aria-expanded") !== "true";
+      const sec = $("#freigaben-abschnitt");
+      if (sec) sec.innerHTML = freigabenHtml();
+      return;
+    }
+    if (t.closest("[data-plan-auf]")) {
+      const id = t.closest("[data-plan-auf]").dataset.planAuf;
+      if (S.zeilenAuf.has(id)) S.zeilenAuf.delete(id); else S.zeilenAuf.add(id);
+      const sec = $("#freigaben-abschnitt");
+      if (sec) sec.innerHTML = freigabenHtml();
+      return;
+    }
     if (t.closest("[data-auf]")) {
       const post = t.closest(".post");
       const offen = post.classList.toggle("is-open");
