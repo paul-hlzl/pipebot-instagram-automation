@@ -689,6 +689,9 @@
   /** Geht bei diesem Beitrag ueberhaupt ein Bild mit? Bei LinkedIn haengt das an der
    *  Einstellung "mit Bild / nur Text mit Hashtags" (20.09.2026). */
   function mitBild(p) {
+    // Ausnahme: ein selbst hochgeladenes Bild geht auch bei "nur Text" mit raus - es soll dann
+    // auch in der Vorschau stehen, sonst zeigt das Panel etwas anderes als der Beitrag.
+    if (p.imageSource === "kunde") return true;
     return !(p.channel === "linkedin" && S.customer?.linkedinImageMode === "text");
   }
   function postHtml(p, opts = {}) {
@@ -869,8 +872,8 @@
       ${c.linkedinEnabled ? planZeile("linkedinbild", "LinkedIn-Beiträge", `${c.linkedinImageMode === "text" ? "Nur Text mit Hashtags" : "Mit Bild"}`,
         `<div class="wahl">
            <label><input type="radio" name="linkedinImageMode" value="bild" ${c.linkedinImageMode === "text" ? "" : "checked"}><span>Mit Bild<small>wie bei Instagram, in deinen Markenfarben</small></span></label>
-           <label><input type="radio" name="linkedinImageMode" value="text" ${c.linkedinImageMode === "text" ? "checked" : ""}><span>Nur Text mit Hashtags<small>kein Bild, reiner Textbeitrag</small></span></label>
-         </div>`) : ""}
+           <label><input type="radio" name="linkedinImageMode" value="text" ${c.linkedinImageMode === "text" ? "checked" : ""}><span>Nur Text mit Hashtags<small>kein Bild - außer einem, das du selbst hochgeladen hast</small></span></label>
+         </div>`, c.linkedinImageMode === "text" ? "Ein Bild, das du selbst hochlädst, geht trotzdem mit raus." : "") : ""}
       ${planZeile("freigabe", "Freigabe", `${c.approvalMode ? "An" : "Aus"}<br><span class="muted">${c.approvalMode ? "Jeder Beitrag wartet auf dein OK, bevor er rausgeht." : "Beiträge gehen zur geplanten Zeit automatisch raus."}</span>`,
         `<label class="schalter"><input type="checkbox" name="approvalMode" ${c.approvalMode ? "checked" : ""}><span>Freigabe an - jeder Beitrag wartet auf dein OK</span></label>
          <span class="small muted">Aus heißt: Beiträge gehen zur geplanten Zeit automatisch raus. Du siehst sie trotzdem vorher in der Übersicht.</span>`)}

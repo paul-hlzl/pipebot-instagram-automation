@@ -37,7 +37,7 @@ for (const [i, ch] of ["ig_feed", "linkedin"].entries()) {
 
 /* ---------- Server: was beim Planen und Veroeffentlichen passiert ---------- */
 const { mitKundenmarke } = await import("../dist/panel/planning.js");
-const { assertLinkedInHasImage, linkedinNurText } = await import("../dist/panel/credentials.js");
+const { assertLinkedInHasImage, linkedinNurText, istEigenesBild } = await import("../dist/panel/credentials.js");
 console.log("Server");
 db.prepare("UPDATE customers SET linkedin_image_mode='text' WHERE id=?").run(id);
 ok("Einstellung wird gelesen", linkedinNurText(id) === true);
@@ -48,6 +48,19 @@ db.prepare("UPDATE customers SET linkedin_image_mode='bild' WHERE id=?").run(id)
 ok("Bei 'mit Bild' bekommt das Bild die Markenfarben", (await mitKundenmarke(id, "linkedin", "Kopf", HAUSBILD)) !== HAUSBILD);
 warf = false; try { assertLinkedInHasImage("linkedin", null, id); } catch { warf = true; }
 ok("Und ein fehlendes Bild bleibt dort ein Fehler", warf);
+
+/* ---------- Die Ausnahme: ein selbst hochgeladenes Bild ueberlebt den Textmodus ---------- */
+console.log("\nEigenes Bild des Kunden");
+const eigenId = `plp_e${Date.now()}`;
+db.prepare("INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, caption, image_url, image_source, origin, pillar_title, created_at, updated_at) VALUES (?,?,?,?,'edited',?,?,?,'kunde','kunde','Thema',?,?)")
+  .run(eigenId, id, "linkedin", tag(2), "Mit eigenem Bild", "Text.", HAUSBILD, jetzt, jetzt);
+db.prepare("UPDATE customers SET linkedin_image_mode='text' WHERE id=?").run(id);
+ok("Der Server erkennt ein eigenes Bild", istEigenesBild(id, HAUSBILD) === true);
+ok("Es bleibt bei 'nur Text' erhalten, statt weggelassen zu werden", (await mitKundenmarke(id, "linkedin", "Mit eigenem Bild", HAUSBILD)) === HAUSBILD);
+const fremd = HAUSBILD.replace(".jpg", "-fremd.jpg");
+ok("Ein von uns erzeugtes Bild geht weiterhin nicht mit", (await mitKundenmarke(id, "linkedin", "Kopf", fremd)) === undefined);
+db.prepare("DELETE FROM planned_posts WHERE id=?").run(eigenId);
+db.prepare("UPDATE customers SET linkedin_image_mode='bild' WHERE id=?").run(id);
 
 /* ---------- Ein echter Planungslauf im Textmodus erzeugt gar kein Bild ---------- */
 db.prepare("UPDATE customers SET linkedin_image_mode='text', ig_feed_enabled=0 WHERE id=?").run(id);
@@ -102,6 +115,19 @@ for (const breite of [360, 1440]) {
   const karten = await page.evaluate(() => [...document.querySelectorAll("#woche .post")].map((k) => ({ kanal: k.querySelector(".chan")?.textContent.trim(), bild: Boolean(k.querySelector(".media")) })));
   ok("Die LinkedIn-Karte zeigt kein Bild mehr", karten.some((k) => k.kanal === "LinkedIn" && !k.bild), JSON.stringify(karten));
   ok("Die Instagram-Karte zeigt weiterhin ihres", karten.some((k) => k.kanal === "Instagram" && k.bild), JSON.stringify(karten));
+
+  // Ein selbst hochgeladenes LinkedIn-Bild bleibt auch im Textmodus sichtbar - und die Zeile
+  // sagt es dazu.
+  db.prepare("UPDATE planned_posts SET image_source='kunde', origin='kunde' WHERE customer_id=? AND channel='linkedin'").run(id);
+  await page.goto(`${BASE}${MOUNT}/start/?t=${Date.now()}#dashboard`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#woche .post", { timeout: 20000 });
+  await page.waitForTimeout(400);
+  const mitEigenem = await page.evaluate(() => [...document.querySelectorAll("#woche .post")].map((k) => ({ kanal: k.querySelector(".chan")?.textContent.trim(), bild: Boolean(k.querySelector(".media")) })));
+  ok("Eigenes Bild bleibt auch bei 'nur Text' sichtbar", mitEigenem.some((k) => k.kanal === "LinkedIn" && k.bild), JSON.stringify(mitEigenem));
+  await page.goto(`${BASE}${MOUNT}/start/?t=${Date.now()}#einstellungen`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#zeile-linkedinbild", { timeout: 20000 });
+  const notiz = (await page.textContent("#zeile-linkedinbild .zeile-notiz"))?.trim();
+  ok("Die Zeile weist auf die Ausnahme hin", notiz === "Ein Bild, das du selbst hochlädst, geht trotzdem mit raus.", String(notiz));
   ok(`@${breite}: Keine Skriptfehler`, seitenfehler.length === 0, seitenfehler.join(" | "));
   await ctx.close();
 }

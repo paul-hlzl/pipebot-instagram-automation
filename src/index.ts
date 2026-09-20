@@ -31,6 +31,7 @@ import {
   PROVIDER_FOR_CHANNEL,
   type PublishChannel,
   assertLinkedInHasImage,
+  istEigenesBild,
   linkedinNurText,
   assertNoBannedWords,
   assertRequiredElements,
@@ -758,7 +759,8 @@ function createServer(): McpServer {
         // Hat der Kunde "nur Text mit Hashtags" gewaehlt, geht der Beitrag ohne Bild raus - auch
         // wenn die Routine eines mitschickt. Die Einstellung des Kunden entscheidet, nicht der
         // Aufrufer; sonst haenge die Wahl daran, welches Werkzeug die Routine gerade nimmt.
-        if (linkedinNurText(customer_id)) {
+        // "Nur Text" - mit einer Ausnahme: ein vom Kunden selbst hochgeladenes Bild geht mit.
+        if (linkedinNurText(customer_id) && !istEigenesBild(customer_id, image_url)) {
           assertChannelEnabled(customer_id, "linkedin");
           assertNoBannedWords(customer_id, text);
           assertRequiredElements(customer_id, text);

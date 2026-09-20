@@ -954,6 +954,27 @@ export function linkedinNurText(customerId?: string | null): boolean {
   return row?.linkedin_image_mode === "text";
 }
 
+/**
+ * Gehoert dieses Bild dem Kunden selbst (hochgeladen), statt von uns erzeugt zu sein?
+ *
+ * Gefragt wird ueber die Bild-Adresse, weil der Veroeffentlichungsweg nur sie kennt - und in
+ * beiden Tabellen, weil ein Bild entweder noch im Wochenplan liegt oder schon in der
+ * Warteschlange steht. Gebraucht fuer die Ausnahme bei LinkedIn "nur Text mit Hashtags":
+ * eigene Arbeit des Kunden darf nicht stillschweigend verschwinden (Ansage 20.09.2026).
+ */
+export function istEigenesBild(customerId: string | null | undefined, imageUrl: string | null | undefined): boolean {
+  if (!customerId || !imageUrl) return false;
+  const gefunden = db
+    .prepare(
+      `SELECT 1 AS x FROM planned_posts WHERE customer_id = ? AND image_url = ? AND image_source = 'kunde'
+       UNION ALL
+       SELECT 1 AS x FROM pending_approvals WHERE customer_id = ? AND image_url = ? AND image_source = 'kunde'
+       LIMIT 1`,
+    )
+    .get(customerId, imageUrl, customerId, imageUrl) as { x: number } | undefined;
+  return Boolean(gefunden);
+}
+
 export function assertLinkedInHasImage(channel: string, imageUrl: string | null | undefined, customerId?: string | null): void {
   if (channel !== "linkedin") return;
   // Steht die Einstellung auf "nur Text", ist ein fehlendes Bild kein Fehler, sondern der Wunsch.
@@ -1277,6 +1298,8 @@ export function expireStalePostRequests(): PostRequest[] {
 export interface PendingApproval {
   id: string;
   origin: "auto" | "kunde";
+  /** 'kunde' = der Kunde hat dieses Bild selbst hochgeladen (siehe istEigenesBild). */
+  imageSource: "auto" | "kunde";
   customerId: string;
   provider: string;
   /** ig_feed/ig_story/linkedin - the exact channel from save_pending_approval. Falls back to
@@ -1310,6 +1333,7 @@ function toPendingApproval(r: PendingApprovalRow): PendingApproval {
   return {
     id: r.id,
     origin: r.origin === "kunde" ? "kunde" : "auto",
+    imageSource: r.image_source === "kunde" ? "kunde" : "auto",
     customerId: r.customer_id,
     provider: r.provider,
     channel: r.channel ?? r.provider,
@@ -1728,9 +1752,11 @@ export function submitPlannedPostForApproval(plannedPostId: string): PendingAppr
   // planned_post at 'planned' would make K3b retry it every single run, forever.
   // Herkunft wandert mit: das Freigabe-Tor (getFreshApprovedPendingPosts) darf Kundenarbeit
   // genauso wenig neu schreiben wie die Planung.
-  if (approval) db.prepare("UPDATE pending_approvals SET origin = ? WHERE id = ?").run(plan.origin, approval.id);
+  // Herkunft des Bildes wandert mit: ein selbst hochgeladenes Bild bleibt auch in der
+  // Warteschlange als solches erkennbar (LinkedIn "nur Text" macht davon eine Ausnahme).
+  if (approval) db.prepare("UPDATE pending_approvals SET origin = ?, image_source = ? WHERE id = ?").run(plan.origin, plan.imageSource, approval.id);
   markPlannedPostStatus(plan.id, "submitted");
-  return approval ? { ...approval, origin: plan.origin } : approval;
+  return approval ? { ...approval, origin: plan.origin, imageSource: plan.imageSource } : approval;
 }
 
 /**

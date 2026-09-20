@@ -346,6 +346,10 @@ migrateColumns("planned_posts", [
 migrateColumns("pending_approvals", [
   // Wird beim Einreichen aus planned_posts uebernommen (credentials.ts, submit...).
   ["origin", "TEXT NOT NULL DEFAULT 'auto'"],
+  // 20.09.2026: dasselbe fuer das Bild. Gebraucht fuer die Ausnahme bei LinkedIn "nur Text" -
+  // ein selbst hochgeladenes Bild geht mit raus, ein von uns erzeugtes nicht. Ohne diese Spalte
+  // saehe das Panel dem Eintrag in der Warteschlange nicht an, wem sein Bild gehoert.
+  ["image_source", "TEXT NOT NULL DEFAULT 'auto'"],
   // Exact ig_feed/ig_story/linkedin value from save_pending_approval's `channel` argument -
   // the pre-existing `provider` column collapses ig_feed/ig_story both to "instagram", which
   // loses exactly the distinction the panel UI and a later publish-approved-post run need.
@@ -931,6 +935,7 @@ export interface SavedThemeRow {
 
 export interface PendingApprovalRow {
   id: string;
+  image_source?: string;
   customer_id: string;
   provider: string;
   channel: string | null;

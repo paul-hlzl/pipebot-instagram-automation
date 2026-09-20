@@ -43,7 +43,7 @@ import {
 } from "./credentials.js";
 import { isPostingDayForChannel, nextViennaWeekly, planWindowEnd, viennaDateStr, viennaWeekday, type PostingChannel } from "./schedule.js";
 import { wochenfarbe } from "./brand-colors.js";
-import { darfNeuGeschriebenWerden, linkedinNurText } from "./credentials.js";
+import { darfNeuGeschriebenWerden, istEigenesBild, linkedinNurText } from "./credentials.js";
 import { sprachFehler } from "./sprache.js";
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
@@ -455,7 +455,11 @@ export async function mitKundenmarke(
   imageUrl: string | undefined,
 ): Promise<string | undefined> {
   if (!customerId) return imageUrl;
-  // "Nur Text mit Hashtags": dann geht gar kein Bild mit - auch keines, das die Routine
+  // Ein Bild, das der Kunde selbst hochgeladen hat, wird NIE angefasst: weder durch ein
+  // Markenbild ersetzt noch bei LinkedIn "nur Text" weggelassen. Seine Arbeit darf nicht
+  // stillschweigend verschwinden (Ansage 20.09.2026) - das gilt auf jedem Kanal.
+  if (istEigenesBild(customerId, imageUrl)) return imageUrl;
+  // "Nur Text mit Hashtags": sonst geht gar kein Bild mit - auch keines, das die Routine
   // mitschickt. Damit ist die Markenfrage bei LinkedIn in diesem Fall gegenstandslos. Diese
   // Pruefung steht VOR der Ueberschrift: ein LinkedIn-Beitrag hat oft gar keine.
   if (channel === "linkedin" && linkedinNurText(customerId)) return undefined;

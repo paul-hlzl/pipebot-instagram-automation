@@ -26,7 +26,11 @@ const { mitKundenmarke } = await import("../dist/panel/planning.js");
 
 const id = db.prepare("SELECT id FROM customers WHERE status='test' ORDER BY created_at DESC").get()?.id;
 if (!id) { console.log("Kein Testkunde in der Sandbox - erst scripts/test-freigabe.mjs laufen lassen."); process.exit(1); }
-db.prepare("UPDATE customers SET accent_color=?, gradient_color2=?, gradient_enabled=1, gradient_direction='diagonal' WHERE id=?").run(ACCENT, ZWEITFARBE, id);
+db.prepare("UPDATE customers SET accent_color=?, gradient_color2=?, gradient_enabled=1, gradient_direction='diagonal', linkedin_image_mode='bild' WHERE id=?").run(ACCENT, ZWEITFARBE, id);
+// Sauberer Ausgangspunkt: kein Rest aus einem frueheren Lauf, der dieses Bild als "eigenes Bild
+// des Kunden" markiert haette - dann wuerde es zu Recht nicht angefasst und der Test misst nichts.
+db.prepare("DELETE FROM planned_posts WHERE customer_id=?").run(id);
+db.prepare("DELETE FROM pending_approvals WHERE customer_id=?").run(id);
 
 async function ecken(url) {
   const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
@@ -64,6 +68,13 @@ db.prepare("UPDATE customers SET gradient_enabled=1 WHERE id=?").run(id);
 
 ok("Ohne Ueberschrift passiert nichts", (await mitKundenmarke(id, "ig_feed", undefined, HAUSBILD)) === HAUSBILD);
 ok("Ohne Kunde passiert nichts", (await mitKundenmarke(undefined, "ig_feed", "Wer wir sind", HAUSBILD)) === HAUSBILD);
+
+const eigen = `plp_eig${Date.now()}`;
+const nun = new Date().toISOString();
+db.prepare("INSERT INTO planned_posts (id, customer_id, channel, scheduled_for, status, headline, image_url, image_source, origin, created_at, updated_at) VALUES (?,?,?,?,'edited',?,?,'kunde','kunde',?,?)")
+  .run(eigen, id, "ig_feed", nun.slice(0, 10), "Eigenes", HAUSBILD, nun, nun);
+ok("Ein selbst hochgeladenes Bild wird nie durch ein Markenbild ersetzt", (await mitKundenmarke(id, "ig_feed", "Eigenes", HAUSBILD)) === HAUSBILD);
+db.prepare("DELETE FROM planned_posts WHERE id=?").run(eigen);
 
 console.log(fehler ? `\n${fehler} Bruchstelle(n)` : "\nalles gruen");
 process.exit(fehler ? 1 : 0);
