@@ -342,6 +342,37 @@
       // bei gleicher Hoehe viel groesser. Gemessen wird das Seitenverhaeltnis der Datei, nicht
       // die Darstellung - deshalb erst, wenn das Bild wirklich geladen ist.
       bild.onload = () => {
+        // Die Tinte auf die Achse legen (20.09.2026, vierter Anlauf). Ein Logo ist nicht das,
+        // was seine Datei gross ist: die meisten haben oben oder unten Luft. Wer nur den Kasten
+        // ausrichtet, richtet diese Luft aus - genau deshalb hing das Logo dreimal daneben.
+        // Also wird die Tinte einmal gemessen (kleine Kopie auf einer Zeichenflaeche, gleiche
+        // Herkunft, kein Netzzugriff) und das Bild um ihre Aussermittigkeit verschoben.
+        try {
+          const n = 48, flaeche = document.createElement("canvas");
+          flaeche.width = n; flaeche.height = n;
+          const stift = flaeche.getContext("2d", { willReadFrequently: true });
+          stift.drawImage(bild, 0, 0, n, n);
+          const punkte = stift.getImageData(0, 0, n, n).data;
+          let oben = null, unten = null;
+          for (let y = 0; y < n; y++) {
+            for (let x = 0; x < n; x++) {
+              const i = (y * n + x) * 4;
+              // Tinte: sichtbar und nicht papierhell. Deckt beides ab - ein freigestelltes Logo
+              // (durchsichtig aussen) und eine Kachel mit eigenem, farbigem Hintergrund.
+              if (punkte[i + 3] > 40 && (punkte[i] + punkte[i + 1] + punkte[i + 2]) / 3 < 236) {
+                if (oben === null) oben = y;
+                unten = y;
+                break;
+              }
+            }
+          }
+          const hoehe = bild.getBoundingClientRect().height;
+          if (oben !== null && unten > oben && hoehe) {
+            const mitteDerTinte = (oben + unten + 1) / 2 / n;
+            const versatz = Math.max(-6, Math.min(6, (0.5 - mitteDerTinte) * hoehe));
+            bild.style.transform = Math.abs(versatz) > 0.4 ? `translateY(${versatz.toFixed(1)}px)` : "";
+          }
+        } catch { /* Zeichenflaeche nicht verfuegbar: dann eben ohne Feinausrichtung */ }
         const verhaeltnis = bild.naturalHeight ? bild.naturalWidth / bild.naturalHeight : 1;
         // Drei Faelle, weil drei Formen unterschiedlich wiegen: geschlossenes Zeichen (unter
         // 2.2), mehrzeilige Wortmarke (bis 4, Buchstaben nur halb so hoch wie das Bild) und
@@ -775,9 +806,9 @@
           const aktiv = gewaehlterTag(tage);
           return streifenHtml(posts, tage, aktiv) + tagDetailHtml(posts, tage, aktiv);
         })()}
+        <p class="anders-zeile"><button type="button" class="link" data-go="anders">Anders machen</button></p>
         <div class="sticky-actions">
           <button type="button" class="btn lg" data-go="plan">Passt, weiter</button>
-          <button type="button" class="link" data-go="anders">Anders machen</button>
         </div>
       </section>`;
   }
@@ -1554,6 +1585,12 @@
     } catch (err) { beschaeftigt(btn, false); toast(err.message, "bad"); }
   }
 
+  /** Zwei Farben mischen - fuer die Geschwister der Markenfarbe im "Jetzt posten"-Blatt. */
+  function mischen(hex, ziel, anteil) {
+    const z = (h, i) => parseInt(h.slice(i, i + 2), 16);
+    const m = (a, b) => Math.round(a + (b - a) * anteil).toString(16).padStart(2, "0");
+    return `#${m(z(hex, 1), z(ziel, 1))}${m(z(hex, 3), z(ziel, 3))}${m(z(hex, 5), z(ziel, 5))}`;
+  }
   function jetztPostenOeffnen() {
     const c = S.customer;
     const kanaele = aktiveKanaele(c);
@@ -1564,11 +1601,49 @@
       <form id="f-jetzt">
         <div class="wahl">${kanaele.map((ch) => `<label><input type="checkbox" name="ch" value="${ch}" ${offen.has(ch) ? "disabled" : kanaele.length === 1 ? "checked" : ""}><span>${esc(KANAL[ch].label)}${offen.has(ch) ? `<small>schon angefragt</small>` : ""}</span></label>`).join("")}</div>
         <div class="field" style="margin-top:14px"><label for="topic">Thema <span class="muted">(optional)</span></label><input class="input" id="topic" name="topic" maxlength="300" placeholder="z. B. unser neues Angebot ab Oktober"></div>
+        <!-- Zwei leise Zeilen statt zusaetzlicher Knoepfe: Vorschlaege kommen erst auf Tipp, und
+             die Farbe ist eine Reihe Tupfer, keine eigene Seite. Beides gilt nur fuer diesen
+             Beitrag (20.09.2026). -->
+        <p class="jetzt-zeile"><button type="button" class="link" id="themen-vorschlag">Themen vorschlagen</button><span class="small muted" id="themen-hinweis"></span></p>
+        <div class="chips" id="themen-liste" hidden></div>
         <p class="error" id="err-topic" aria-live="assertive"></p>
+        <div class="jetzt-zeile farbzeile">
+          <span class="small muted">Farbe</span>
+          <div class="tupfer">${farbTupferHtml(c)}</div>
+        </div>
         <div class="actions" style="margin-top:16px"><button class="btn lg" type="submit">Jetzt posten</button></div>
       </form>`;
+    // Die freie Farbe und die Tupfer schliessen einander aus - wer eine eigene waehlt, hat die
+    // Tupfer damit abgewaehlt, und umgekehrt.
+    const frei = $("#farbe-frei");
+    if (frei) {
+      frei.addEventListener("input", () => {
+        frei.dataset.gewaehlt = "1";
+        $$("input[name=farbe]").forEach((r) => { r.checked = false; });
+      });
+      $$("input[name=farbe]").forEach((r) => r.addEventListener("change", () => { frei.dataset.gewaehlt = "0"; }));
+    }
     $("#sheet-overlay").hidden = false;
   }
+  /** Die Markenfarbe und drei Geschwister, dazu die freie Wahl - nur fuer diesen einen Beitrag. */
+  function farbTupferHtml(c) {
+    const basis = (c.accentColor || STANDARD_AKZENT).toLowerCase();
+    const werte = [
+      { wert: "", farbe: basis, titel: "Wie immer" },
+      { wert: mischen(basis, "#ffffff", 0.28), titel: "Heller" },
+      { wert: mischen(basis, "#000000", 0.35), titel: "Dunkler" },
+    ];
+    if (c.gradientColor2) werte.push({ wert: c.gradientColor2.toLowerCase(), titel: "Zweite Markenfarbe" });
+    return `${werte.map((t, i) => `<label class="tupfer-el" title="${esc(t.titel)}">
+        <input type="radio" name="farbe" value="${esc(t.wert)}" ${i === 0 ? "checked" : ""}>
+        <span class="tupfer-punkt" style="background:${esc(t.farbe || t.wert)}"></span>
+        <span class="sr-only">${esc(t.titel)}</span>
+      </label>`).join("")}
+      <label class="tupfer-el tupfer-frei" title="Eigene Farbe">
+        <input type="color" id="farbe-frei" value="${esc(basis)}" aria-label="Eigene Farbe für diesen Beitrag">
+      </label>`;
+  }
+
   /* ------------------------ Das Blatt zu einem Beitrag (Konzept M2) ------------------------ */
   const postVon = (id) => (S.status?.posts || []).find((p) => p.id === id);
   function blattOeffnen(titel, html) {
@@ -1720,6 +1795,31 @@
     }
   }
 
+  /** Drei Vorschlaege aus Branche, Beschreibung und den Themen des Kunden - auf Tipp, nicht vorab. */
+  async function themenVorschlagen() {
+    const knopf = $("#themen-vorschlag"), hinweis = $("#themen-hinweis"), liste = $("#themen-liste");
+    if (!knopf || !liste) return;
+    beschaeftigt(knopf, true, "Einen Moment …");
+    hinweis.textContent = "";
+    try {
+      const { topics } = await api("POST", "/api/suggest-topics");
+      const drei = (topics || []).slice(0, 3);
+      if (!drei.length) { hinweis.textContent = "Gerade fällt uns nichts ein - schreib es selbst."; return; }
+      // Die KI antwortet in ganzen Saetzen. Im Feld steht der ganze, auf dem Chip eine kurze
+      // Fassung - sonst wird aus drei Vorschlaegen eine halbe Bildschirmseite.
+      liste.innerHTML = drei.map((t) => {
+        const kurz = t.length > 58 ? `${t.slice(0, 57).trimEnd()}…` : t;
+        return `<button type="button" class="chip chip-thema" data-thema="${esc(t)}" title="${esc(t)}">${esc(kurz)}</button>`;
+      }).join("");
+      liste.hidden = false;
+      hinweis.textContent = "Antippen übernimmt.";
+    } catch (err) {
+      hinweis.textContent = err.message;
+    } finally {
+      beschaeftigt(knopf, false);
+    }
+  }
+
   async function jetztPostenAbsenden(form) {
     const kanaele = $$("input[name=ch]:checked", form).map((i) => i.value);
     feldFehler("topic", "");
@@ -1727,7 +1827,12 @@
     const btn = $("button[type=submit]", form);
     beschaeftigt(btn, true, "Wird angefragt …");
     try {
-      const r = await api("POST", "/api/post-now", { channels: kanaele, topic: form.topic.value.trim(), format: "single" });
+      // Die Farbe gilt NUR fuer diesen Beitrag - leer heisst "wie immer", die Einstellung des
+      // Kunden bleibt unberuehrt.
+      const gewaehlt = $("input[name=farbe]:checked", form);
+      const freie = $("#farbe-frei", form);
+      const accentColor = gewaehlt ? gewaehlt.value : (freie?.dataset.gewaehlt === "1" ? freie.value : "");
+      const r = await api("POST", "/api/post-now", { channels: kanaele, topic: form.topic.value.trim(), format: "single", ...(accentColor ? { accentColor } : {}) });
       uebernehmen(r);
       sheetSchliessen();
       S.notice = { kind: "ok", text: `Angefragt für ${kanaele.map((ch) => KANAL[ch].label).join(" und ")}. Der Beitrag entsteht in den nächsten Minuten${S.customer.approvalMode ? " und erscheint dann oben zur Freigabe" : ""}.` };
@@ -1923,6 +2028,15 @@
     if (t.closest("#btn-plan-uebernehmen")) { planUebernehmen(); return; }
     if (t.closest("#btn-zum-dashboard")) { go("dashboard"); return; }
     if (t.closest("#btn-jetzt-posten")) { jetztPostenOeffnen(); return; }
+    if (t.closest("#themen-vorschlag")) { await themenVorschlagen(); return; }
+    const vorschlag = t.closest("[data-thema]");
+    if (vorschlag) {
+      const feld = $("#topic");
+      if (feld) { feld.value = vorschlag.dataset.thema; feld.focus(); }
+      $("#themen-liste").hidden = true;
+      $("#themen-hinweis").textContent = "";
+      return;
+    }
     if (t.closest("#sheet-close") || t.id === "sheet-overlay") { sheetSchliessen(); return; }
     const skip = t.closest("[data-skip]");
     if (skip) { try { uebernehmen(await api("POST", `/api/skip-provider/${skip.dataset.skip}`)); render(); } catch (err) { toast(err.message, "bad"); } return; }

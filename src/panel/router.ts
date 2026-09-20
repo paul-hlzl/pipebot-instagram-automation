@@ -1875,7 +1875,11 @@ export function createPanelRouter(): Router {
     // Pro Anfrage, nicht als Kundeneinstellung: wer oefter sofort postet, will nicht jedes Mal
     // eine Mail (siehe post_requests.notify_email).
     const notifyEmail = req.body?.notifyEmail === true;
-    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single", notifyEmail));
+    // Farbe nur fuer diesen einen Beitrag (20.09.2026): eine Hex-Farbe oder gar nichts. Die
+    // Grundeinstellung des Kunden wird dabei NICHT angefasst.
+    const gewuenschteFarbe = str(req.body?.accentColor, 7);
+    const farbe = /^#[0-9a-fA-F]{6}$/.test(gewuenschteFarbe) ? gewuenschteFarbe.toLowerCase() : null;
+    channels.forEach((ch) => createPostRequest(c.id, topic || null, ch, ch === "ig_feed" ? format : "single", notifyEmail, farbe));
     triggerRoutineNow("post-now");
     // Video-Diashows macht der Server selbst (videos.ts) - die externe Routine sieht sie gar nicht.
     // Deshalb hier sofort anstossen statt bis zum naechsten Video-Cron zu warten: der Kunde hat

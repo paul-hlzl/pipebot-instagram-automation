@@ -962,6 +962,25 @@ export function linkedinNurText(customerId?: string | null): boolean {
  * Warteschlange steht. Gebraucht fuer die Ausnahme bei LinkedIn "nur Text mit Hashtags":
  * eigene Arbeit des Kunden darf nicht stillschweigend verschwinden (Ansage 20.09.2026).
  */
+/**
+ * Die Farbe, die fuer genau diesen einen angefragten Beitrag gelten soll (20.09.2026).
+ *
+ * Steht auf der offenen "Jetzt posten"-Anfrage und nur dort: die Grundeinstellung des Kunden
+ * bleibt unberuehrt, der naechste geplante Beitrag sieht wieder aus wie immer.
+ */
+export function farbeDerAnfrage(customerId: string | null | undefined, channel: string | null | undefined): string | null {
+  if (!customerId) return null;
+  const zeile = db
+    .prepare(
+      `SELECT accent_color FROM post_requests
+       WHERE customer_id = ? AND status IN ('pending','processing') AND accent_color IS NOT NULL
+         AND (channel = ? OR channel IS NULL OR ? IS NULL)
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(customerId, channel ?? null, channel ?? null) as { accent_color: string | null } | undefined;
+  return zeile?.accent_color ?? null;
+}
+
 export function istEigenesBild(customerId: string | null | undefined, imageUrl: string | null | undefined): boolean {
   if (!customerId || !imageUrl) return false;
   const gefunden = db
@@ -1056,12 +1075,12 @@ export function postRequestCountToday(customerId: string): number {
  * whole point is that the routine decides how to fulfil it). Caller must check
  * openPostRequestCount/postRequestCountToday against POST_REQUEST_MAX_OPEN/_PER_DAY first.
  */
-export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null, format: string = "single", notifyEmail = false): PostRequest {
+export function createPostRequest(customerId: string, topic: string | null, channel: string | null = null, format: string = "single", notifyEmail = false, accentColor: string | null = null): PostRequest {
   const id = `preq_${randomToken(9)}`;
   const now = nowIso();
   db.prepare(
-    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format, notify_email) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
-  ).run(id, customerId, topic || null, channel, now, now, format, notifyEmail ? 1 : 0);
+    `INSERT INTO post_requests (id, customer_id, topic, channel, status, created_at, updated_at, format, notify_email, accent_color) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+  ).run(id, customerId, topic || null, channel, now, now, format, notifyEmail ? 1 : 0, accentColor);
   return { id, customerId, topic, channel, status: "pending", createdAt: now, updatedAt: now, format, note: null, notifyEmail };
 }
 

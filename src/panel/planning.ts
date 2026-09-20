@@ -44,7 +44,7 @@ import {
 } from "./credentials.js";
 import { isPostingDayForChannel, nextViennaWeekly, planWindowEnd, viennaDateStr, viennaWeekday, type PostingChannel } from "./schedule.js";
 import { wochenfarbe } from "./brand-colors.js";
-import { darfNeuGeschriebenWerden, istEigenesBild, linkedinNurText } from "./credentials.js";
+import { darfNeuGeschriebenWerden, farbeDerAnfrage, istEigenesBild, linkedinNurText } from "./credentials.js";
 import { sprachFehler } from "./sprache.js";
 import { headlineLayoutForFormat, HEADLINE_MAX_LINES } from "../watermark.js";
 import { getFontOption, DEFAULT_FONT_ID } from "../fonts.js";
@@ -426,6 +426,12 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
   return { updated, skipped, errors };
 }
 
+/** Dieselbe Farbe, nur dunkler - als zweite Farbe eines Verlaufs, wenn der Kunde keine hat. */
+function dunklereSchwester(hex: string): string {
+  const z = (i: number) => Math.max(0, Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.55));
+  return `#${[z(1), z(3), z(5)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /**
  * Erzwingt die Marke des Kunden auf einem Bild, das die Routine erzeugt hat (20.09.2026).
  *
@@ -460,12 +466,19 @@ export async function mitKundenmarke(
   // Markenbild ersetzt noch bei LinkedIn "nur Text" weggelassen. Seine Arbeit darf nicht
   // stillschweigend verschwinden (Ansage 20.09.2026) - das gilt auf jedem Kanal.
   if (istEigenesBild(customerId, imageUrl)) return imageUrl;
+  // Farbe nur fuer diesen einen angefragten Beitrag (20.09.2026). Ohne eigene zweite Farbe wird
+  // eine dunklere Schwester davon genommen - ein Verlauf braucht zwei, und lokal gerendert
+  // kostet er nichts.
+  const einmalFarbe = farbeDerAnfrage(customerId, channel);
   // "Nur Text mit Hashtags": sonst geht gar kein Bild mit - auch keines, das die Routine
   // mitschickt. Damit ist die Markenfrage bei LinkedIn in diesem Fall gegenstandslos. Diese
   // Pruefung steht VOR der Ueberschrift: ein LinkedIn-Beitrag hat oft gar keine.
   if (channel === "linkedin" && linkedinNurText(customerId)) return undefined;
   if (!headline || !imageUrl) return imageUrl;
-  const branding = resolveImageBranding(customerId);
+  const roh = resolveImageBranding(customerId);
+  const branding = einmalFarbe
+    ? { ...roh, accentColor: einmalFarbe, gradient: { color2: roh.gradient?.color2 ?? dunklereSchwester(einmalFarbe), direction: roh.gradient?.direction ?? "diagonal" } }
+    : roh;
   if (!branding.gradient || !branding.accentColor) return imageUrl;
   const freigegeben = db
     .prepare("SELECT 1 AS x FROM pending_approvals WHERE customer_id = ? AND image_url = ? LIMIT 1")

@@ -59,6 +59,13 @@ for (const logo of LOGOS) {
       return { name: r(".marke-name"), logo: r("#marke-kunde-bild"), huelle: r("#marke-kunde") };
     });
     console.log(`${STAND} ${breite} ${logo.name}: Wortmarke Mitte ${box.name?.mitte}, Logo Mitte ${box.logo?.mitte}, Logo ${box.logo?.breite}x${box.logo?.hoehe}`);
+    // Die Kaesten mitschreiben, damit die Tinte im Bild an genau diesen Stellen gemessen werden
+    // kann - Kasten und Tinte sind bei Schrift nicht dasselbe, und genau darum geht es hier.
+    const kasten = await page.evaluate(() => {
+      const r = (s) => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect(); const t = document.querySelector("#top").getBoundingClientRect(); return { x: Math.round(b.left - t.left), y: Math.round(b.top - t.top), b: Math.round(b.width), h: Math.round(b.height) }; };
+      return { name: r(".marke-name"), logo: r("#marke-kunde-bild"), x: r(".marke-x") };
+    });
+    fs.writeFileSync(datei.replace(/\.png$/, ".json"), JSON.stringify(kasten));
     await ctx.close();
   }
 }

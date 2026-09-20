@@ -343,6 +343,9 @@ migrateColumns("planned_posts", [
   ["origin", "TEXT NOT NULL DEFAULT 'auto'"],
   ["image_source", "TEXT NOT NULL DEFAULT 'auto'"],
 ]);
+// 20.09.2026: Farbe fuer genau diesen einen Beitrag, ohne die Grundeinstellung des Kunden zu
+// aendern. NULL heisst "wie immer" - der Normalfall.
+migrateColumns("post_requests", [["accent_color", "TEXT"]]);
 migrateColumns("pending_approvals", [
   // Wird beim Einreichen aus planned_posts uebernommen (credentials.ts, submit...).
   ["origin", "TEXT NOT NULL DEFAULT 'auto'"],

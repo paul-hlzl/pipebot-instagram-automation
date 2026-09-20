@@ -317,7 +317,10 @@ for (const breite of BREITEN) {
   await page.waitForTimeout(900);
   ok("Uebersicht zeigt die Woche", (await page.locator(".post").count()) >= 5);
   ok("Jede Karte nennt ihren Zustand", (await page.locator(".post .zust").count()) === (await page.locator(".post").count()));
-  const handlungen = await page.locator(".post").first().locator(".post-actions button").count();
+  // Seit 20.09.2026 kann eine der drei Handlungen ein LINK sein: steht der Kanal auf "nicht
+  // verbunden", tritt "<Anbieter> verbinden" an die Stelle von "Freigeben" - ein Knopf, der
+  // nichts bewirken kann, waere dort eine Luege. Gezaehlt wird deshalb beides.
+  const handlungen = await page.locator(".post").first().locator(".post-actions button, .post-actions a").count();
   ok("Auf der Karte stehen zwei Handlungen und das Mehr-Menue", handlungen === 3, String(handlungen));
   await shot("5-uebersicht");
   await pruefeBildschirm(page, "Uebersicht", breite);

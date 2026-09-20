@@ -338,11 +338,20 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .order-btns button { min-width: var(--tap); min-height: var(--tap); border: 1px solid var(--linie); background: transparent; color: var(--text); border-radius: 999px; cursor: pointer; font-size: 15px; }
 .order-btns button[disabled] { opacity: .3; cursor: default; }
 
+/* Die klebende Leiste (20.09.2026 ueberarbeitet): SIE DARF UEBER DEM INHALT LIEGEN, ABER NICHTS
+   DAUERHAFT VERDECKEN. Vorher standen hier zwei Handlungen uebereinander - zusammen 135 px, ein
+   Fuenftel eines iPhone-Bildschirms. Auf dem Ergebnisbildschirm lag sie damit genau auf dem
+   Tagesstreifen und der Beitragskarte: sichtbar war die Kanalzeile, dann der Knopf, und es sah
+   aus, als waere die Seite dort zu Ende. Jetzt traegt sie nur noch die eine Hauptsache;
+   "Anders machen" steht als ruhige Zeile darueber im Textfluss. Der Abstand darunter sorgt
+   dafuer, dass der letzte Inhalt IMMER unter der Leiste hervorgescrollt werden kann. */
 .sticky-actions {
-  position: sticky; bottom: 0; margin-top: 30px; padding: 16px 0 max(14px, env(safe-area-inset-bottom));
-  background: linear-gradient(to top, var(--grund) 76%, rgba(255,255,255,0)); display: flex; flex-direction: column; gap: 4px; align-items: center;
+  position: sticky; bottom: 0; margin-top: 18px; padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--grund) 72%, rgba(255,255,255,0)); display: flex; flex-direction: column; gap: 4px; align-items: center;
 }
 .sticky-actions .btn { width: 100%; max-width: 420px; }
+.anders-zeile { margin: 22px 0 0; text-align: center; }
+.anders-zeile .link { padding: 11px 14px; min-height: 44px; }
 .lauf-zeile { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: var(--t-small); margin-top: 16px; }
 .lauf-zeile::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--aktion); animation: puls 1.2s ease-in-out infinite; }
 
@@ -364,6 +373,23 @@ button { font: inherit; letter-spacing: inherit; color: inherit; }
 .chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--linie); border-radius: 999px; padding: 7px 13px; font-size: var(--t-small); background: #fff; min-height: 38px; }
 .chip button { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-2); font-size: 17px; line-height: 1; min-width: 26px; min-height: 26px; }
 .chip.add { padding: 0; }
+
+/* "Jetzt posten": zwei leise Zeilen statt zusaetzlicher Knoepfe (20.09.2026). Die Vorschlaege
+   erscheinen erst auf Tipp, die Farbe ist eine Reihe Tupfer - beides gilt nur fuer diesen einen
+   Beitrag und laesst die Grundeinstellung des Kunden in Ruhe. */
+.jetzt-zeile { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 0; }
+.jetzt-zeile .link { padding: 11px 0; min-height: 44px; }
+.farbzeile { margin-top: 12px; }
+.chip-thema { cursor: pointer; text-align: left; min-height: 44px; }
+.chip-thema:hover { border-color: var(--text-2); }
+.tupfer { display: flex; gap: 2px; flex-wrap: wrap; }
+.tupfer-el { position: relative; width: 44px; height: 44px; display: grid; place-items: center; cursor: pointer; border-radius: 50%; }
+.tupfer-el input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+.tupfer-punkt { width: 26px; height: 26px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.14); }
+.tupfer-el input:checked + .tupfer-punkt { box-shadow: inset 0 0 0 1px rgba(0,0,0,.14), 0 0 0 2px var(--grund), 0 0 0 3px var(--text); }
+.tupfer-el input:focus-visible + .tupfer-punkt { outline: 2px solid var(--text); outline-offset: 4px; }
+.tupfer-frei input[type="color"] { opacity: 1; position: absolute; inset: 9px; width: 26px; height: 26px; padding: 0; border: 1px dashed var(--linie); border-radius: 50%; background: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .chip.add input { border: 0; background: transparent; font: inherit; font-size: 14px; padding: 7px 13px; min-width: 150px; outline: none; color: var(--text); }
 .chip.add:focus-within { border-color: var(--aktion); }
 .wahl { display: grid; gap: 8px; }
@@ -532,6 +558,10 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
      damit unter die Grundlinie des Schriftzugs. Diese Hoehe ist genau die Zeile von
      "Pipeflow"; das Logo sitzt darin mittig und liegt damit auf derselben Achse. */
   height: 28px; align-self: flex-start;
+  /* 2,5 px tiefer als die Zeilenmitte: die sichtbare Mitte von "Pipeflow" liegt nicht in der
+     Mitte seiner Zeile, weil die Schrift oben Versalhoehe und unten eine Unterlaenge (p) hat.
+     Gemessen an der Tinte im Bild, nicht am Kasten (docs/easy-onboarding/kopfzeile). */
+  margin-top: 2.5px;
   animation: logo-auf .5s var(--kurve) both;
 }
 .marke-kunde[hidden] { display: none; }
@@ -572,6 +602,11 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
   /* Das ✕ verbindet zwei Dinge. In der zweiten Zeile steht es allein am Anfang und verbindet
      nichts mehr - dort reicht die Marke des Kunden fuer sich (Ansage 20.09.2026). */
   .marke-x { display: none; }
+  /* Am Handy klebt die Leiste NICHT (20.09.2026). Auf einem iPhone sind 664 Pixel Sichtfeld:
+     eine Beitragskarte ist allein 715 Pixel hoch, der Kunde sah die Kanalzeile und darunter
+     sofort den Knopf - es sah aus, als hoere die Seite dort auf. Im Textfluss verdeckt sie
+     nichts, und der Knopf steht genau dort, wo man nach dem Durchsehen der Woche ankommt. */
+  .sticky-actions { position: static; background: none; padding-top: 4px; }
   .marke-kunde img { height: 19px; max-width: 136px; }
   .marke-kunde.logo-hoch img { height: 23px; max-width: 124px; }
   .marke-kunde.logo-kompakt img { height: 17px; max-width: 44px; }
