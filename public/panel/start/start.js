@@ -1050,9 +1050,9 @@
    * verschwand er, sobald die Warteschlange leer war, und der Kunde sah nirgends, was ansteht.
    *
    * Zugeklappt ist er eine Zeile: "10 Beitraege warten auf deine Freigabe". So bleibt die
-   * Uebersicht ruhig und die Woche steht weiter oben. Ein Tipp klappt ihn auf. AUSNAHME: liegt
-   * ein FAELLIGER Beitrag in der Warteschlange, steht er offen - der wartet auf eine Handlung
-   * jetzt, nicht irgendwann, und den soll der Kunde sehen, ohne zu suchen.
+   * Uebersicht ruhig und die Woche steht weiter oben. Ein Tipp klappt ihn auf - IMMER, auch
+   * wenn ein faelliger Beitrag darin liegt (Ansage 20.09.2026: "Ich will selbst entscheiden,
+   * wann ich aufklappe"). Eine frueher hier eingebaute Ausnahme dafuer ist bewusst wieder raus.
    *
    * Offen: oben die faelligen als ganze Karte (Text mit Hashtags, Bild ungeschnitten), darunter
    * die geplanten als Zeilen mit kleinem Vorschaubild, die sich auf Tipp an Ort und Stelle zum
@@ -1068,8 +1068,8 @@
     if (!gesamt) {
       return `<div class="abschnitt-kopf"><h2>Wartet auf deine Freigabe</h2></div><p class="leer">Gerade wartet nichts auf dich.</p>`;
     }
-    // Voreinstellung: offen, solange etwas faellig ist. Danach entscheidet der Kunde.
-    const offen = S.freigabenOffen === null || S.freigabenOffen === undefined ? liste.length > 0 : S.freigabenOffen;
+    // Immer zugeklappt starten; aufgeklappt wird nur, was der Kunde selbst aufklappt.
+    const offen = S.freigabenOffen === true;
     const kopf = `<button type="button" class="frei-kopf" data-freigaben-auf aria-expanded="${offen}">
       <span class="frei-kopf-text"><strong>${gesamt} ${gesamt === 1 ? "Beitrag wartet" : "Beiträge warten"}</strong> auf deine Freigabe</span>
       <span class="frei-pfeil${offen ? " ist-auf" : ""}" aria-hidden="true">⌄</span>

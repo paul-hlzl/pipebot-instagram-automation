@@ -83,8 +83,13 @@ for (const breite of [360, 1440]) {
   });
   ok("Kopfzeile steht an fester Stelle über der Woche", kopf.vorDerWoche);
   ok("Sie nennt die Zahl in einem Satz", kopf.text === "4 Beiträge warten auf deine Freigabe ⌄", kopf.text);
-  ok("Mit einem fälligen Beitrag steht der Block offen", kopf.offen === "true" && (await page.locator("#freigaben-abschnitt .post[data-approval]").count()) === 1);
+  ok("Auch mit einem fälligen Beitrag startet der Block zugeklappt", kopf.offen === "false" && (await page.locator("#freigaben-abschnitt .post[data-approval], #freigaben-abschnitt .frei-zeile").count()) === 0);
   ok("Die Kopfzeile ist eine Tippfläche von mindestens 44 px", kopf.hoehe >= 44, `${kopf.hoehe}px`);
+
+  // Ab hier aufgeklappt - der Kunde tippt einmal.
+  await page.locator("#freigaben-abschnitt .frei-kopf").click();
+  await page.waitForTimeout(300);
+  ok("Ein Tipp klappt auf: fällige Karte und geplante Zeilen stehen da", (await page.locator("#freigaben-abschnitt .post[data-approval]").count()) === 1 && (await page.locator("#freigaben-abschnitt .frei-zeile").count()) === 3);
 
   // 2) Faellige Karte oben, geplante Zeilen darunter, mit Vorschaubild
   const inhalt = await page.evaluate(() => {
@@ -139,7 +144,7 @@ for (const breite of [360, 1440]) {
   await page.waitForTimeout(1200);
   ok("Fälligen freigegeben: Warteschlangen-Eintrag approved", db.prepare("SELECT status FROM pending_approvals WHERE id=?").get(aid).status === "approved");
 
-  // 6) Ohne faelligen Beitrag steht der Block standardmaessig zu
+  // 6) Ohne faelligen Beitrag genauso zugeklappt
   aufbauen({ faellig: false });
   await lade();
   const ohneFaellig = await page.evaluate(() => {
