@@ -23,7 +23,7 @@ import { decrypt, encrypt } from "./crypto.js";
 import { assertConnectionUsable } from "./connection-block.js";
 import { getProvider } from "./providers/index.js";
 import type { Provider, TokenSet } from "./providers/types.js";
-import { isDue, isDueForChannel, nextPostAt, viennaDateStr, type ScheduleInput } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, planWindowEnd, viennaDateStr, type ScheduleInput } from "./schedule.js";
 import { getRecentMedia, checkInstagramToken, type InstagramCredentials } from "../instagram.js";
 import { checkLinkedInToken } from "../linkedin.js";
 import type { LinkedInCredentials } from "../linkedin.js";
@@ -1063,6 +1063,30 @@ export function listRecentPostRequestsForCustomer(customerId: string, limit = 10
 const POST_REQUEST_STALE_PROCESSING_MS = 3 * 3_600_000;
 
 /**
+ * Kurze Frist fuer einen Lauf, der NACHWEISLICH nichts erzeugt hat (20.09.2026).
+ *
+ * Der Fall vom 19.09.: die Routine holte die Anfrage um 19:02:46 ab, machte genau einen weiteren
+ * Aufruf und starb - der Kunde haette bis 22:02 gewartet, obwohl in der ersten Sekunde klar war,
+ * dass nichts kommt. Drei Stunden sind dafuer zu lang.
+ *
+ * Warum die Bedingung "nichts erzeugt" und nicht einfach 15 Minuten fuer alle: die drei Stunden
+ * oben sind die Reparatur des Vorfalls vom 14./15.09. (14 doppelte Beitraege, weil dieselbe
+ * Anfrage mehrfach ausgegeben wurde). Ein Lauf, der laenger als 15 Minuten braucht, aber schon
+ * veroeffentlicht oder einen Beitrag zur Freigabe gelegt hat, darf seine Anfrage deshalb NICHT
+ * verlieren - fuer ihn gelten weiter die drei Stunden. Nur wenn seit dem Abholen fuer diesen
+ * Kunden weder ein Beitrag veroeffentlicht noch einer in die Freigabe-Warteschlange gelegt
+ * wurde, ist die Anfrage nach 15 Minuten wieder frei.
+ */
+const POST_REQUEST_LEERLAUF_MS = 15 * 60_000;
+
+/** Ist seit `seit` fuer diesen Kunden nachweislich nichts entstanden? */
+function laufOhneErgebnis(customerId: string, seit: string): boolean {
+  const veroeffentlicht = db.prepare("SELECT 1 FROM posts WHERE customer_id = ? AND posted_at > ? LIMIT 1").get(customerId, seit);
+  if (veroeffentlicht) return false;
+  return !db.prepare("SELECT 1 FROM pending_approvals WHERE customer_id = ? AND created_at > ? LIMIT 1").get(customerId, seit);
+}
+
+/**
  * All still-open requests across all customers, oldest first - what the routine should process
  * before its regular customer loop. Atomically CLAIMS them (flips 'pending' -> 'processing' in
  * the same call) so a request is only ever handed to ONE routine run at a time: previously this
@@ -1080,12 +1104,15 @@ const POST_REQUEST_STALE_PROCESSING_MS = 3 * 3_600_000;
  * Kunde bekäme am Ende zwei. Dasselbe gilt für listApprovedPendingPosts weiter unten.
  */
 export function listOpenPostRequests(): PostRequest[] {
-  const staleBefore = new Date(Date.now() - POST_REQUEST_STALE_PROCESSING_MS).toISOString();
-  const claimable = db
-    .prepare(
-      "SELECT id FROM post_requests WHERE format != 'video_slideshow' AND (status = 'pending' OR (status = 'processing' AND updated_at < ?)) ORDER BY created_at",
-    )
-    .all(staleBefore) as { id: string }[];
+  const langeGrenze = new Date(Date.now() - POST_REQUEST_STALE_PROCESSING_MS).toISOString();
+  const kurzeGrenze = new Date(Date.now() - POST_REQUEST_LEERLAUF_MS).toISOString();
+  const claimable = (
+    db
+      .prepare(
+        "SELECT id, customer_id, status, updated_at FROM post_requests WHERE format != 'video_slideshow' AND (status = 'pending' OR (status = 'processing' AND updated_at < ?)) ORDER BY created_at",
+      )
+      .all(kurzeGrenze) as { id: string; customer_id: string; status: string; updated_at: string }[]
+  ).filter((r) => r.status === "pending" || r.updated_at < langeGrenze || laufOhneErgebnis(r.customer_id, r.updated_at));
   if (claimable.length === 0) return [];
 
   const now = nowIso();
@@ -1765,7 +1792,7 @@ export function updatePlannedPostImage(id: string, imageUrl: string, accentColor
  */
 export function countRegenerableBrandingPlannedPosts(customerId: string): { eligible: number; edited: number } {
   const today = viennaDateStr();
-  const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+  const to = planWindowEnd();
   const rows = db
     .prepare("SELECT status FROM planned_posts WHERE customer_id = ? AND scheduled_for >= ? AND scheduled_for <= ?")
     .all(customerId, today, to) as { status: string }[];

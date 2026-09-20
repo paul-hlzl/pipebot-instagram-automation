@@ -72,6 +72,52 @@ function viennaParts(date: Date): ViennaParts {
   };
 }
 
+/** Wochentag in Wiener Zeit: 0=Sonntag .. 6=Samstag. Fuer die Planweite und den Wochenlauf. */
+export function viennaWeekday(date: Date = new Date()): number {
+  return viennaParts(date).weekday;
+}
+
+/** Der UTC-Zeitpunkt, an dem in Wien als naechstes <weekday> um <hour>:<minute> ist (DST-sicher). */
+export function nextViennaWeekly(weekday: number, hour: number, minute = 0, now: Date = new Date()): Date {
+  const jetzt = viennaParts(now);
+  let tage = (weekday - jetzt.weekday + 7) % 7;
+  if (tage === 0 && (jetzt.hour > hour || (jetzt.hour === hour && jetzt.minute >= minute))) tage = 7;
+  const ziel = viennaDateStr(new Date(now.getTime() + tage * 86_400_000));
+  return new Date(viennaWallClockToUtcIso(ziel, hour, minute));
+}
+
+/**
+ * Planweite: von heute bis zum Ende der NAECHSTEN Kalenderwoche (Sonntag), also 8 bis 14 Tage.
+ *
+ * Bis 20.09.2026 waren es sieben rollende Tage und jede Nacht wuchs genau einer hinten nach.
+ * Seit der Umstellung auf den Wochenlauf (Sonntag 18:00 Wien, siehe startWeeklyPlanningSchedule)
+ * wird nicht mehr taeglich nachgefuellt - eine reine Ein-Wochen-Weite wuerde im Lauf der Woche
+ * auf einen einzigen Tag zusammenschrumpfen, und der Kunde saehe am Freitag fast nichts mehr.
+ *
+ * Zwei Kalenderwochen kosten nicht mehr: im geregelten Betrieb schreibt jeder Sonntagslauf genau
+ * eine neue Woche, weil die andere schon steht. Erwuenschte Nebenwirkung: faellt ein Sonntagslauf
+ * ganz aus (leeres Guthaben, Ausfall), merkt der Kunde nichts - die kommende Woche wurde eine
+ * Woche vorher geplant. Der Nachfasser am Montag frueh ist damit Reserve, nicht Rettung.
+ */
+export function planWindowEnd(now: Date = new Date()): string {
+  const wochentag = viennaWeekday(now); // 0 = Sonntag
+  // Am Sonntag selbst zaehlen volle sieben Tage bis zum naechsten Sonntag - sonst endete die
+  // Weite ausgerechnet am Tag des Wochenlaufs.
+  const bisSonntag = wochentag === 0 ? 7 : 7 - wochentag;
+  return viennaDateStr(new Date(now.getTime() + (bisSonntag + 7) * 86_400_000));
+}
+
+/**
+ * Weite der Erst-Planung beim Anmelden: unveraendert die naechsten sieben Tage.
+ *
+ * Bewusst NICHT die volle Planweite: dieser Lauf laeuft, waehrend der Kunde auf einen leeren
+ * Bildschirm schaut, und er faellt bei unbestaetigten Konten unter den Kostendeckel
+ * (postsUnverified). Der erste Wochenlauf fuellt den Rest auf.
+ */
+export function erstPlanungEnde(now: Date = new Date()): string {
+  return viennaDateStr(new Date(now.getTime() + 6 * 86_400_000));
+}
+
 /** Europe/Vienna's UTC offset (in minutes) at the given instant - handles CET/CEST automatically. */
 function viennaOffsetMinutes(date: Date): number {
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Vienna", timeZoneName: "shortOffset" });

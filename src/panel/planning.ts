@@ -41,7 +41,7 @@ import {
   type PlannedPost,
   type PublishChannel,
 } from "./credentials.js";
-import { isPostingDayForChannel, viennaDateStr, type PostingChannel } from "./schedule.js";
+import { isPostingDayForChannel, nextViennaWeekly, planWindowEnd, viennaDateStr, viennaWeekday, type PostingChannel } from "./schedule.js";
 import { wochenfarbe } from "./brand-colors.js";
 import { darfNeuGeschriebenWerden } from "./credentials.js";
 import { sprachFehler } from "./sprache.js";
@@ -54,7 +54,8 @@ import { ToolError } from "../errors.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { stalePostSkippedEmail } from "./emails.js";
 
-const LOOKAHEAD_DAYS = 7;
+/** Harte Obergrenze der Tagesschleife - die Planweite ist datumsgebunden, nicht zahlgebunden. */
+const MAX_PLAN_TAGE = 21;
 
 export type PlannableChannel = PublishChannel;
 
@@ -378,7 +379,9 @@ export async function regeneratePlannedPostsForBranding(row: CustomerRow, includ
     throw new ToolError("KI-Vorschläge sind gerade nicht verfügbar.");
   }
   const today = viennaDateStr();
-  const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+  // Dieselbe Weite wie die Planung selbst: sonst behielten die Beitraege der zweiten Woche das
+  // alte Branding, bis die naechtliche Auffrischung sie einsammelt.
+  const to = planWindowEnd();
   const targetStatuses = includeEdited ? ["planned", "edited"] : ["planned"];
   // Ueberschreibschutz: Kundenarbeit ist auch mit includeEdited unantastbar - 'edited' ist seit
   // 19.09.2026 immer Kundenarbeit (origin = 'kunde'), also faellt includeEdited faktisch weg.
@@ -437,12 +440,20 @@ export interface PlanningRunSummary {
 
 /**
  * Runs one full planning pass: every active, non-trial-expired, non-paused customer x every
- * enabled channel x the next 7 days. Idempotent (checks getPlannedPostByChannelDate first), so
- * running it more than once a day, or re-running after a partial failure, never creates
+ * enabled channel x the planning window. Idempotent (checks getPlannedPostByChannelDate first),
+ * so running it more than once a day, or re-running after a partial failure, never creates
  * duplicates. A failure for one customer/day/channel is logged (logPlanningError) and skipped -
  * it NEVER aborts the rest of the run (task 8's safety net).
+ *
+ * `plan: false` laesst NUR den Pflegeteil laufen (Auffrischen veralteter Zeilen, fehlende Bilder
+ * nachtragen). Genau das ist seit 20.09.2026 der taegliche Lauf: neue Tage kommen nur noch im
+ * Wochenlauf am Sonntag und im Nachfasser am Montag dazu, damit die Woche ein Paket bleibt und
+ * nicht jeden Morgen ein Beitrag hinten nachwaechst. Die Pflege muss taeglich bleiben - sonst
+ * greift nach einer Farb- oder Namensaenderung am Montag erst das Sicherheitsnetz kurz vor dem
+ * Veroeffentlichen und ueberspringt den Beitrag, statt ihn zu erneuern.
  */
-export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
+export async function planUpcomingPosts(opts: { plan?: boolean } = {}): Promise<PlanningRunSummary> {
+  const plane = opts.plan !== false;
   const startedAt = nowIso();
   let customersChecked = 0;
   let planned = 0;
@@ -481,6 +492,7 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
     const nachgetragen = await backfillMissingImages(row);
     errors += nachgetragen.failed;
 
+    if (!plane) continue;
     const week = await planCustomerWeek(row, { pillars });
     planned += week.planned;
     skippedExisting += week.skippedExisting;
@@ -489,8 +501,6 @@ export async function planUpcomingPosts(): Promise<PlanningRunSummary> {
 
   return { startedAt, finishedAt: nowIso(), customersChecked, planned, skippedExisting, refreshed, refreshFailed, errors };
 }
-
-export const PLANNING_LOOKAHEAD_DAYS = LOOKAHEAD_DAYS;
 
 export interface PlanWeekProgress {
   /** Slots, die dieser Lauf zu erzeugen hatte (ohne schon vorhandene). */
@@ -508,6 +518,8 @@ export interface PlanWeekOptions {
   postBudget?: number;
   /** Parallel laufende Generierungen. Nachtlauf: 1 (unveraendert), Onboarding: 3. */
   concurrency?: number;
+  /** Letzter zu planender Tag (Wiener Datum). Standard: planWindowEnd(). */
+  bis?: string;
   feature?: string;
   onProgress?: (p: PlanWeekProgress) => void;
 }
@@ -523,7 +535,7 @@ export interface PlanWeekResult {
 }
 
 /**
- * Plant die naechsten LOOKAHEAD_DAYS Tage fuer EINEN Kunden - die Schleife, die vorher direkt in
+ * Plant die Tage bis zum Ende der Planweite (planWindowEnd) fuer EINEN Kunden - die Schleife, die vorher direkt in
  * planUpcomingPosts stand, unveraendert im Verhalten (gleiche Slot-Auswahl, gleiche Idempotenz
  * ueber getPlannedPostByChannelDate, gleiche Saeulen-Rotation), nur herausgeloest, damit das
  * Easy Onboarding sie SOFORT fuer den gerade angelegten Kunden aufrufen kann, statt bis 03:00
@@ -548,8 +560,10 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
   let overBudget = 0;
   let lastPillarTitle: string | null = null;
   const slots: { channel: PlannableChannel; dateStr: string; pillar: ContentPillar | null; withImage: boolean }[] = [];
-  for (let offset = 0; offset < LOOKAHEAD_DAYS; offset++) {
+  const bis = opts.bis ?? planWindowEnd();
+  for (let offset = 0; offset < MAX_PLAN_TAGE; offset++) {
     const date = new Date(Date.now() + offset * 86_400_000);
+    if (viennaDateStr(date) > bis) break;
     for (const { channel, enabled } of channelDefs) {
       if (!enabled) continue;
       const { dateStr, due } = isPostingDayForChannel(scheduleInput, CHANNEL_SCHEDULE[channel], date);
@@ -580,7 +594,9 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
   // traegt sein Ergebnis ein. Bei mehreren Arbeitern sieht ein spaeter Slot nicht zwingend
   // ALLE frueheren - aber die grosse Mehrheit, und das genuegt: die Wiederholung entstand
   // dadurch, dass gar nichts bekannt war, nicht dadurch, dass zwei gleichzeitig liefen.
-  const vergeben: string[] = listPlannedPosts(row.id, viennaDateStr(), viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000)))
+  // Ueber die ganze Planweite, nicht ueber sieben Tage: sonst kennt Woche 2 die Ueberschriften
+  // aus Woche 1 nicht und wiederholt sie.
+  const vergeben: string[] = listPlannedPosts(row.id, viennaDateStr(), bis)
     .map((p) => p.headline)
     .filter((h): h is string => Boolean(h));
   // Pruefen und Belegen in EINEM synchronen Schritt. JavaScript unterbricht eine Funktion nicht
@@ -625,7 +641,7 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
  */
 export async function recolorPlannedPosts(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
   const today = viennaDateStr();
-  const to = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
+  const to = planWindowEnd();
   const rows = listPlannedPosts(row.id, today, to).filter((p) => p.headline && p.imageUrl && ["planned", "edited", "approved"].includes(p.status) && p.imageSource !== "kunde");
   if (!rows.length) return { filled: 0, failed: 0 };
   const branding = resolveImageBranding(row.id);
@@ -665,7 +681,7 @@ export interface BackfillResult {
  */
 export async function backfillMissingImages(row: CustomerRow, opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {}): Promise<BackfillResult> {
   const today = viennaDateStr();
-  const to = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
+  const to = planWindowEnd();
   const rows = listPlannedPostsWithoutImage(row.id, today, to).filter((p) => p.headline);
   if (!rows.length) return { filled: 0, failed: 0 };
   const branding = resolveImageBranding(row.id);
@@ -709,21 +725,48 @@ function msUntilNextUtcHour(hourUtc: number): number {
 }
 
 /**
- * Starts the once-daily planning run at a fixed UTC wall-clock hour (default 03:00 - clear of
- * both the 14:30-15:45 UTC own-account blackout and every hourly Kunden-Loop fire, which lands
- * on the hour). Unlike startTokenRefreshSchedule's simple setInterval (fine for "roughly every N
- * hours"), this deliberately anchors to a specific UTC hour so a server restart at some random
- * time of day doesn't permanently shift when planning runs.
+ * Der taegliche Lauf um 03:00 UTC (05:00 Wien): Pflege fuer alle, neue Tage nur montags.
+ *
+ * Die feste UTC-Stunde ist Absicht - sie liegt ausserhalb der 14:30-15:45-Sperre des eigenen
+ * Kontos und ausserhalb jeder vollen Stunde, auf der der Kunden-Loop feuert, und ein Neustart
+ * des Servers zu irgendeiner Tageszeit verschiebt den Lauf nicht dauerhaft.
+ *
+ * Montags ist derselbe Lauf der NACHFASSER zum Wochenlauf vom Vorabend: idempotent, er legt nur
+ * an, was am Sonntag nicht zustande kam. Fiel der Sonntagslauf ganz aus, faellt das dem Kunden
+ * trotzdem nicht auf - dank der Planweite von zwei Wochen steht die laufende Woche bereits.
  */
 export function startDailyPlanningSchedule(hourUtc = 3): NodeJS.Timeout {
-  const run = () =>
-    planUpcomingPosts()
-      .then((summary) => console.log("[panel] Tägliche Vorausplanung:", summary))
-      .catch((err) => console.error("[panel] Tägliche Vorausplanung unerwartet fehlgeschlagen:", err));
+  const run = () => {
+    const nachfasser = viennaWeekday() === 1; // Montag
+    return planUpcomingPosts({ plan: nachfasser })
+      .then((summary) => console.log(`[panel] Täglicher Lauf (${nachfasser ? "mit Nachfasser" : "nur Pflege"}):`, summary))
+      .catch((err) => console.error("[panel] Täglicher Lauf unerwartet fehlgeschlagen:", err));
+  };
   return setTimeout(() => {
     run();
     setInterval(run, 24 * 3_600_000);
   }, msUntilNextUtcHour(hourUtc));
+}
+
+/**
+ * Der Wochenlauf: Sonntag 18:00 Wiener Zeit, die ganze Planweite fuer alle Kunden.
+ *
+ * Wiener Wandzeit, nicht UTC: "Sonntagabend" soll im Winter dieselbe Stunde sein wie im Sommer.
+ * Deshalb wird nach jedem Lauf neu gerechnet (nextViennaWeekly) statt mit einem 7-Tage-Intervall
+ * zu arbeiten, das an der Zeitumstellung um eine Stunde verrutschen wuerde.
+ */
+export function startWeeklyPlanningSchedule(hourVienna = 18): NodeJS.Timeout {
+  const plane = (): NodeJS.Timeout => {
+    const ziel = nextViennaWeekly(0, hourVienna);
+    console.log(`[panel] Nächster Wochenlauf: ${ziel.toISOString()}`);
+    return setTimeout(() => {
+      planUpcomingPosts()
+        .then((summary) => console.log("[panel] Wochenlauf (Sonntag):", summary))
+        .catch((err) => console.error("[panel] Wochenlauf unerwartet fehlgeschlagen:", err))
+        .finally(() => plane());
+    }, Math.max(1_000, ziel.getTime() - Date.now()));
+  };
+  return plane();
 }
 
 /* ================= Stale-Content-Sicherheitsnetz (Panel v19) =================
@@ -773,14 +816,17 @@ export function isBrandingStale(versionAtGeneration: string | null, brandingLast
 /**
  * Ab welchem Alter ein unangetasteter Tagesplan allein wegen der Zeit neu geschrieben wird.
  *
- * Warum 14 und nicht weniger: vorausgeplant wird LOOKAHEAD_DAYS = 7 Tage. Im Normalbetrieb ist
- * ein Beitrag am Tag seiner Veroeffentlichung also hoechstens 7 Tage alt. Ein Schwellwert
+ * Warum 21 und nicht weniger: vorausgeplant wird bis zum Ende der naechsten Kalenderwoche, also
+ * hoechstens 14 Tage (planWindowEnd, seit 20.09.2026 - vorher 7). Im Normalbetrieb ist ein
+ * Beitrag am Tag seiner Veroeffentlichung also hoechstens 14 Tage alt. Ein Schwellwert
  * darunter wuerde Nacht fuer Nacht Beitraege neu schreiben, die der planende Lauf selbst gerade
  * erst erzeugt hat - Kosten fuer jeden Kunden jede Nacht, und der Kunde saehe genau das staendig
  * wechselnde Programm, das die Ueberspring-Regel verhindern soll. 14 Tage = doppelte Planweite
  * und feuert deshalb im geregelten Betrieb nie; es faengt die Faelle ab, in denen eine Zeile
  * wirklich liegen bleibt: pausierter Kunde, der wieder aktiv wird, ein Kanal, der erst spaeter
  * wieder eingeschaltet wird, ein gescheiterter Versand, oder eine spaeter groessere Planweite.
+ * WER DIE PLANWEITE AENDERT, MUSS DIESEN WERT MITZIEHEN: liegt er unter der Planweite, schreibt
+ * die naechtliche Auffrischung Nacht fuer Nacht Beitraege neu, die der Kunde schon gesehen hat.
  *
  * Der eigentliche Auslöser fuer "veraltet" ist nicht das Alter, sondern das geaenderte
  * Kundenprofil - das deckt die Branding-Regel unten praezise ab, und zwar sofort statt nach
@@ -789,7 +835,7 @@ export function isBrandingStale(versionAtGeneration: string | null, brandingLast
  */
 export const PLANNED_POST_MAX_AGE_DAYS = (() => {
   const raw = Number(process.env.PLANNED_POST_MAX_AGE_DAYS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 14;
+  return Number.isFinite(raw) && raw > 0 ? raw : 21;
 })();
 
 export type StaleReason = "branding" | "alter";
@@ -831,7 +877,7 @@ export interface RefreshResult {
  */
 export async function refreshStalePlannedPosts(row: CustomerRow, pillars: ContentPillar[]): Promise<RefreshResult> {
   const von = viennaDateStr();
-  const bis = viennaDateStr(new Date(Date.now() + (LOOKAHEAD_DAYS - 1) * 86_400_000));
+  const bis = planWindowEnd();
   const jetzt = Date.now();
   let refreshed = 0;
   let failed = 0;

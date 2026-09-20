@@ -60,7 +60,7 @@ import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { accessRecoveryEmail, verificationEmail } from "./emails.js";
-import { isDue, isDueForChannel, nextPostAt, nextVideoPostAt, viennaDateStr } from "./schedule.js";
+import { isDue, isDueForChannel, nextPostAt, nextVideoPostAt, planWindowEnd, viennaDateStr } from "./schedule.js";
 import { anthropicAvailable, helpChatReply, improveBriefing, suggestPillarsWithSearch, suggestTopics, type HelpChatMessage } from "../anthropic.js";
 import { subscribeToCommentWebhook } from "../instagram-comments.js";
 import { CAROUSEL_MIN_SLIDES, CAROUSEL_MAX_SLIDES } from "../instagram.js";
@@ -72,7 +72,7 @@ import { registerStartRoutes } from "./start-routes.js";
 import { registerTestmodeRoutes, testmodusMoeglich } from "./start-testmode.js";
 import { registerWocheRoutes, registerWocheBildRoute, merken } from "./woche-routes.js";
 import { limitsAusgeschaltet } from "./start-quota.js";
-import { runBackfillJob } from "./start-jobs.js";
+import { isJobRunning, runBackfillJob, runPlanWeekJob } from "./start-jobs.js";
 import { featuresForTier, normalizeTier } from "./tiers.js";
 import { reorderPlannedPosts } from "./credentials.js";
 
@@ -1217,6 +1217,23 @@ export function createPanelRouter(): Router {
       return;
     }
     const changedBrandingFields = brandingFieldsChanged(c, data);
+    // Kanal oder Rhythmus geaendert? Dann sofort nachplanen (20.09.2026). Seit der Wochenplanung
+    // wuerde die Luecke sonst bis zum naechsten Sonntag offen bleiben: wer am Mittwoch LinkedIn
+    // dazunimmt, saehe bis dahin keinen einzigen LinkedIn-Beitrag. Ein ABgeschalteter Kanal loest
+    // nichts aus, weil planCustomerWeek ausschliesslich leere Tage fuellt.
+    // Nur Felder, die dieser PATCH wirklich mitgeschickt hat (wie beim Teil-Patch oben): sonst
+    // loeste ein beliebiger PATCH einen Lauf aus, sobald die Spalte in der Datenbank leer ist und
+    // parseBriefing ihren Standard einsetzt.
+    const planFelder: [string, unknown, unknown][] = [
+      ["frequency", data.frequency, c.frequency],
+      ["activeWeekdays", data.activeWeekdays || null, c.active_weekdays || null],
+      ["instagramWeekdays", data.instagramWeekdays || null, c.instagram_weekdays || null],
+      ["linkedinWeekdays", data.linkedinWeekdays || null, c.linkedin_weekdays || null],
+      ["igFeedEnabled", data.igFeedEnabled ? 1 : 0, c.ig_feed_enabled ? 1 : 0],
+      ["igStoryEnabled", data.igStoryEnabled ? 1 : 0, c.ig_story_enabled ? 1 : 0],
+      ["linkedinEnabled", data.linkedinEnabled ? 1 : 0, c.linkedin_enabled ? 1 : 0],
+    ];
+    const nachplanenNoetig = planFelder.some(([feld, neu, alt]) => incoming[feld] !== undefined && neu !== alt);
     // Die Themenschwerpunkte steuern unmittelbar, WOVON ein Beitrag handelt - sie gehoeren damit
     // genauso zum inhaltlichen Profil wie Branche oder Beschreibung. Bis 15.09.2026 fehlten sie
     // hier: wer nur seine Saeulen austauschte, bekam weder das Angebot zum Neugenerieren, noch
@@ -1255,6 +1272,12 @@ export function createPanelRouter(): Router {
       ],
     );
     setContentPillars(c.id, data.contentPillars);
+    // Nur fuer bestaetigte Konten: vor der Bestaetigung gilt der Kostendeckel des Onboardings,
+    // und dort fuellt der Lauf nach der Bestaetigung (runBackfillJob) ohnehin auf.
+    if (nachplanenNoetig && c.email_verified && !c.customer_paused && anthropicAvailable() && !isJobRunning(c.id) && !rateLimited(`plan-einstellung:${c.id}`, 6, 3_600_000)) {
+      console.log(`[panel] ${c.id}: Kanal/Rhythmus geändert - Woche wird nachgeplant.`);
+      runPlanWeekJob(c.id, "replan", { concurrency: 3, feature: "einstellung-nachplanen" });
+    }
     // Panel v18: only ever an OFFER, never an automatic regeneration (see brandingFieldsChanged's
     // doc comment / Session-Bericht) - null when nothing content-relevant changed, or when there's
     // simply nothing in the 7-day preview left to regenerate.
@@ -1305,7 +1328,7 @@ export function createPanelRouter(): Router {
       try {
         const result = await regeneratePlannedPostsForBranding(c, includeEdited);
         const today = viennaDateStr();
-        const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+        const to = planWindowEnd();
         res.json({ ...result, posts: listPlannedPosts(c.id, today, to), maxRegenerate: PLANNED_POST_MAX_REGENERATE });
       } catch (err) {
         console.error("[panel] Branding-Neugenerierung fehlgeschlagen:", err);
@@ -1530,7 +1553,7 @@ export function createPanelRouter(): Router {
       return;
     }
     const today = viennaDateStr();
-    const to = viennaDateStr(new Date(Date.now() + 6 * 86_400_000));
+    const to = planWindowEnd();
     res.json({ posts: listPlannedPosts(c.id, today, to), maxRegenerate: PLANNED_POST_MAX_REGENERATE });
   });
 

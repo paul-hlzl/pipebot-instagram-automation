@@ -43,7 +43,10 @@
     "test:start-browser": "node scripts/easy-onboarding-shots.mjs",
     "test:prod-copy": "node scripts/test-prod-copy.mjs",
     "test:auth": "node scripts/test-auth.mjs",
-    "brand-colors:proof": "node scripts/brand-colors-proof.mjs"
+    "brand-colors:proof": "node scripts/brand-colors-proof.mjs",
+    "test:planweite": "node --import tsx --test scripts/planweite.test.ts",
+    "test:freigabe": "node scripts/test-freigabe.mjs",
+    "test:wochenlauf": "node scripts/test-wochenlauf.mjs"
   },
   "keywords": [
     "mcp",

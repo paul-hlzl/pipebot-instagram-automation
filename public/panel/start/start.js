@@ -1016,11 +1016,36 @@
         </div>
       </section>`;
   }
+  /* -------------------- Das Freigabefenster (20.09.2026) --------------------
+   * Der Abschnitt steht immer an derselben Stelle, solange die Freigabe an ist. Vorher
+   * verschwand er, sobald die Warteschlange leer war - der Kunde sah dann nirgends, was ansteht,
+   * obwohl die geplanten Beitraege alle auf sein OK warteten.
+   *
+   * Oben die faelligen aus der Warteschlange (die legt die Routine erst kurz vor dem
+   * Veroeffentlichen an), darunter die geplanten mit Datum. Freigeben geht fuer beide, ueber die
+   * zwei Endpunkte, die es schon gibt. Die geplanten bewusst als schmale Zeilen und nicht als
+   * Karten: bei zwei Wochen Planweite sind das bis zu zwanzig, und die Wochenansicht direkt
+   * darunter zeigt dieselben Beitraege ohnehin schon mit Bild. */
   function freigabenHtml() {
+    if (!S.customer?.approvalMode) return "";
     const liste = S.approvals || [];
-    if (!liste.length) return "";
-    return `<div class="abschnitt-kopf"><h2>Wartet auf deine Freigabe</h2><span class="small muted">${liste.length}</span></div>
-      <div class="tag-posts">${liste.map((a) => {
+    const geplant = (S.status?.posts || [])
+      .filter((p) => ["planned", "edited"].includes(p.status) && aktiveKanaele().includes(p.channel))
+      .sort((a, b) => (a.scheduledFor === b.scheduledFor ? KANAL_REIHE.indexOf(a.channel) - KANAL_REIHE.indexOf(b.channel) : a.scheduledFor < b.scheduledFor ? -1 : 1));
+    const kopf = `<div class="abschnitt-kopf"><h2>Wartet auf deine Freigabe</h2><span class="small muted">${liste.length + geplant.length || ""}</span></div>`;
+    if (!liste.length && !geplant.length) return `${kopf}<p class="leer">Gerade wartet nichts auf dich.</p>`;
+    const geplantHtml = geplant.length
+      ? `<div class="plan">${geplant.map((p) => {
+          const meta = KANAL[p.channel] || KANAL.ig_feed;
+          return `<div class="zeile">
+            <span class="zeile-k">${esc(langDatum(p.scheduledFor))} · ${esc(meta.label)}</span>
+            <div class="zeile-v">${esc(p.headline || "(ohne Titel)")}</div>
+            <button type="button" class="btn secondary sm" data-freigeben-plan="${esc(p.id)}">Freigeben</button>
+          </div>`;
+        }).join("")}</div>`
+      : "";
+    const faelligHtml = liste.length
+      ? `<div class="tag-posts">${liste.map((a) => {
         const meta = KANAL[a.channel] || KANAL.ig_feed;
         return `<article class="post" data-approval="${esc(a.id)}">
           <div class="post-meta"><span class="chan ${esc(a.channel)}">${esc(meta.label)}</span><time>${esc(zeitpunkt(a.createdAt))}</time></div>
@@ -1028,7 +1053,9 @@
           <div class="post-body"><h3 class="post-h">${esc(a.headline || "")}</h3>${a.caption ? `<p class="post-c">${esc(a.caption)}</p><button type="button" class="link post-more" data-more>mehr</button>` : ""}</div>
           <div class="post-actions"><button type="button" class="btn sm" data-freigeben="${esc(a.id)}">Freigeben</button><button type="button" class="link" data-ablehnen="${esc(a.id)}">Ablehnen</button></div>
         </article>`;
-      }).join("")}</div>`;
+      }).join("")}</div>`
+      : "";
+    return `${kopf}${faelligHtml}${geplantHtml}`;
   }
 
   function einstellungenHtml() {

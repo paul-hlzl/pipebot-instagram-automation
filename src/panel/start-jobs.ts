@@ -8,6 +8,7 @@
  */
 import { db, type CustomerRow } from "./db.js";
 import { backfillMissingImages, planCustomerWeek, recolorPlannedPosts, regeneratePlannedPostsForBranding, type PlanWeekOptions } from "./planning.js";
+import { erstPlanungEnde } from "./schedule.js";
 import { listContentPillars } from "./credentials.js";
 import { analysiereWebsite, uebernehmeAnalyse, logoUebernehmen, type DomainAnalysis } from "./start-analysis.js";
 import { suggestFromWebsite } from "../anthropic.js";
@@ -114,6 +115,9 @@ export function runPreviewJob(customerId: string, opts: { website: string | null
       console.log(`[start] ${customerId}: Markenfarben erkannt, Bilder werden lokal gerendert - kein Bilderdeckel.`);
     }
     const result = await planCustomerWeek(frisch ?? row, {
+      // Beim Anmelden bleibt es bei sieben Tagen (erstPlanungEnde) - der Kunde wartet waehrend
+      // dieses Laufs vor einem leeren Bildschirm, und vor der Bestaetigung gilt der Kostendeckel.
+      bis: erstPlanungEnde(),
       // 6 statt 3 (19.09.2026): der Kunde wartet waehrenddessen auf einen leeren Bildschirm.
       // Gemessen sank das Schreiben von 13,5 auf 8,2 Sekunden. Die Wiederholungssperre haelt
       // trotzdem, weil Pruefen und Belegen synchron in einem Schritt passieren (planning.ts):
@@ -185,7 +189,7 @@ export function runAdjustJob(customerId: string, keepImageless: boolean): StartJ
     if (result.updated === 0 && result.errors > 0) throw new Error("Die Beiträge konnten nicht neu geschrieben werden.");
     // Neue Slots (z. B. nach geaendertem Rhythmus) gleich mit - Budgets wie beim ersten Lauf.
     const pillars = listContentPillars(row.id);
-    await planCustomerWeek(row, { pillars, concurrency: 6, feature: "easy-onboarding-adjust", ...(keepImageless ? { imageBudget: 0 } : {}) });
+    await planCustomerWeek(row, { pillars, concurrency: 6, feature: "easy-onboarding-adjust", bis: erstPlanungEnde(), ...(keepImageless ? { imageBudget: 0 } : {}) });
   })()
     .then(() => finish(job))
     .catch((err) => {

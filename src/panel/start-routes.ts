@@ -26,14 +26,13 @@ import { ToolError } from "../errors.js";
 import { cacheLesen } from "./start-analysis.js";
 import { listContentPillars, listPlannedPosts, setContentPillars, PLANNED_POST_MAX_REGENERATE } from "./credentials.js";
 import { logUsageCost } from "./analytics.js";
-import { viennaDateStr } from "./schedule.js";
+import { planWindowEnd, viennaDateStr } from "./schedule.js";
 import { turnstileConfigured, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
 import { loginLinkEmail, verificationEmail } from "./emails.js";
 import { istTestkunde } from "./start-testmode.js";
 import { countAdjustsForCustomer, countPreviews, decidePreviewQuota, limitsAusgeschaltet, naechsterPlatz, normalizeDomain, previewLimits, quotaText, recordPreview, zeitSatz, type QuotaReason } from "./start-quota.js";
 import { getStartJob, isJobRunning, runAdjustJob, runPlanWeekJob, runPreviewJob, runRecolorJob } from "./start-jobs.js";
-import { PLANNING_LOOKAHEAD_DAYS } from "./planning.js";
 import { AuthNotConfiguredError, authProvidersPublic, getAuthProvider } from "./auth-providers.js";
 
 export interface StartContext {
@@ -92,8 +91,9 @@ function createEasyCustomer(input: { email: string; name?: string; authProvider?
   return customerById(id);
 }
 
+/** Was das Panel zeigt, ist genau die Planweite - eine Konstante, kein zweiter Wert. */
 function previewWindow(): { today: string; to: string } {
-  return { today: viennaDateStr(), to: viennaDateStr(new Date(Date.now() + (PLANNING_LOOKAHEAD_DAYS - 1) * 86_400_000)) };
+  return { today: viennaDateStr(), to: planWindowEnd() };
 }
 
 function summaryFor(c: CustomerRow) {

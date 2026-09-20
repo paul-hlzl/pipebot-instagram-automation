@@ -291,6 +291,13 @@ Punkt 3).
 
 ## 7. Wie die Vorausplanung sofort läuft - ohne Umbau der Routine
 
+> **Nachtrag 20.09.2026:** Der Nachtlauf plant nicht mehr täglich einen Tag nach. Die Woche
+> entsteht sonntags um 18:00 Wiener Zeit als Paket, der tägliche Lauf macht nur noch Pflege
+> (Auffrischen, Bilder). Planweite sind jetzt zwei Kalenderwochen. Einzelheiten und die zwei
+> Konstanten, die dabei mitwandern müssen: `docs/WOCHENPLANUNG.md`. Der Aufruf beim Anmelden
+> ist unverändert - er bleibt bei sieben Tagen und läuft weiter sofort.
+
+
 Die Kundenschleife aus `planUpcomingPosts()` ist als `planCustomerWeek(row, opts)`
 herausgelöst - gleiche Slot-Auswahl, gleiche Idempotenz über `getPlannedPostByChannelDate`,
 gleiche Säulen-Rotation. Der Nachtlauf ruft sie auf wie bisher; das Onboarding ruft sie sofort

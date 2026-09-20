@@ -19,7 +19,7 @@ import { logUsageCost } from "./panel/analytics.js";
 import { installFontsOnce } from "./fonts.js";
 import { uploadImageBase64 } from "./r2.js";
 import { createHttpApp } from "./http-server.js";
-import { startDailyPlanningSchedule } from "./panel/planning.js";
+import { startDailyPlanningSchedule, startWeeklyPlanningSchedule } from "./panel/planning.js";
 import { startTrialEndingEmailSchedule } from "./panel/trial-emails.js";
 import { startDailyAnalyticsSnapshotSchedule, startWeeklyAnalyticsSummarySchedule } from "./panel/analytics.js";
 import { startCommentAutomationSchedule } from "./panel/comments.js";
@@ -1177,6 +1177,7 @@ async function main(): Promise<void> {
   const app = createHttpApp(createServer);
   startTokenRefreshSchedule();
   startDailyPlanningSchedule();
+  startWeeklyPlanningSchedule();
   startTrialEndingEmailSchedule();
   startDailyAnalyticsSnapshotSchedule();
   startWeeklyAnalyticsSummarySchedule();
