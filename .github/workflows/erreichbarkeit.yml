@@ -1,0 +1,108 @@
+# Erreichbarkeit von AUSSEN (20.09.2026).
+#
+# Warum es das gibt: /root/scripts/health-check.sh laeuft auf genau der Maschine, die es
+# ueberwacht. Es teilt sich deren Netz und deren DNS-Cache - und kann deshalb nie sagen, ob die
+# Aussenwelt hereinkommt. Am 20.09. war der A-Record von mcp.pipebot.at ab 12:45 weg; der Check
+# auf dem Server meldete um 13:00 noch "http=200", weil er den alten Eintrag im Cache hatte.
+# Und faellt der Server ganz aus, kann er auch keine Alarmmail mehr schicken.
+#
+# Dieser Lauf startet bei GitHub, nicht bei uns. Er sieht genau das, was die Routine sieht.
+# Gemeldet wird ueber ein GitHub-Issue: das verschickt die Benachrichtigung von selbst, es
+# braucht also kein Mailkonto und kein Secret im Repository.
+
+name: Erreichbarkeit
+
+on:
+  schedule:
+    # Alle 10 Minuten. GitHub haelt den Takt nur ungefaehr ein (oft ein paar Minuten spaeter) -
+    # fuer eine Ausfallmeldung genuegt das. Das Repository ist oeffentlich, Minuten sind frei.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+env:
+  ZIEL: https://mcp.pipebot.at/health
+  NAME: mcp.pipebot.at
+  ZONE: pipebot.at
+  ERWARTETE_IP: 2.29.38.44
+  MARKE: erreichbarkeit-ausfall      # Label, an dem der Lauf sein eigenes Issue wiedererkennt
+
+jobs:
+  pruefen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Von aussen pruefen
+        id: pruefung
+        run: |
+          set -u
+          gruende=""
+
+          # 1. Zeigt der Name beim autoritativen Nameserver noch auf uns?
+          #    Ohne Cache - genau die Pruefung, die am 20.09. gefehlt hat.
+          ns="$(dig +short NS "$ZONE" 2>/dev/null | head -1)"
+          if [ -n "$ns" ]; then
+            ip="$(dig +short +time=5 +tries=2 @"$ns" "$NAME" A 2>/dev/null | grep -E '^[0-9.]+$' | tail -1)"
+          else
+            ip="$(dig +short "$NAME" A 2>/dev/null | grep -E '^[0-9.]+$' | tail -1)"
+          fi
+          if [ -z "$ip" ]; then
+            gruende="${gruende}- DNS: ${NAME} hat beim autoritativen Nameserver KEINEN A-Record.\n"
+          elif [ "$ip" != "$ERWARTETE_IP" ]; then
+            gruende="${gruende}- DNS: ${NAME} zeigt auf ${ip} statt auf ${ERWARTETE_IP}.\n"
+          fi
+
+          # 2. Kommt eine echte Anfrage von aussen durch? Zweimal versuchen, damit ein
+          #    einzelner Schluckauf bei GitHub keinen Fehlalarm ausloest.
+          code=""
+          for versuch in 1 2; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$ZIEL" || echo 000)"
+            [ "$code" = "200" ] && break
+            sleep 10
+          done
+          if [ "$code" != "200" ]; then
+            gruende="${gruende}- HTTP: ${ZIEL} lieferte ${code} statt 200 (000 = gar keine Verbindung).\n"
+          fi
+
+          {
+            echo "ip=${ip:-keiner}"
+            echo "code=${code}"
+            if [ -n "$gruende" ]; then
+              echo "status=FAILED"
+              echo "gruende<<ENDE"
+              printf "%b" "$gruende"
+              echo "ENDE"
+            else
+              echo "status=OK"
+              echo "gruende<<ENDE"
+              echo "ENDE"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Status: ${gruende:+FAILED}${gruende:-OK} | A-Record=${ip:-keiner} | HTTP=${code}"
+
+      - name: Ausfall melden
+        if: steps.pruefung.outputs.status == 'FAILED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Nur EIN offenes Issue, sonst entsteht bei einem laengeren Ausfall alle 10 Minuten eines.
+          offen="$(gh issue list --label "$MARKE" --state open --json number --jq '.[0].number // empty')"
+          text="$(printf 'Der Dienst ist von aussen nicht erreichbar.\n\nGeprueft: %s (UTC)\nA-Record laut autoritativem NS: %s (erwartet: %s)\nHTTP-Status: %s\n\nGefunden:\n%b\nDieser Lauf startet bei GitHub, nicht auf dem Server - er sieht also, was die Routine sieht. Das Issue schliesst sich von selbst, sobald der naechste Lauf wieder durchkommt.' \
+            "$(date -u +'%Y-%m-%d %H:%M:%S')" "${{ steps.pruefung.outputs.ip }}" "$ERWARTETE_IP" "${{ steps.pruefung.outputs.code }}" "${{ steps.pruefung.outputs.gruende }}")"
+          if [ -n "$offen" ]; then
+            gh issue comment "$offen" --body "$text"
+          else
+            gh issue create --title "Ausfall: mcp.pipebot.at von aussen nicht erreichbar" --label "$MARKE" --body "$text"
+          fi
+
+      - name: Wiederherstellung melden
+        if: steps.pruefung.outputs.status == 'OK'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          offen="$(gh issue list --label "$MARKE" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$offen" ]; then
+            gh issue close "$offen" --comment "Wieder erreichbar: A-Record ${{ steps.pruefung.outputs.ip }}, HTTP ${{ steps.pruefung.outputs.code }} ($(date -u +'%Y-%m-%d %H:%M:%S') UTC)."
+          fi
