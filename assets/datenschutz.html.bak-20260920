@@ -1,4 +1,20 @@
 <!doctype html>
+<!--
+  ============================================================================================
+  ENTWURF IN FERTIGER FORM - VOR ENDGÜLTIGER VERWENDUNG ANWALTLICH PRÜFEN LASSEN.
+
+  Erstellt am 15.09.2026 aus dem Arbeitsentwurf docs/DATENSCHUTZ_ENTWURF.md und einer
+  Code-Inventur des tatsächlichen Systemverhaltens (welche Dienste angebunden sind, was
+  gespeichert wird, was bei einer Kontolöschung passiert). Das ist eine fachliche
+  Arbeitsgrundlage, KEINE Rechtsberatung und KEIN geprüfter Text.
+
+  Vor der endgültigen Verwendung zwingend:
+    1. Anwaltliche bzw. WKO-Prüfung des gesamten Textes.
+    2. Die mit [BITTE BESTÄTIGEN] markierten Angaben ausfüllen/bestätigen.
+    3. Nach der OG-Gründung: Abschnitt 1 (Verantwortlicher) auf die OG umstellen -
+       Firmenname, Rechtsform, Firmenbuchnummer, Gesellschafter, Anschrift.
+  ============================================================================================
+-->
 <html lang="de">
 <head>
 <meta charset="utf-8">

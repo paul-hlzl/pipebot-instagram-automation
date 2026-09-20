@@ -17,7 +17,10 @@ import { cancelPostRequest, connectionStatus, isTrialExpired, trialDaysLeft } fr
 import { sendMail } from "./mailer.js";
 import { firstPostLiveEmail, pendingApprovalsSummaryEmail, tokenExpiringEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
 import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
-import { entferneKunde } from "./kunde-entfernen.js";
+import { entferneKunde, sammleKundenDateien } from "./kunde-entfernen.js";
+import { deleteObject } from "../r2.js";
+import { getConfig } from "../config.js";
+import { promises as fsPromises } from "node:fs";
 import { commentStatsForCustomer } from "./comments.js";
 
 const COOKIE = "pp_admin";
@@ -372,7 +375,7 @@ export function createAdminRouter(panelPublicDir?: string): Router {
    */
   router.delete(
     "/api/customers/:id",
-    safe((req, res) => {
+    safe(async (req, res) => {
       const id = String(req.params.id);
       const row = db.prepare("SELECT company FROM customers WHERE id = ?").get(id) as { company: string } | undefined;
       if (!row) {
@@ -384,9 +387,19 @@ export function createAdminRouter(panelPublicDir?: string): Router {
         res.status(400).json({ error: "Zur Bestätigung bitte den Firmennamen exakt eingeben." });
         return;
       }
+      // Dateien VOR den Zeilen - danach weiss niemand mehr, welche es waren. Fehlschlaege beim
+      // Aufraeumen halten das Loeschen nicht auf (siehe denselben Weg in router.ts).
+      const dateien = sammleKundenDateien(db, id, getConfig().mediaBucketUrl);
+      await Promise.all(dateien.r2Schluessel.map((k) => deleteObject(k).catch(() => {})));
+      await Promise.all(dateien.lokaleDateien.map((f) => fsPromises.unlink(f).catch(() => {})));
+
       const ergebnis = entferneKunde(db, id);
-      console.warn(`[panel-admin] Konto geloescht: ${id} (${row.company}) - ${JSON.stringify(ergebnis.zeilen)}`);
-      res.json({ ok: true, geloescht: ergebnis.zeilen });
+      console.warn(
+        `[panel-admin] Konto geloescht: ${id} (${row.company}) - ` +
+        `${dateien.r2Schluessel.length} Bild(er), ${dateien.lokaleDateien.length} Logo(s), ` +
+        `Zeilen ${JSON.stringify(ergebnis.zeilen)}`,
+      );
+      res.json({ ok: true, geloescht: ergebnis.zeilen, dateien: { objektspeicher: dateien.r2Schluessel.length, logos: dateien.lokaleDateien.length } });
     }),
   );
 

@@ -76,3 +76,75 @@ export function entferneKunde(db: Datenbank, customerId: string): Entfernt {
 
   return { kundeGefunden: true, zeilen };
 }
+
+/**
+ * Alle Dateien eines Kunden, die NICHT in der Datenbank liegen (20.09.2026).
+ *
+ * Die Zeilen zu loeschen genuegt nicht: die Bilder liegen im Objektspeicher (R2), die Logos als
+ * Dateien auf der Platte. Vor dem 20.09. blieb beides nach einer Kontoloeschung unbegrenzt
+ * liegen - und die R2-Bilder sind ueber ihre Adresse oeffentlich abrufbar.
+ *
+ * Bewusst getrennt vom Loeschen selbst: diese Funktion liest nur und braucht kein Netz, damit
+ * `entferneKunde` eine reine Datenbank-Transaktion bleibt. Der Aufrufer raeumt die Dateien auf,
+ * BEVOR er die Zeilen entfernt - danach weiss niemand mehr, welche es waren.
+ */
+export interface KundenDateien {
+  /** Schluessel im Objektspeicher, z. B. "posts/2026-09-20T...png". */
+  r2Schluessel: string[];
+  /** Absolute Pfade auf der Platte (Logos). */
+  lokaleDateien: string[];
+}
+
+/** Macht aus einer gespeicherten Adresse den Objektschluessel - oder null, wenn sie nicht uns gehoert. */
+export function r2SchluesselAus(adresse: string | null | undefined, bucketUrl: string): string | null {
+  if (!adresse || !bucketUrl) return null;
+  const basis = bucketUrl.replace(/\/$/, "");
+  if (!adresse.startsWith(basis + "/")) return null;
+  const schluessel = adresse.slice(basis.length + 1);
+  // Nur unsere eigenen Ablagen anfassen - nie etwas anderes im selben Eimer.
+  return /^(posts|videos|voice-tmp)\//.test(schluessel) ? schluessel : null;
+}
+
+export function sammleKundenDateien(db: Datenbank, customerId: string, bucketUrl: string): KundenDateien {
+  const r2 = new Set<string>();
+  const lokal = new Set<string>();
+
+  // Jede Tabelle, die eine Bild- oder Videoadresse zu diesem Kunden haelt.
+  const bildQuellen: { tabelle: string; spalten: string[] }[] = [
+    { tabelle: "posts", spalten: ["image_url", "video_url"] },
+    { tabelle: "planned_posts", spalten: ["image_url", "video_url"] },
+    { tabelle: "pending_approvals", spalten: ["image_url", "video_url"] },
+  ];
+  for (const { tabelle, spalten } of bildQuellen) {
+    for (const spalte of spalten) {
+      if (!hatSpalte(db, tabelle, spalte)) continue;
+      for (const zeile of db
+        .prepare(`SELECT ${spalte} AS a FROM ${tabelle} WHERE customer_id = ? AND ${spalte} IS NOT NULL`)
+        .all(customerId) as { a: string }[]) {
+        const k = r2SchluesselAus(zeile.a, bucketUrl);
+        if (k) r2.add(k);
+      }
+    }
+  }
+
+  // Karussell-Folien haengen am Beitrag, nicht am Kunden.
+  if (hatSpalte(db, "post_media", "image_url") && hatSpalte(db, "post_media", "post_id")) {
+    for (const zeile of db
+      .prepare("SELECT image_url AS a FROM post_media WHERE post_id IN (SELECT id FROM posts WHERE customer_id = ?)")
+      .all(customerId) as { a: string }[]) {
+      const k = r2SchluesselAus(zeile.a, bucketUrl);
+      if (k) r2.add(k);
+    }
+  }
+
+  // Logos liegen als Datei auf der Platte, nicht im Objektspeicher. `detected_logo_url` wurde
+  // bisher nirgends aufgeraeumt - nur `logo_url`.
+  const kunde = db
+    .prepare("SELECT logo_url, detected_logo_url FROM customers WHERE id = ?")
+    .get(customerId) as { logo_url: string | null; detected_logo_url: string | null } | undefined;
+  for (const pfad of [kunde?.logo_url, kunde?.detected_logo_url]) {
+    if (pfad && pfad.startsWith("/")) lokal.add(pfad);
+  }
+
+  return { r2Schluessel: [...r2], lokaleDateien: [...lokal] };
+}

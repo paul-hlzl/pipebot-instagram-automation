@@ -48,6 +48,7 @@ import {
 import { generateAndCacheSummary, getAnalyticsSummary, getSummaryCache, logUsageCost, type AnalyticsChannel } from "./analytics.js";
 import { regeneratePlannedPostsForBranding } from "./planning.js";
 import { deleteObject, uploadAudioBase64 } from "../r2.js";
+import { entferneKunde, sammleKundenDateien } from "./kunde-entfernen.js";
 import { estimateTranscriptionCostUsd, transcribeAudioUrl } from "../audio-transcribe.js";
 import { ToolError } from "../errors.js";
 import { approveCommentReply, CommentRateLimitError, listPendingCommentApprovals, rejectCommentReply } from "./comments.js";
@@ -1468,10 +1469,20 @@ export function createPanelRouter(): Router {
     res.json({ ok: true });
   });
 
-  // Die EINZIGE Loeschfunktion im ganzen Panel - nur der eingeloggte Kunde kann sein eigenes
-  // Konto loeschen, nie ein anderer Kunde und nie ein Admin ueber die Oberflaeche (Meta
-  // verlangt so einen Selbstbedienungs-Weg fuer instagram_business_basic/-content_publish).
-  // ON DELETE CASCADE auf connections/sessions/oauth_states/posts/style_cache raeumt alles auf.
+  // Der Selbstbedienungs-Loeschweg des Kunden - Meta verlangt ihn fuer
+  // instagram_business_basic/-content_publish. Nur der eingeloggte Kunde kann sein eigenes Konto
+  // loeschen, nie ein anderer Kunde.
+  //
+  // 20.09.2026: Hier stand ein blosses DELETE auf `customers` im Vertrauen auf ON DELETE CASCADE.
+  // Das war LUECKENHAFT, ausgerechnet auf dem Weg, den Meta verlangt: 17 Tabellen raeumten korrekt
+  // auf, ZWEI nicht - `start_previews` (enthaelt IP- UND E-Mail-Adresse) und `planning_errors`,
+  // weil beide keinen CASCADE deklarieren. Gemessen an einer Kopie der Produktionssicherung.
+  // Ausserdem blieben die Bilder im Objektspeicher unbegrenzt liegen, oeffentlich abrufbar, und
+  // von den zwei Logofeldern wurde nur eines aufgeraeumt.
+  //
+  // Jetzt derselbe Weg wie im Adminbereich: `sammleKundenDateien` VOR dem Loeschen (danach weiss
+  // niemand mehr, welche Dateien es waren), dann `entferneKunde`, das das Schema fragt, welche
+  // Tabellen einen Kundenbezug haben - eine neue Tabelle ist damit automatisch abgedeckt.
   router.delete("/api/me", safe(async (req, res) => {
     const c = currentCustomer(req);
     if (!c) {
@@ -1482,11 +1493,18 @@ export function createPanelRouter(): Router {
       res.status(400).json({ error: "Bestätigung erforderlich." });
       return;
     }
-    // Logo liegt als Datei auf der Platte, nicht in der DB - CASCADE raeumt es nicht mit auf.
-    if (c.logo_url) {
-      await fsPromises.unlink(c.logo_url).catch(() => {});
-    }
-    db.prepare("DELETE FROM customers WHERE id = ?").run(c.id);
+    // Erst die Dateien: Bilder im Objektspeicher, Logos auf der Platte. Ein Fehlschlag hier darf
+    // die Loeschung nicht aufhalten - ein zurueckgebliebenes Bild ist aergerlich, ein halb
+    // geloeschtes Konto waere schlimmer.
+    const dateien = sammleKundenDateien(db, c.id, getConfig().mediaBucketUrl);
+    await Promise.all(dateien.r2Schluessel.map((k) => deleteObject(k).catch(() => {})));
+    await Promise.all(dateien.lokaleDateien.map((f) => fsPromises.unlink(f).catch(() => {})));
+
+    const ergebnis = entferneKunde(db, c.id);
+    console.log(
+      `[panel] Kunde ${c.id}: ${dateien.r2Schluessel.length} Bild(er) im Objektspeicher, ` +
+      `${dateien.lokaleDateien.length} Logodatei(en), Zeilen ${JSON.stringify(ergebnis.zeilen)}`,
+    );
     res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
     console.log(`[panel] Kunde ${c.id} (${c.company}) hat sein Konto inkl. aller Daten gelöscht.`);
     res.json({ ok: true });
