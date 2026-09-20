@@ -34,3 +34,39 @@ test("ein voruebergehender Fehler ist keine Sperre", () => {
   assert.equal(detectPlatformBlock(new Error("ECONNRESET")), null);
   assert.equal(detectPlatformBlock(null), null);
 });
+
+/**
+ * DER VORFALL VOM 20.09.2026: axios wirft den 403 unaufbereitet, `.message` ist nur
+ * "Request failed with status code 403". Vorher lieferte detectPlatformBlock dafuer null, die
+ * Verbindung blieb unvermerkt und der Doppelpost lief durch. Nachbau der echten Antwort.
+ */
+function axiosFehler(status, data) {
+  const e = new Error(`Request failed with status code ${status}`);
+  e.name = "AxiosError";
+  e.response = { status, data };
+  return e;
+}
+
+test("DER VORFALL: roher axios-403 von Meta wird als Sperre erkannt", () => {
+  const e = axiosFehler(403, {
+    error: {
+      message: "We restrict certain activity to protect our community. Tell us if you think we made a mistake.",
+      code: 4,
+      error_subcode: 2207051,
+    },
+  });
+  assert.equal(e.message, "Request failed with status code 403", "genau diese Meldung sah die Erkennung vorher");
+  const b = detectPlatformBlock(e);
+  assert.ok(b, "der rohe axios-Fehler haette erkannt werden muessen");
+  assert.equal(b.code, "IG_RESTRICTED_ACTIVITY");
+});
+
+test("auch LinkedIns RESTRICTED_MEMBER unaufbereitet", () => {
+  const e = axiosFehler(401, { serviceErrorCode: 65608, message: "Member is restricted" });
+  assert.equal(detectPlatformBlock(e)?.code, "RESTRICTED_MEMBER");
+});
+
+test("ein roher 500 ohne Sperrkennung bleibt keine Sperre", () => {
+  assert.equal(detectPlatformBlock(axiosFehler(500, { error: { message: "Internal", code: 1 } })), null);
+  assert.equal(detectPlatformBlock(axiosFehler(429, {})), null);
+});

@@ -1,8 +1,8 @@
 /**
  * Admin dashboard for Paul: overview of all customers, trial/connection status, and a
- * small set of safe actions (extend trial, unlock, pause/activate). No delete action here
- * on purpose - deleting a customer's own data is only ever done by the customer themselves
- * (see the self-service "Konto löschen" flow).
+ * small set of actions (extend trial, unlock, sperren/entsperren, loeschen). Das Loeschen kam
+ * am 20.09.2026 dazu - vorher gab es das nur als Einmal-Werkzeug und im Selbstbedienungsweg
+ * des Kunden; alle drei teilen sich jetzt kunde-entfernen.ts.
  *
  * Mounted inside the panel router (`router.use("/admin", createAdminRouter())`), so it
  * sits before the global MCP bearer-token gate in http-server.ts and gets the panel's
@@ -17,6 +17,7 @@ import { cancelPostRequest, connectionStatus, isTrialExpired, trialDaysLeft } fr
 import { sendMail } from "./mailer.js";
 import { firstPostLiveEmail, pendingApprovalsSummaryEmail, tokenExpiringEmail, trialEndingEmail, verificationEmail, weeklyAnalyticsReportEmail } from "./emails.js";
 import { getAnalyticsSummary, usageCostSummary } from "./analytics.js";
+import { entferneKunde } from "./kunde-entfernen.js";
 import { commentStatsForCustomer } from "./comments.js";
 
 const COOKIE = "pp_admin";
@@ -33,8 +34,16 @@ const APP_HOSTS = (process.env.PANEL_APP_HOSTS ?? "app.pipeflow.at")
   .split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
 const cookiePathFor = (req: Request): string => {
   const host = String(req.headers.host ?? "").split(":")[0].toLowerCase();
-  return APP_HOSTS.includes(host) ? "/admin" : `${MOUNT}/admin`;
+  return APP_HOSTS.includes(host) ? `/${ADMIN_SEGMENT}` : `${MOUNT}/${ADMIN_SEGMENT}`;
 };
+/**
+ * Das Pfadsegment des Adminbereichs. Standard "admin" - identisch zum Verhalten vor dem
+ * 20.09.2026. Mit PANEL_ADMIN_PATH wird daraus ein geheimes Segment, und der Bereich ist von
+ * aussen nicht mehr auffindbar. Schraegstriche werden abgeschnitten, damit ein Eintrag mit
+ * fuehrendem "/" nicht zu einer doppelten Einhaengung fuehrt.
+ */
+export const ADMIN_SEGMENT = (process.env.PANEL_ADMIN_PATH ?? "admin").replace(/^\/+|\/+$/g, "") || "admin";
+
 const SESSION_HOURS = 12;
 const STATUSES = ["active", "paused"] as const;
 
@@ -112,11 +121,15 @@ interface CustomerAdminView {
   contactName: string;
   email: string;
   createdAt: string;
+  /** Wie sich der Kunde angemeldet hat: 'google' | 'microsoft' | null = per E-Mail/Anmeldeschluessel. */
+  authProvider: string | null;
   status: string;
   trial: { unlimited: boolean; expired: boolean; daysLeft: number | null; endsAt: string | null };
   channels: { provider: string; accountName: string | null; status: string }[];
   postCount: number;
   lastPostAt: string | null;
+  /** Noch nicht veroeffentlichte Beitraege im Plan - sagt, ob ueberhaupt etwas ansteht. */
+  plannedPostCount: number;
   notifyOnPublish: boolean;
   notifyWeeklyReport: boolean;
   analyticsFollowers: number | null;
@@ -135,6 +148,7 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     contactName: c.contact_name,
     email: c.email,
     createdAt: c.created_at,
+    authProvider: c.auth_provider ?? null,
     status: c.status,
     trial: {
       unlimited: !c.trial_ends_at,
@@ -145,6 +159,9 @@ function customerAdminView(c: CustomerRow): CustomerAdminView {
     channels: connections.map((r) => ({ provider: r.provider, accountName: r.account_name, status: connectionStatus(r) })),
     postCount: postStats.n,
     lastPostAt: postStats.last,
+    plannedPostCount: (db
+      .prepare("SELECT COUNT(*) as n FROM planned_posts WHERE customer_id = ?")
+      .get(c.id) as { n: number }).n,
     notifyOnPublish: Boolean(c.notify_on_publish),
     notifyWeeklyReport: Boolean(c.notify_weekly_report),
     // Panel v9 Aufgabe 6: kurzer Analytics-Hinweis in der Kundenübersicht (nur Follower-Anzahl,
@@ -338,6 +355,38 @@ export function createAdminRouter(panelPublicDir?: string): Router {
         return;
       }
       res.json({ ok: true, status });
+    }),
+  );
+
+  /**
+   * Konto endgueltig entfernen (20.09.2026 beauftragt).
+   *
+   * Der Kommentar oben im Modul sagte frueher, hier gebe es bewusst KEIN Loeschen - das galt,
+   * solange nur der Kunde selbst sein Konto entfernen konnte. Jetzt gibt es beides; die Logik
+   * teilen sich beide Wege ueber kunde-entfernen.ts, damit nicht zwei Tabellenlisten
+   * auseinanderlaufen.
+   *
+   * Schutz gegen den Fehlgriff: die Firma muss im Rumpf wortgleich mitgeschickt werden. Ein
+   * versehentlicher Klick auf die falsche Zeile kann damit nichts ausloesen, ein bewusster
+   * schon - dieselbe Sorte Bremse wie `--wirklich` im Werkzeug.
+   */
+  router.delete(
+    "/api/customers/:id",
+    safe((req, res) => {
+      const id = String(req.params.id);
+      const row = db.prepare("SELECT company FROM customers WHERE id = ?").get(id) as { company: string } | undefined;
+      if (!row) {
+        res.status(404).json({ error: "Kunde nicht gefunden" });
+        return;
+      }
+      const bestaetigung = typeof req.body?.company === "string" ? req.body.company.trim() : "";
+      if (bestaetigung !== row.company.trim()) {
+        res.status(400).json({ error: "Zur Bestätigung bitte den Firmennamen exakt eingeben." });
+        return;
+      }
+      const ergebnis = entferneKunde(db, id);
+      console.warn(`[panel-admin] Konto geloescht: ${id} (${row.company}) - ${JSON.stringify(ergebnis.zeilen)}`);
+      res.json({ ok: true, geloescht: ergebnis.zeilen });
     }),
   );
 

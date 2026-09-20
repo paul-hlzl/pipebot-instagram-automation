@@ -26,6 +26,7 @@ import {
   listContentPillars,
   listPlannedPosts,
   listPlannedPostsWithoutImage,
+  listPostsForCustomer,
   logPlanningError,
   markPlannedPostStatus,
   overwritePendingApprovalContent,
@@ -689,9 +690,19 @@ export async function planCustomerWeek(row: CustomerRow, opts: PlanWeekOptions =
   // dadurch, dass gar nichts bekannt war, nicht dadurch, dass zwei gleichzeitig liefen.
   // Ueber die ganze Planweite, nicht ueber sieben Tage: sonst kennt Woche 2 die Ueberschriften
   // aus Woche 1 nicht und wiederholt sie.
-  const vergeben: string[] = listPlannedPosts(row.id, viennaDateStr(), bis)
-    .map((p) => p.headline)
-    .filter((h): h is string => Boolean(h));
+  // 20.09.2026: dazu die zuletzt VEROEFFENTLICHTEN Ueberschriften. Vorher kannte die Sperre nur
+  // die Zukunft (planned_posts) - ein Beitrag, der bereits im Feed steht, taucht dort nicht mehr
+  // auf und konnte deshalb unveraendert noch einmal geplant werden. Aufgefallen an "Jeder Post
+  // getestet": am 20.09. zweimal live, in planned_posts nicht vorhanden, in posts nicht
+  // protokolliert (der Doppelpost-Vorfall). Fenster wie die Aufraeumgrenze, damit eine alte
+  // Ueberschrift nach PLANNED_POST_MAX_AGE_DAYS wieder frei wird.
+  const veroeffentlichtSeit = new Date(Date.now() - PLANNED_POST_MAX_AGE_DAYS * 86_400_000).toISOString();
+  const vergeben: string[] = [
+    ...listPlannedPosts(row.id, viennaDateStr(), bis).map((p) => p.headline),
+    ...listPostsForCustomer(row.id, 60)
+      .filter((p) => p.postedAt >= veroeffentlichtSeit)
+      .map((p) => p.headline),
+  ].filter((h): h is string => Boolean(h));
   // Pruefen und Belegen in EINEM synchronen Schritt. JavaScript unterbricht eine Funktion nicht
   // mittendrin, also kann zwischen Pruefung und Eintrag kein zweiter Beitrag dazwischenfunken.
   // Genau das ist vorher passiert: bei drei gleichzeitigen Laeufen sahen zwei dieselbe alte

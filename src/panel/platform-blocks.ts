@@ -70,8 +70,45 @@ const IG_TOKEN_INVALID: PlatformBlock = {
     "einer Sicherheitsabmeldung bei Instagram. Bitte im Panel einmal neu verbinden, danach geht es weiter.",
 };
 
+/**
+ * Sammelt allen Text, an dem eine Sperre erkennbar sein kann.
+ *
+ * 20.09.2026: genau hier blieb die Erkennung haengen. `noteConnectionError` bekommt den ROHEN
+ * axios-Fehler, und dessen `.message` lautet nur "Request failed with status code 403" - der
+ * Subcode steckt ausschliesslich in `response.data.error`. IG_RESTRICTED_ACTIVITY gibt es seit
+ * dem 17.09., ausgeloest hat die Regel deshalb nie: der Doppelpost bei @pipeflow_solution lief
+ * durch, ohne dass die Verbindung vermerkt wurde.
+ *
+ * Darum wird der Text jetzt aus beidem gebaut: der Meldung selbst UND der Antwort darunter,
+ * einmal in der normalisierten Schreibweise ("code=4 subcode=2207051", wie sie errors.ts
+ * erzeugt) und einmal als roher Rumpf, damit auch LinkedIns `serviceErrorCode` trifft.
+ * Bewusst ohne axios-Import - reine Logik, an der Form des Objekts erkannt, weiter testbar.
+ */
+function sperrText(error: unknown): string {
+  const teile: string[] = [];
+  if (error instanceof Error) teile.push(error.message);
+  else if (error != null) teile.push(String(error));
+
+  const rumpf = (error as { response?: { data?: unknown } } | null | undefined)?.response?.data;
+  if (rumpf && typeof rumpf === "object") {
+    const graph = (rumpf as { error?: unknown }).error;
+    if (graph && typeof graph === "object") {
+      const g = graph as { message?: unknown; code?: unknown; error_subcode?: unknown };
+      if (typeof g.message === "string") teile.push(g.message);
+      if (g.code != null) teile.push(`code=${String(g.code)}`);
+      if (g.error_subcode != null) teile.push(`subcode=${String(g.error_subcode)}`);
+    }
+    try {
+      teile.push(JSON.stringify(rumpf));
+    } catch {
+      // Zirkulaerer Rumpf: die normalisierten Felder oben genuegen.
+    }
+  }
+  return teile.join(" ");
+}
+
 export function detectPlatformBlock(error: unknown): PlatformBlock | null {
-  const text = error instanceof Error ? error.message : String(error ?? "");
+  const text = sperrText(error);
   if (!text) return null;
 
   if (text.includes("RESTRICTED_MEMBER") || text.includes("65608")) return RESTRICTED_MEMBER;

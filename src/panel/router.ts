@@ -55,7 +55,7 @@ import { approveReviewReply, listPendingReviewApprovals, rejectReviewReply, Revi
 import { runVideoPass } from "./videos.js";
 import { DEFAULT_VOICE_ID, getVoiceOption, synthesizeSpeech, ttsAvailable, VOICE_OPTIONS, VOICE_PREVIEW_TEXT } from "../tts.js";
 import { DEFAULT_VIDEO_LENGTH, VIDEO_LENGTHS, ZOOM_DIRECTIONS } from "../video.js";
-import { createAdminRouter } from "./admin.js";
+import { ADMIN_SEGMENT, createAdminRouter } from "./admin.js";
 import { triggerRoutineNow } from "./routine-trigger.js";
 import { turnstileConfigured, turnstileSiteKey, verifyTurnstileToken } from "./turnstile.js";
 import { sendMailBestEffort } from "./mailer.js";
@@ -726,7 +726,13 @@ export function createPanelRouter(): Router {
 
   router.use(express.json({ limit: "50kb" }));
 
-  router.use("/admin", createAdminRouter(publicDir));
+  // 20.09.2026: Der Adminbereich lag fest unter "/admin" und war damit von aussen SICHTBAR -
+  // app.pipeflow.at/admin/ lieferte jedem die vollstaendige Anmeldeseite (HTTP 200, 37 KB). Die
+  // Daten waren zwar geschuetzt (Passwort, Sitzung, 401), die Existenz aber nicht. Jetzt bestimmt
+  // PANEL_ADMIN_PATH das Segment; ist es gesetzt, laeuft "/admin" in denselben 404 wie jeder
+  // andere unbekannte Pfad - von aussen nicht von "gibt es nicht" zu unterscheiden.
+  // Ohne die Variable bleibt alles exakt wie bisher.
+  router.use(`/${ADMIN_SEGMENT}`, createAdminRouter(publicDir));
 
   // Panel v15: dieselben Schriftdateien, die die Bild-Rendering-Pipeline serverseitig nutzt
   // (fonts.ts/assets/fonts) - hier oeffentlich servierbar, damit das Panel per @font-face eine

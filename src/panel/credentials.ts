@@ -350,9 +350,17 @@ export async function getCredentials(
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Unbekannte Plattform: ${providerId}`);
 
-  const customerRow = db.prepare("SELECT trial_ends_at, customer_paused FROM customers WHERE id = ?").get(customerId) as
-    | { trial_ends_at: string | null; customer_paused: number }
+  const customerRow = db.prepare("SELECT status, trial_ends_at, customer_paused FROM customers WHERE id = ?").get(customerId) as
+    | { status: string; trial_ends_at: string | null; customer_paused: number }
     | undefined;
+  // 20.09.2026: Der Admin-Status hat hier bis heute GEFEHLT. "Gesperrt" (status = 'paused')
+  // verhinderte die Anmeldung (jeder Login-Weg filtert status = 'active') und die Planung
+  // (planning.ts: WHERE status = 'active'), aber NICHT das Veroeffentlichen - eine bereits
+  // freigegebene Zeile konnte die Routine weiterhin hinausschicken. Eine Sperre, die einen der
+  // drei Wege offen laesst, ist keine Sperre.
+  if (customerRow && customerRow.status !== "active" && customerRow.status !== "test") {
+    throw new Error(`Kunde ${customerId}: Konto ist gesperrt - keine Veröffentlichung möglich, bis es wieder entsperrt wird.`);
+  }
   if (customerRow && isTrialExpired({ trialEndsAt: customerRow.trial_ends_at })) {
     // Second line of defense - list_customers already exposes trialExpired so a well-behaved
     // routine skips these customers on its own, but this check makes it impossible to

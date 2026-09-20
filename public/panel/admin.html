@@ -236,6 +236,10 @@ tbody tr:hover td { background: var(--wash); }
 }
 .confirm-ok { background: var(--ink); color: var(--paper); }
 .confirm-ok.danger { background: var(--stop); border-color: var(--stop); }
+/* Loeschen soll sich vom Rest der Zeilenaktionen abheben - es ist die einzige, die nicht
+   umkehrbar ist. Erst beim Zeigen voll eingefaerbt, damit die Zeile ruhig bleibt. */
+.btn.btn-quiet.danger { color: var(--stop); border-color: color-mix(in srgb, var(--stop) 35%, transparent); }
+.btn.btn-quiet.danger:hover { background: var(--stop); border-color: var(--stop); color: #fff; }
 .confirm-cancel { border-color: var(--line-strong); }
 @media (max-width: 480px) {
   .confirm-actions { flex-direction: column-reverse; }
@@ -314,7 +318,10 @@ tbody tr:hover td { background: var(--wash); }
   // /panel/sandbox/admin/ aufgerufen wurde (gefunden beim Testen von Panel v9 Aufgabe 6, siehe
   // Session-Bericht - Sicherheitsrelevant: ein Sandbox-Test haette unbemerkt echte Produktions-
   // Kundendaten veraendern koennen). Gleiches Muster wie CONFIG.mount im Kunden-Panel.
-  const MOUNT = location.pathname.startsWith("/panel/sandbox") ? "/panel/sandbox/admin" : "/panel/admin";
+  /* Der eigene Pfad IST der Einhaengepunkt des Admin-Routers - fest verdrahtet ging das nur so
+     lange gut, wie das Segment "admin" hiess und der Wirt bekannt war (auf app.pipeflow.at
+     stimmte es schon vorher nicht). Seit PANEL_ADMIN_PATH ist das Segment frei waehlbar. */
+  const MOUNT = location.pathname.replace(/\/+$/, "");
   const $ = (s, r) => (r || document).querySelector(s);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
@@ -531,7 +538,10 @@ tbody tr:hover td { background: var(--wash); }
   }
 
   function rowHtml(c) {
+    // Anmeldeweg: null bedeutet Anmeldeschluessel per E-Mail (es gab noch keinen Anbieter).
+    const wege = { google: "Google", microsoft: "Microsoft", apple: "Apple" };
     const extras = [
+      `Anmeldung: ${wege[c.authProvider] || "E-Mail"}`,
       c.notifyOnPublish ? "Mail bei Veröffentlichung: an" : "",
       c.analyticsFollowers != null ? `Analytics: ${c.analyticsFollowers} Follower` : "",
       c.commentAutomationEnabled ? `Kommentare (30 T): ${c.commentStats30d.answered} beantwortet, ${c.commentStats30d.skipped} übersprungen, ${c.commentStats30d.pendingApproval} wartend` : "",
@@ -545,16 +555,17 @@ tbody tr:hover td { background: var(--wash); }
       <td data-label="Erstellt" class="num">${fmtDate(c.createdAt)}</td>
       <td data-label="Status">${c.status === "active"
         ? `<span class="chip ok"><i class="dot"></i>aktiv</span>`
-        : `<span class="chip warn">pausiert</span>`}</td>
+        : `<span class="chip warn">gesperrt</span>`}</td>
       <td data-label="Testphase">${trialChip(c)}</td>
       <td data-label="Kanäle">${channelChips(c)}</td>
-      <td data-label="Beiträge"><span class="num">${c.postCount}</span>${c.lastPostAt ? `<span class="meta muted small"> · zuletzt ${fmtDate(c.lastPostAt)}</span>` : ""}</td>
+      <td data-label="Beiträge"><span class="num">${c.postCount}</span>${c.lastPostAt ? `<span class="meta muted small"> · zuletzt ${fmtDate(c.lastPostAt)}</span>` : ""}<span class="meta muted small"> · ${c.plannedPostCount} geplant</span></td>
       <td data-label="Aktionen"><div class="row-actions">
         <button class="btn btn-quiet btn-small" data-action="details" data-id="${esc(c.customerId)}">Details</button>
         ${c.openPostRequests ? `<button class="btn btn-quiet btn-small" data-action="cancel-requests" data-id="${esc(c.customerId)}">${c.openPostRequests} offene Anfrage${c.openPostRequests === 1 ? "" : "n"} stornieren</button>` : ""}
         <button class="btn btn-quiet btn-small" data-action="extend" data-id="${esc(c.customerId)}">+7 Tage</button>
         ${!c.trial.unlimited ? `<button class="btn btn-quiet btn-small" data-action="unlimited" data-id="${esc(c.customerId)}">Unbefristet</button>` : ""}
-        <button class="btn btn-quiet btn-small" data-action="toggle-status" data-id="${esc(c.customerId)}" data-status="${c.status === "active" ? "paused" : "active"}">${c.status === "active" ? "Pausieren" : "Aktivieren"}</button>
+        <button class="btn btn-quiet btn-small" data-action="toggle-status" data-id="${esc(c.customerId)}" data-status="${c.status === "active" ? "paused" : "active"}">${c.status === "active" ? "Sperren" : "Entsperren"}</button>
+        <button class="btn btn-quiet btn-small danger" data-action="delete" data-id="${esc(c.customerId)}" data-company="${esc(c.company)}">Löschen</button>
       </div></td>
     </tr>`;
   }
@@ -716,9 +727,29 @@ tbody tr:hover td { background: var(--wash); }
       }
       if (action === "toggle-status") {
         const status = btn.dataset.status;
-        if (status === "paused" && !(await showConfirm({ title: "Kunde pausieren?", message: "Es werden dann keine neuen Beiträge mehr veröffentlicht.", confirmLabel: "Pausieren", danger: true }))) return;
+        if (status === "paused" && !(await showConfirm({
+          title: "Konto sperren?",
+          message: "Gesperrt heißt: keine Anmeldung, keine Planung, keine Veröffentlichung. Lässt sich jederzeit wieder aufheben.",
+          confirmLabel: "Sperren", danger: true,
+        }))) return;
         btn.classList.add("busy");
         await api("POST", `/api/customers/${id}/status`, { status });
+        await loadOverview();
+      }
+      // Loeschen ist endgueltig, darum die Tippbestaetigung: der Firmenname muss wortgleich
+      // eingegeben werden. Der Server prueft ihn ein zweites Mal - die Oberflaeche ist die
+      // Bequemlichkeit, die Schranke sitzt hinten.
+      if (action === "delete") {
+        const company = btn.dataset.company || "";
+        const eingabe = await showConfirm({
+          title: "Konto endgültig löschen?",
+          message: `Alles zu „${company}" wird entfernt: Beiträge, Planung, Freigaben, Verbindungen und Sitzungen. Das lässt sich nicht rückgängig machen. Zur Bestätigung den Firmennamen eingeben.`,
+          confirmLabel: "Endgültig löschen", danger: true,
+          input: { label: "Firmenname" },
+        });
+        if (!eingabe || String(eingabe).trim() !== company.trim()) return;
+        btn.classList.add("busy");
+        await api("DELETE", `/api/customers/${id}`, { company: String(eingabe).trim() });
         await loadOverview();
       }
     } catch (err) {
