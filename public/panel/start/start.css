@@ -522,17 +522,32 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
    dass die Oberflaeche zum Kunden gehoert, nicht das Logo. Eine feine senkrechte Linie
    trennt es vom Produktnamen, damit es nicht wie Teil von "Pipeflow" wirkt. */
 .marke-kunde {
-  display: flex; align-items: center; min-width: 0; gap: 10px;
+  display: flex; align-items: center; min-width: 0; gap: 9px;
   /* margin-right:auto haelt das Logo am Produktnamen - .top verteilt sonst mit
      space-between und schoebe es in die Bildschirmmitte. */
-  margin: 2px auto 0 14px; padding-left: 14px; border-left: 1px solid var(--linie);
+  margin: 0 auto 0 14px; padding-left: 14px; border-left: 1px solid var(--linie);
+  /* Gemeinsame optische Achse mit dem Schriftzug (20.09.2026): die Kopfzeile richtet oben aus,
+     der Schriftzug "Pipeflow" steht aber in einem 44 px hohen Block mit der Zusatzzeile
+     darunter. Ohne eigene Hoehe sass das Logo an der Oberkante dieses Blocks und rutschte
+     damit unter die Grundlinie des Schriftzugs. Diese Hoehe ist genau die Zeile von
+     "Pipeflow"; das Logo sitzt darin mittig und liegt damit auf derselben Achse. */
+  height: 28px; align-self: flex-start;
   animation: logo-auf .5s var(--kurve) both;
 }
 .marke-kunde[hidden] { display: none; }
-/* 32 px statt 26: eine breite Wortmarke wird darunter unleserlich - gemessen an der
-   Schriftmarke von Channoine, die bei 26 px nur noch ein Fleck war. Der Pipeflow-Schriftzug
-   daneben ist 27 px, damit steht beides gleichwertig ohne dass das Kundenlogo lauter wird. */
-.marke-kunde img { display: block; height: 32px; width: auto; max-width: 168px; object-fit: contain; }
+/* Groesse nach dem sichtbaren Eindruck, nicht nach der gemessenen Zahl (20.09.2026).
+   "Pipeflow" fuehrt, das Kundenlogo ordnet sich unter: die Versalhoehe des Schriftzugs ist die
+   Obergrenze, nicht seine Schriftgroesse. Eine breite Wortmarke besteht aus duennen Buchstaben
+   und darf deshalb hoeher sein als ein geschlossenes Zeichen - ein farbiges Quadrat wirkt bei
+   gleicher Hoehe deutlich groesser, weil es Flaeche UND Farbe hat. Welcher Fall vorliegt,
+   entscheidet start.js am Seitenverhaeltnis (logo-breit / logo-kompakt). */
+.marke-kunde img { display: block; height: 20px; width: auto; max-width: 136px; object-fit: contain; }
+/* Mehrzeilige Wortmarke (Verhaeltnis unter 4): ihre Buchstaben sind nur halb so hoch wie das
+   Bild, sie darf deshalb hoeher sein, ohne lauter zu werden. */
+.marke-kunde.logo-hoch img { height: 24px; max-width: 124px; }
+/* Geschlossenes, oft farbiges Zeichen: die kleinste Hoehe, weil Flaeche und Farbe zusammen
+   schon bei 18 px so schwer wiegen wie der Schriftzug daneben. */
+.marke-kunde.logo-kompakt img { height: 18px; max-width: 44px; }
 .marke-kunde img[hidden], .marke-kunde-name[hidden] { display: none; }
 /* Das ✕ ist Verbindung, nicht Gewicht: klein und grau. */
 .marke-x { font-size: 12px; color: var(--text-2); line-height: 1; }
@@ -542,8 +557,9 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
   font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2;
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* App-Kachel mit eigenem Hintergrund: runde Ecken, sonst klebt ein Quadrat auf dem Papier. */
-.marke-kunde.kachel-logo img { border-radius: 7px; height: 28px; max-width: 28px; }
+/* App-Kachel mit eigenem Hintergrund: runde Ecken, sonst klebt ein Quadrat auf dem Papier.
+   Als volle Flaeche wiegt sie am schwersten - deshalb die kleinste der drei Hoehen. */
+.marke-kunde.kachel-logo img { border-radius: 5px; height: 18px; max-width: 18px; }
 @keyframes logo-auf { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 @media (max-width: 420px) {
   /* Am Handy reicht die Breite neben "powered by Pipeline AI Solutions" nicht: schon
@@ -552,8 +568,14 @@ body.blatt-offen #plan-vorschau .kachel-wm { font-size: 7px; }
      bis rund 30 Zeichen, danach Auslassung. Die Kopfzeile wird dafuer 28 px hoeher, nur hier. */
   .top { flex-wrap: wrap; gap: 2px 12px; }
   .top-actions { order: 2; }
-  .marke-kunde { order: 3; flex-basis: 100%; margin: 2px 0 0; padding-left: 0; border-left: 0; gap: 8px; }
-  .marke-kunde img { height: 26px; max-width: 160px; }
+  .marke-kunde { order: 3; flex-basis: 100%; height: auto; margin: 4px 0 0; padding-left: 0; border-left: 0; gap: 8px; }
+  /* Das ✕ verbindet zwei Dinge. In der zweiten Zeile steht es allein am Anfang und verbindet
+     nichts mehr - dort reicht die Marke des Kunden fuer sich (Ansage 20.09.2026). */
+  .marke-x { display: none; }
+  .marke-kunde img { height: 19px; max-width: 136px; }
+  .marke-kunde.logo-hoch img { height: 23px; max-width: 124px; }
+  .marke-kunde.logo-kompakt img { height: 17px; max-width: 44px; }
+  .marke-kunde.kachel-logo img { height: 17px; max-width: 17px; }
   .marke-kunde-name { font-size: 16px; max-width: 260px; }
 }
 

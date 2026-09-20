@@ -337,6 +337,18 @@
       bild.alt = c.company ? `Logo von ${c.company}` : "Logo";
       // Laedt das Logo nicht, steht der Name da - nie ein kaputtes Bildsymbol, nie eine Luecke.
       bild.onerror = alsText;
+      // Form des Logos bestimmt die Groesse (20.09.2026): eine breite Wortmarke besteht aus
+      // duennen Buchstaben, ein quadratisches Zeichen ist eine geschlossene Flaeche und wirkt
+      // bei gleicher Hoehe viel groesser. Gemessen wird das Seitenverhaeltnis der Datei, nicht
+      // die Darstellung - deshalb erst, wenn das Bild wirklich geladen ist.
+      bild.onload = () => {
+        const verhaeltnis = bild.naturalHeight ? bild.naturalWidth / bild.naturalHeight : 1;
+        // Drei Faelle, weil drei Formen unterschiedlich wiegen: geschlossenes Zeichen (unter
+        // 2.2), mehrzeilige Wortmarke (bis 4, Buchstaben nur halb so hoch wie das Bild) und
+        // einzeilige Wortmarke (darueber, Buchstaben fuellen die Hoehe).
+        huelle.classList.toggle("logo-kompakt", verhaeltnis < 2.2);
+        huelle.classList.toggle("logo-hoch", verhaeltnis >= 2.2 && verhaeltnis < 4);
+      };
       bild.src = quelle;
     }
   }
