@@ -27,6 +27,7 @@
  */
 import axios from "axios";
 import { db, nowIso, type CustomerRow, type PostRow, type ProcessedCommentRow } from "./db.js";
+import { kennungsFormen, vergissAlles } from "./fremddaten.js";
 import { resolveInstagramCredentials } from "./credentials.js";
 import { clearCommentFetchFailures, mayFetchComments, recordCommentFetchFailure } from "./comment-backoff.js";
 import { fetchTopLevelComments, postCommentReply, type IncomingComment } from "../instagram-comments.js";
@@ -74,7 +75,11 @@ function toProcessedComment(r: ProcessedCommentRow): ProcessedComment {
 }
 
 function isCommentProcessed(commentId: string): boolean {
-  return Boolean(db.prepare("SELECT 1 FROM processed_comments WHERE comment_id = ?").get(commentId));
+  // Beide Formen pruefen: Klartext, solange die Freigabe laeuft - Hash, sobald vergessen wurde.
+  // Ohne den Hash waere ein bereits beantworteter Kommentar nach dem Vergessen wieder "neu" und
+  // die Person bekaeme eine zweite Antwort.
+  const [klar, hash] = kennungsFormen(commentId);
+  return Boolean(db.prepare("SELECT 1 FROM processed_comments WHERE comment_id IN (?, ?)").get(klar, hash));
 }
 
 function saveProcessedComment(input: {
@@ -148,7 +153,16 @@ export async function approveCommentReply(customerId: string, id: string, edited
   await postCommentReply(row.comment_id, replyText, creds);
   const now = nowIso();
   db.prepare("UPDATE processed_comments SET generated_reply = ?, status = 'answered', updated_at = ? WHERE id = ?").run(replyText, now, row.id);
-  return toProcessedComment(db.prepare("SELECT * FROM processed_comments WHERE id = ?").get(row.id) as ProcessedCommentRow);
+  // Antwort fuer den Aufrufer festhalten, BEVOR vergessen wird - sonst bekaeme das Panel eine
+  // leere Karte zurueck. Was der Kunde gerade freigegeben hat, darf er noch einmal sehen;
+  // gespeichert bleibt es nicht.
+  const ergebnis = toProcessedComment(
+    db.prepare("SELECT * FROM processed_comments WHERE id = ?").get(row.id) as ProcessedCommentRow,
+  );
+  // Die Antwort ist raus - Name, Text und Kennung haben ab hier keinen Zweck mehr. Anders als bei
+  // Google gibt es fuer Instagram-Kommentare keine Nachpruefung, also faellt beides sofort.
+  vergissAlles("processed_comments", row.id);
+  return ergebnis;
 }
 
 /** Rejects one pending comment reply - it is never sent. Scoped to the given customer like approveCommentReply. */
@@ -158,7 +172,11 @@ export function rejectCommentReply(customerId: string, id: string): ProcessedCom
     .prepare("UPDATE processed_comments SET status = 'rejected', updated_at = ? WHERE id = ? AND customer_id = ? AND status = 'pending_approval'")
     .run(now, id, customerId);
   if (result.changes === 0) return null;
-  return toProcessedComment(db.prepare("SELECT * FROM processed_comments WHERE id = ?").get(id) as ProcessedCommentRow);
+  const ergebnis = toProcessedComment(db.prepare("SELECT * FROM processed_comments WHERE id = ?").get(id) as ProcessedCommentRow);
+  // Auch der abgelehnte Fall ist abgeschlossen: es geht nichts mehr raus, gebraucht wird nur noch
+  // die Kennung als Sperre - und die nur noch als Hash.
+  vergissAlles("processed_comments", id);
+  return ergebnis;
 }
 
 /** Last `days` days, grouped by status - for the customer's own settings page and the admin overview. */

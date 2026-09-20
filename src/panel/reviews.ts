@@ -28,6 +28,7 @@
  * Isolationsprinzip wie in comments.ts/planning.ts.
  */
 import { db, nowIso, type CustomerRow, type GoogleReviewRow } from "./db.js";
+import { kennungsFormen, vergissAbgelaufeneKennungen, vergissPersonendaten } from "./fremddaten.js";
 import {
   assertNoBannedWords,
   assertRequiredElements,
@@ -115,7 +116,10 @@ function toReviewEntry(r: GoogleReviewRow): ReviewEntry {
 }
 
 function findReviewRow(reviewName: string): GoogleReviewRow | undefined {
-  return db.prepare("SELECT * FROM google_reviews WHERE review_name = ?").get(reviewName) as GoogleReviewRow | undefined;
+  // Klartext UND Hash: nach dem Moderationsfenster steht hier nur noch der Hash, und ohne ihn
+  // waere eine laengst beantwortete Rezension wieder "neu".
+  const [klar, hash] = kennungsFormen(reviewName);
+  return db.prepare("SELECT * FROM google_reviews WHERE review_name IN (?, ?)").get(klar, hash) as GoogleReviewRow | undefined;
 }
 
 function insertReviewRow(input: {
@@ -221,13 +225,20 @@ export async function approveReviewReply(customerId: string, id: string, editedR
   const creds = await resolveGoogleCredentials(customerId);
   if (!creds) throw new Error("Google-Unternehmensprofil nicht verbunden.");
   const sent = await updateReviewReply(row.review_name, replyText, creds.accessToken);
+  // Achtung: die Kennung (`review_name`) bleibt hier bewusst im Klartext. Google kann eine
+  // gesendete Antwort noch nachtraeglich ablehnen; `checkPendingModeration` fragt sieben Tage lang
+  // damit nach. Erst danach wird sie gehasht - siehe vergissAbgelaufeneKennungen weiter unten.
   db.prepare("UPDATE google_reviews SET generated_reply = ?, status = 'answered', reply_state = ?, updated_at = ? WHERE id = ?").run(
     replyText,
     sent.reviewReplyState,
     nowIso(),
     row.id,
   );
-  return toReviewEntry(db.prepare("SELECT * FROM google_reviews WHERE id = ?").get(row.id) as GoogleReviewRow);
+  // Antwort fuer den Aufrufer festhalten, BEVOR Name und Text verschwinden - das Panel soll den
+  // gerade freigegebenen Satz noch einmal zeigen koennen. Gespeichert bleibt er nicht.
+  const ergebnis = toReviewEntry(db.prepare("SELECT * FROM google_reviews WHERE id = ?").get(row.id) as GoogleReviewRow);
+  vergissPersonendaten("google_reviews", row.id);
+  return ergebnis;
 }
 
 /** Lehnt einen wartenden Antwort-Entwurf ab - er wird nie gesendet. Auf den Kunden eingegrenzt wie approveReviewReply. */
@@ -236,7 +247,11 @@ export function rejectReviewReply(customerId: string, id: string): ReviewEntry |
     .prepare("UPDATE google_reviews SET status = 'rejected', updated_at = ? WHERE id = ? AND customer_id = ? AND status = 'pending_approval'")
     .run(nowIso(), id, customerId);
   if (result.changes === 0) return null;
-  return toReviewEntry(db.prepare("SELECT * FROM google_reviews WHERE id = ?").get(id) as GoogleReviewRow);
+  const ergebnis = toReviewEntry(db.prepare("SELECT * FROM google_reviews WHERE id = ?").get(id) as GoogleReviewRow);
+  // Abgelehnt heisst: es geht nichts raus, es kommt auch keine Nachpruefung. Name und Text weg -
+  // die Kennung faellt mit dem naechsten Lauf ueber vergissAbgelaufeneKennungen.
+  vergissPersonendaten("google_reviews", id);
+  return ergebnis;
 }
 
 // ---------- Content-Recycling ----------
@@ -594,6 +609,10 @@ export interface ReviewRunSummary {
 
 export async function runReviewAutomationPass(): Promise<ReviewRunSummary> {
   const startedAt = nowIso();
+  // Kennungen abgeschlossener Rezensionen vergessen, sobald das Moderationsfenster zu ist. Haengt
+  // bewusst am selben Lauf wie die Nachpruefung: dieselbe Frist, eine Stelle.
+  const vergessen = vergissAbgelaufeneKennungen("google_reviews", REVIEW_MODERATION_CHECK_DAYS);
+  if (vergessen) console.log(`[reviews] ${vergessen} Kennung(en) nach Ablauf des Moderationsfensters gehasht.`);
   const summary: ReviewRunSummary = {
     startedAt,
     finishedAt: startedAt,

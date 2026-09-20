@@ -52,6 +52,7 @@
     "test:kanalplanung": "node scripts/test-kanalplanung.mjs",
     "test:veroeffentlichen": "node --import tsx --test scripts/veroeffentlichen.test.ts",
     "test:loeschen": "node --test scripts/test-loeschen.mjs",
+    "test:fremddaten": "node --test scripts/test-fremddaten.mjs",
     "test:klebeleisten": "node scripts/test-klebeleisten.mjs",
     "test:jetzt-posten": "node scripts/test-jetzt-posten.mjs"
   },
