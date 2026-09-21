@@ -10,3 +10,4 @@ timestamp	status	details
 2026-09-18T15:06:00Z	POSTED	Headline "Ship AI Systems Fast" published, postId 18053069585587895
 2026-09-19T15:05:54Z	POSTED	Headline "Your AI Team Awaits" published, postId 18415122901152950
 2026-09-20T15:06:07Z	POSTED	Headline "Always-On AI Support" published, postId 17949225192277781; note: generated image's font/watermark rendering visually deviates from styleguide.md spec (sans-serif not serif, watermark horizontal/bottom-left not vertical/right-edge) - flagged for review, did not block posting per routine rules
+2026-09-21T15:05:49Z	POSTED	Headline "Consistency That Scales" published, postId 18124218920299468 (from content-calendar.json topic, category Kundenservice/24-7-Support); note: same font/watermark deviation from styleguide.md as 2026-09-20 persists (sans-serif not serif, watermark horizontal/bottom-left not vertical/right-edge) - flagged again for review, did not block posting per routine rules
