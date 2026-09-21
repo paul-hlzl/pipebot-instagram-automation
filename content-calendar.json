@@ -1,54 +1,40 @@
 {
-  "week_start": "2026-09-07",
+  "week_start": "2026-09-21",
   "days": {
-    "2026-09-07": {
+    "2026-09-21": {
       "category": "Kundenservice/24-7-Support",
-      "topic": "Wie ein KI-Chatbot nachts und am Wochenende Kundenanfragen beantwortet, während das Team schläft",
-      "status": "planned",
-      "issue_number": 1,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/1"
+      "topic": "How an AI chatbot keeps every customer interaction consistent in tone and accuracy, even on the business's busiest day of the year",
+      "status": "planned"
     },
-    "2026-09-08": {
+    "2026-09-22": {
       "category": "Automatisierung/Effizienz",
-      "topic": "Wiederkehrende Rückfragen automatisch beantworten lassen, bevor sie im Postfach landen",
-      "status": "planned",
-      "issue_number": 2,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/2"
+      "topic": "Automating appointment booking and confirmations so staff spend their time on sales conversations instead of scheduling admin",
+      "status": "planned"
     },
-    "2026-09-09": {
+    "2026-09-23": {
       "category": "Chatbot/ROI",
-      "topic": "Wie viel Umsatz ein einziger gut trainierter Chatbot pro Monat zusätzlich bringen kann",
-      "status": "planned",
-      "issue_number": 3,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/3"
+      "topic": "Comparing the monthly cost of a chatbot subscription to the salary of one extra support hire, and what the business gets back",
+      "status": "planned"
     },
-    "2026-09-10": {
+    "2026-09-24": {
       "category": "KI-Tools/Digitalisierung",
-      "topic": "Die drei KI-Tools, die kleine Teams zuerst einführen sollten",
-      "status": "planned",
-      "issue_number": 4,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/4"
+      "topic": "The most common mistake small businesses make when picking their first AI tool, and how to avoid it",
+      "status": "planned"
     },
-    "2026-09-11": {
+    "2026-09-25": {
       "category": "Kundenservice/24-7-Support",
-      "topic": "Warum Kunden schnelle Antworten wichtiger sind als perfekte Antworten",
-      "status": "planned",
-      "issue_number": 5,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/5"
+      "topic": "How an AI chatbot serves customers across different time zones and languages without hiring a bigger support team",
+      "status": "planned"
     },
-    "2026-09-12": {
+    "2026-09-26": {
       "category": "Automatisierung/Effizienz",
-      "topic": "Ein Beispiel-Workflow, der pro Woche mehrere Stunden manueller Arbeit einspart",
-      "status": "planned",
-      "issue_number": 6,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/6"
+      "topic": "Automatically following up on abandoned carts and unanswered questions so no potential customer falls through the cracks",
+      "status": "planned"
     },
-    "2026-09-13": {
+    "2026-09-27": {
       "category": "Chatbot/ROI",
-      "topic": "Vom ersten Chat bis zum Kaufabschluss: der Weg eines Leads durch den Chatbot",
-      "status": "planned",
-      "issue_number": 7,
-      "issue_url": "https://github.com/paul-hlzl/pipebot-instagram-automation/issues/7"
+      "topic": "Which three metrics actually prove a chatbot is paying for itself, and how to track them",
+      "status": "planned"
     }
   }
 }
