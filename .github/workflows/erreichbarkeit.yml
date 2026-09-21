@@ -9,6 +9,25 @@
 # Dieser Lauf startet bei GitHub, nicht bei uns. Er sieht genau das, was die Routine sieht.
 # Gemeldet wird ueber ein GitHub-Issue: das verschickt die Benachrichtigung von selbst, es
 # braucht also kein Mailkonto und kein Secret im Repository.
+#
+# 21.09.2026 - zwei Reparaturen, nachdem 27 von 27 Laeufen fehlgeschlagen sind:
+#
+# 1. URSACHE DER FEHLLAEUFE: Der Schritt "Wiederherstellung melden" brach jedes Mal ab mit
+#    "failed to run git: fatal: not a git repository". Dieser Workflow checkt das Repository
+#    bewusst nicht aus (er braucht keinen Code), aber `gh` ermittelt das Zielrepository aus dem
+#    git-Remote im Arbeitsverzeichnis - und das ist auf dem Runner leer. Weil der Schritt bei
+#    status == OK laeuft, scheiterte ausgerechnet jeder ERFOLGREICHE Lauf, und GitHub verschickte
+#    jedes Mal eine "Lauf fehlgeschlagen"-Mail. Behoben durch GH_REPO weiter unten: damit braucht
+#    `gh` kein Arbeitsverzeichnis mehr. Kein Checkout noetig.
+#
+# 2. MELDUNG NUR BEI ZUSTANDSWECHSEL: Vorher kommentierte ein anhaltender Ausfall das offene
+#    Issue bei JEDEM Lauf - also alle 10 Minuten eine Mail. Jetzt gilt dieselbe Regel wie in
+#    health-check.sh: eine Meldung beim Wechsel OK->AUSFALL, eine beim Wechsel AUSFALL->OK,
+#    dazwischen Funkstille. Das offene Issue IST der Zustandsspeicher.
+#
+# GRUNDSATZ fuer kuenftige Aenderungen: Im Normalbetrieb darf dieser Workflow nicht fehlschlagen.
+# Ein roter Lauf ist hier eine Mail. Der OK-Pfad meldet Pannen deshalb nur als Warnung; nur wenn
+# ohnehin ein Ausfall vorliegt, darf der Lauf rot werden - dann ist die Mail erwuenscht.
 
 name: Erreichbarkeit
 
@@ -22,12 +41,20 @@ on:
 permissions:
   issues: write
 
+# Zwei gleichzeitige Laeufe wuerden sich beim Anlegen des Issues in die Quere kommen.
+concurrency:
+  group: erreichbarkeit
+  cancel-in-progress: false
+
 env:
   ZIEL: https://mcp.pipebot.at/health
   NAME: mcp.pipebot.at
   ZONE: pipebot.at
   ERWARTETE_IP: 2.29.38.44
   MARKE: erreichbarkeit-ausfall      # Label, an dem der Lauf sein eigenes Issue wiedererkennt
+  # Ohne das hier findet `gh` das Repository nicht, weil kein Checkout stattfindet. Siehe oben.
+  GH_REPO: ${{ github.repository }}
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   pruefen:
@@ -84,25 +111,53 @@ jobs:
 
       - name: Ausfall melden
         if: steps.pruefung.outputs.status == 'FAILED'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          # Nur EIN offenes Issue, sonst entsteht bei einem laengeren Ausfall alle 10 Minuten eines.
+          set -u
+          # Das offene Issue ist der Zustandsspeicher. Gibt es schon eins, LAEUFT der Ausfall
+          # bereits - dann bleibt es still. Sonst kaeme alle 10 Minuten eine Mail.
           offen="$(gh issue list --label "$MARKE" --state open --json number --jq '.[0].number // empty')"
-          text="$(printf 'Der Dienst ist von aussen nicht erreichbar.\n\nGeprueft: %s (UTC)\nA-Record laut autoritativem NS: %s (erwartet: %s)\nHTTP-Status: %s\n\nGefunden:\n%b\nDieser Lauf startet bei GitHub, nicht auf dem Server - er sieht also, was die Routine sieht. Das Issue schliesst sich von selbst, sobald der naechste Lauf wieder durchkommt.' \
-            "$(date -u +'%Y-%m-%d %H:%M:%S')" "${{ steps.pruefung.outputs.ip }}" "$ERWARTETE_IP" "${{ steps.pruefung.outputs.code }}" "${{ steps.pruefung.outputs.gruende }}")"
           if [ -n "$offen" ]; then
-            gh issue comment "$offen" --body "$text"
-          else
-            gh issue create --title "Ausfall: mcp.pipebot.at von aussen nicht erreichbar" --label "$MARKE" --body "$text"
+            echo "Ausfall haelt an, Issue #${offen} ist bereits offen - keine weitere Meldung."
+            exit 0
           fi
+
+          # Das Label muss existieren, sonst lehnt `gh issue create` den Aufruf ab und die
+          # Ausfallmeldung ginge verloren. Anlegen ist folgenlos, wenn es schon da ist.
+          gh label create "$MARKE" \
+            --color B60205 \
+            --description "Offener Ausfall laut Workflow Erreichbarkeit" \
+            2>/dev/null || true
+
+          text="$(printf 'Der Dienst ist von aussen nicht erreichbar.\n\nGeprueft: %s (UTC)\nA-Record laut autoritativem NS: %s (erwartet: %s)\nHTTP-Status: %s\n\nGefunden:\n%b\nDieser Lauf startet bei GitHub, nicht auf dem Server - er sieht also, was die Routine sieht.\n\nSolange der Ausfall anhaelt, kommt KEINE weitere Meldung: dieses Issue bleibt einfach offen. Es schliesst sich von selbst, sobald der naechste Lauf wieder durchkommt - das ist dann die zweite und letzte Mail zu diesem Vorfall.' \
+            "$(date -u +'%Y-%m-%d %H:%M:%S')" "${{ steps.pruefung.outputs.ip }}" "$ERWARTETE_IP" "${{ steps.pruefung.outputs.code }}" "${{ steps.pruefung.outputs.gruende }}")"
+
+          gh issue create \
+            --title "Ausfall: mcp.pipebot.at von aussen nicht erreichbar" \
+            --label "$MARKE" \
+            --body "$text"
 
       - name: Wiederherstellung melden
         if: steps.pruefung.outputs.status == 'OK'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          offen="$(gh issue list --label "$MARKE" --state open --json number --jq '.[0].number // empty')"
-          if [ -n "$offen" ]; then
-            gh issue close "$offen" --comment "Wieder erreichbar: A-Record ${{ steps.pruefung.outputs.ip }}, HTTP ${{ steps.pruefung.outputs.code }} ($(date -u +'%Y-%m-%d %H:%M:%S') UTC)."
+          set -u
+          # ACHTUNG: Dieser Schritt laeuft bei JEDEM erfolgreichen Lauf, also rund 144x am Tag.
+          # Faellt er aus, verschickt GitHub 144 Fehlermails - genau das ist am 21.09. passiert.
+          # Deshalb wird hier nichts als Fehler gewertet: Pannen erscheinen als Warnung im Lauf,
+          # der Lauf selbst bleibt gruen.
+          if ! offen="$(gh issue list --label "$MARKE" --state open --json number --jq '.[0].number // empty' 2>&1)"; then
+            echo "::warning::Offene Ausfall-Issues konnten nicht abgefragt werden: ${offen}"
+            exit 0
+          fi
+
+          if [ -z "$offen" ]; then
+            echo "Alles in Ordnung, kein offener Ausfall - keine Meldung."
+            exit 0
+          fi
+
+          # Zustandswechsel AUSFALL -> OK: genau hier gehoert die Entwarnung hin.
+          if gh issue close "$offen" \
+               --comment "Wieder erreichbar: A-Record ${{ steps.pruefung.outputs.ip }}, HTTP ${{ steps.pruefung.outputs.code }} ($(date -u +'%Y-%m-%d %H:%M:%S') UTC)."; then
+            echo "Entwarnung: Issue #${offen} geschlossen."
+          else
+            echo "::warning::Issue #${offen} konnte nicht geschlossen werden - naechster Lauf versucht es erneut."
           fi

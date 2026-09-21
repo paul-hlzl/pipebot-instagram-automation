@@ -11,9 +11,14 @@
 # legt die Ueberwachung still - der Cron-Lauf schlaegt dann stumm fehl. Rueckfallkopie:
 # /root/scripts/health-check.sh.bak-20260920
 #
-# Run via cron every 30 minutes. Emails office@pipebot.at only on a status
-# CHANGE (OK->FAILED or FAILED->OK), not on every failed run, to avoid spam
-# during a prolonged outage.
+# Run via cron every 30 minutes. Emails only on a status CHANGE (OK->FAILED or
+# FAILED->OK), not on every failed run, to avoid spam during a prolonged outage.
+#
+# 21.09.2026: Empfaenger von office@pipebot.at auf office@pipeline-solutions.at umgestellt.
+# Grund: dieselbe Stoerung erzeugte bisher Mails in zwei Postfaechern. check.py (alle 5 Minuten)
+# und backup-alert.sh melden nach office@pipeline-solutions.at, dieses Skript meldete woanders
+# hin - am 20.09. lagen dadurch vier Mails zu EINEM 30-Minuten-Ausfall in zwei Postfaechern.
+# Der ABSENDER bleibt office@pipebot.at: er muss zum msmtp-Konto "pipebot" passen.
 
 set -u
 
@@ -26,7 +31,7 @@ DNS_ZONE="pipebot.at"
 DNS_EXPECTED_IP="2.29.38.44"
 LOG_FILE="/root/scripts/health-check.log"
 STATUS_FILE="/root/scripts/health-check-status.txt"
-MAIL_TO="office@pipebot.at"
+MAIL_TO="office@pipeline-solutions.at"   # gemeinsames Postfach aller Ueberwachungen
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 log() {
