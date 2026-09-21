@@ -39,7 +39,10 @@ const customers = before.prepare("SELECT id, company, email, approval_mode, emai
 before.close();
 console.log("Kunden in der Kopie:", customers.map((c) => `${c.company} (${c.id})`).join(", "));
 
-const dist = new URL("../dist/index.js", import.meta.url).pathname;
+// Zweites Argument: ein anderer Build als dist/ - so laesst sich neuer Code gegen die Kopie
+// pruefen, BEVOR dist/ ueberschrieben wird (dort liegt der Code, den die Produktion beim
+// naechsten Neustart laedt).
+const dist = process.argv[3] ?? new URL("../dist/index.js", import.meta.url).pathname;
 const child = spawn(process.execPath, [dist], {
   cwd: dir,
   env: {

@@ -8,9 +8,9 @@
 <title>Pipeflow – Admin</title>
 
 <!--
-  Redesign "Flow", Phase 6. Mount-agnostisch wie index.html: die Seite laeuft unter
-  /panel/admin und /panel/sandbox/admin. Der Aufruf OHNE abschliessenden Slash antwortet mit
-  200 (kein Redirect) - ohne <base> wuerde "../fonts/..." dort eine Ebene zu hoch zeigen.
+  Mount-agnostisch wie index.html: die Seite laeuft unter /panel/admin, /panel/sandbox/admin und
+  unter dem geheimen Segment aus PANEL_ADMIN_PATH. Der Aufruf OHNE abschliessenden Slash antwortet
+  mit 200 (kein Redirect) - ohne <base> wuerde "../fonts/..." dort eine Ebene zu hoch zeigen.
   Das Tag muss vor dem Preload und dem <style> stehen.
 -->
 <script>
@@ -23,27 +23,34 @@
   })();
 </script>
 
-<!-- Schrift selbst gehostet (DSGVO): dieselbe Datei wie im Kunden-Panel, serviert unter
-     ${panelMount}/fonts - vom Admin-Mount aus also eine Ebene hoeher. Google Fonts entfaellt. -->
-<link rel="preload" href="../fonts/SchibstedGrotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+<!--
+  21.09.2026 - gleiche Gestaltung wie der Kundenbereich.
+  Vorher hatte diese Seite eine EIGENE Schrift (Schibsted Grotesk, per @font-face hier im Kopf)
+  und einen eigenen, fett gesetzten Schriftzug. Das Kunden-Panel ist am 18.09.2026 auf die
+  Schriften der Website umgestellt worden (Instrument Serif fuer Ueberschriften, Inter fuer den
+  Text, JetBrains Mono fuer die gesperrten Kleinlabels) - der Adminbereich blieb zurueck und sah
+  deshalb aus wie ein fremdes Werkzeug. Die Schriften kommen jetzt aus derselben Datei wie dort
+  (panel-theme.css, unten eingebunden), selbst gehostet unter ${panelMount}/fonts, also vom
+  Admin-Mount aus eine Ebene hoeher. Google Fonts entfaellt - die Panel-CSP erlaubt nur
+  font-src 'self'.
+-->
+<link rel="preload" href="../fonts/Inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="../fonts/InstrumentSerif-normal-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-@font-face {
-  font-family: "Schibsted Grotesk";
-  font-style: normal; font-weight: 400 700; font-display: swap;
-  src: url("../fonts/SchibstedGrotesk-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "Schibsted Grotesk";
-  font-style: normal; font-weight: 400 700; font-display: swap;
-  src: url("../fonts/SchibstedGrotesk-latin-ext.woff2") format("woff2");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
-    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
-    U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-
-/* --- Tokens: identisch zu panel.css, keine eigenen Werte --- */
+/* ===========================================================================
+   Adminbereich - dieselbe Sprache wie das Kunden-Panel, aber dichter gesetzt.
+   ---------------------------------------------------------------------------
+   Was von dort kommt: Farben, Schriften, Schriftgroessen, Abstandsstufen,
+   Radien, Knopfformen, Chips, Felder - jeder Wert unten ist entweder eine
+   Variable aus panel-theme.css oder derselbe Wert wie in panel.css.
+   Was hier anders ist, und nur das: die Seite ist breiter (--page), die
+   Tabellenzeilen sind enger (--zelle-y), die Abstaende zwischen den
+   Abschnitten eine Stufe kleiner. Der Adminbereich ist ein Arbeitswerkzeug -
+   auf einen Blick moeglichst viele Konten, keine Verkaufsseite.
+   Die Tokens hier sind die RUECKLAGE (identische Werte wie panel.css); die
+   echten Werte setzt panel-theme.css, das nach diesem Block geladen wird und
+   dieselben Variablennamen ueberschreibt.
+   =========================================================================== */
 :root {
   --paper: #FFFFFF; --ink: #000000; --stone: #666666; --rule: #E3E3E3; --wash: #F5F5F5;
   --go: #137A3F; --stop: #B42318;
@@ -58,6 +65,7 @@
   --ease: cubic-bezier(.2,.8,.2,1);
   --node-s: 10px;
   --page: 1320px;   /* Datentabelle, kein Lesetext - darf breiter sein als das Kunden-Panel */
+  --zelle-y: 10px;  /* Tabellenzeile: enger als --s3, genau hier sitzt die Dichte */
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --dur-1: 1ms; --dur-2: 1ms; --dur-3: 1ms; }
@@ -69,13 +77,20 @@ img, svg { max-width: 100%; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--paper); color: var(--ink);
-  font-family: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--sans, "Inter"), system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: var(--t-body); line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-h1, h2 { margin: 0; text-wrap: balance; letter-spacing: -.02em; line-height: 1.18; }
-h1 { font-size: var(--t-h1); font-weight: 700; }
-h2 { font-size: var(--t-h2); font-weight: 700; line-height: 1.25; }
+/* Ueberschriften in der Display-Serif der Website - wie panel.css. Kein font-weight:700:
+   Instrument Serif hat nur Regular, ein synthetisches Fett saehe hohl aus. */
+h1, h2, h3 {
+  margin: 0; text-wrap: balance;
+  font-family: var(--serif, inherit); font-weight: 400;
+  letter-spacing: var(--display-tracking, -.02em); line-height: 1.08;
+}
+h1 { font-size: var(--t-h1); }
+h2 { font-size: var(--t-h2); line-height: 1.15; }
 p { margin: 0; text-wrap: pretty; }
 a { color: inherit; }
 [hidden] { display: none !important; }
@@ -85,6 +100,21 @@ a { color: inherit; }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 
+/* Gesperrtes Mono-Kleinlabel wie auf der Website und im Kunden-Panel (.card-kicker).
+   Im Adminbereich traegt es die Tabellenkoepfe: kurz, ruhig, klar als Label lesbar.
+   EIN bewusster Unterschied zum Kundenbereich: dort ist die Farbe --kicker-color (#8d8d94),
+   das ergibt bei 11px ein Kontrastverhaeltnis von 3,3:1 und faellt damit unter die 4,5:1 der
+   WCAG (axe meldet es als "serious"). Im Kundenbereich ist das ein Zierlabel ueber einer
+   Karte, hier traegt dasselbe Label die Spaltenueberschriften einer Datentabelle - also
+   --stone (7,2:1). Gleiche Schrift, gleiche Sperrung, gleiche Groesse, nur lesbar. */
+.kicker {
+  font-family: var(--kicker-family, var(--mono, ui-monospace, monospace));
+  font-size: var(--kicker-size, 11px);
+  letter-spacing: var(--kicker-tracking, .12em);
+  text-transform: uppercase; font-weight: 400;
+  color: var(--stone);
+}
+
 .skip-link {
   position: fixed; top: var(--s2); left: var(--s2); z-index: 200;
   background: var(--ink); color: var(--paper); padding: var(--s2) var(--s3);
@@ -92,28 +122,41 @@ a { color: inherit; }
 }
 .skip-link:focus { transform: none; }
 
-/* --- Kopf --- */
+/* --- Kopfzeile: dieselbe wie im Kundenpanel (.appbar/.brand in panel.css) --- */
 .top {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
-  min-height: 60px; padding: var(--s2) var(--s4);
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; gap: var(--s3);
+  min-height: 70px; padding: 0 var(--s4);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(1.2) blur(10px);
   border-bottom: 1px solid var(--rule);
 }
-.brand { display: flex; align-items: center; gap: var(--s2); font-weight: 700; letter-spacing: -.02em; }
-.brand span { color: var(--stone); font-weight: 400; }
-main { max-width: var(--page); margin: 0 auto; padding: var(--s6) var(--s4) var(--s8); }
+.brand {
+  display: inline-flex; align-items: center; gap: .22em; flex: 0 0 auto;
+  font-family: var(--serif, inherit); font-weight: 400; font-size: 25px;
+  letter-spacing: var(--display-tracking, -.02em); line-height: 1;
+}
+.brand svg { fill: currentColor; display: block; width: 1.15em; height: 1.15em; }
+.top-note { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-actions { margin-left: auto; display: flex; align-items: center; gap: var(--s2); }
+
+main { max-width: var(--page); margin: 0 auto; padding: var(--s5) var(--s4) var(--s8); }
 @media (min-width: 768px) {
-  .top { padding: var(--s2) var(--s6); }
-  main { padding: var(--s7) var(--s6) var(--s8); }
+  .top { padding: 0 var(--s5); }
+  main { padding: var(--s6) var(--s5) var(--s8); }
 }
 
-.section + .section { margin-top: var(--s7); padding-top: var(--s7); border-top: 1px solid var(--rule); }
+.section + .section { margin-top: var(--s6); padding-top: var(--s6); border-top: 1px solid var(--rule); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
 
-/* --- Buttons und Felder: gleiche Komponenten wie im Kunden-Panel --- */
+/* --- Knoepfe und Felder: gleiche Bausteine wie im Kunden-Panel ---
+   Pillenform und Hoehe kommen als Variable aus panel-theme.css (--r-pill/--btn-h), die
+   Rueckfallwerte sind die des Kunden-Panels vor der Theme-Datei. --- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
-  min-height: 44px; padding: var(--s3) var(--s5);
-  border: 1px solid var(--ink); border-radius: var(--r3);
+  min-height: var(--btn-h, 44px); padding: var(--s3) var(--s5);
+  border: 1px solid var(--ink); border-radius: var(--r-pill, var(--r3));
+  letter-spacing: var(--btn-tracking, normal);
   background: var(--paper); color: var(--ink); font: inherit; font-weight: 500;
   cursor: pointer; text-decoration: none; text-align: center;
   transition: transform var(--dur-1) var(--ease), background var(--dur-1) var(--ease), opacity var(--dur-1) var(--ease);
@@ -122,9 +165,16 @@ main { max-width: var(--page); margin: 0 auto; padding: var(--s6) var(--s4) var(
 .btn:hover { background: var(--wash); }
 .btn-primary { background: var(--ink); color: var(--paper); }
 .btn-primary:hover { background: #1a1a1a; }
-.btn-quiet { border-color: var(--line-strong); }
-.btn-small { min-height: 38px; padding: var(--s2) var(--s3); font-size: var(--t-small); }
-.btn[disabled] { opacity: .45; pointer-events: none; }
+/* Wie panel.css: leise heisst randlos. In der Kundenliste bekommen diese Knoepfe zusaetzlich
+   eine Fuellung (siehe .row-actions), damit sie in der Tabelle nicht wie Text wirken. */
+.btn-quiet { border-color: transparent; }
+.btn-quiet:hover { background: var(--wash); }
+.btn-danger { border-color: var(--stop); color: var(--stop); }
+.btn-danger:hover { background: color-mix(in srgb, var(--stop) 8%, var(--paper)); }
+.btn[disabled], .btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+/* 38px wie .btn-small im Kunden-Panel - nicht die 42px aus --btn-h-sm: die Zeilenaktionen sind
+   der dichteste Ort der Seite, und 38px ist der Wert, den der Kundenbereich dafuer schon nutzt. */
+.btn-small { min-height: 38px; padding: var(--s2) var(--s4); font-size: var(--t-small); }
 .btn-block { width: 100%; }
 .btn.busy { position: relative; color: transparent; pointer-events: none; }
 .btn.busy::after {
@@ -134,8 +184,6 @@ main { max-width: var(--page); margin: 0 auto; padding: var(--s6) var(--s4) var(
 }
 .btn:not(.btn-primary).busy::after { color: var(--ink); }
 @keyframes spin { to { transform: rotate(360deg); } }
-/* Am Handy ist jede Zeilenaktion ein eigener Treffer - volle Breite statt vier 38px-Knoepfe. */
-@media (max-width: 767px) { .row-actions .btn-small { flex: 1 1 140px; min-height: 44px; } }
 
 .field { margin-bottom: var(--s5); }
 .field > label { display: block; font-size: var(--t-small); font-weight: 500; margin-bottom: var(--s2); }
@@ -148,12 +196,18 @@ input[type=text], input[type=email], input[type=password], input[type=number], s
 }
 input:hover, select:hover { border-color: var(--stone); }
 input:focus, select:focus { border-color: var(--ink); outline: none; box-shadow: 0 0 0 1px var(--ink); }
+input::placeholder { color: var(--stone); opacity: 1; }
 .hint { color: var(--stone); font-size: var(--t-small); margin-top: var(--s2); }
+/* Ankreuzfeld wie im Kunden-Panel (.check in panel.css): Kaestchen links, Text daneben,
+   volle Zeile als Treffer. */
+.check {
+  display: flex; align-items: center; gap: var(--s3);
+  font-size: var(--t-small); font-weight: 400; padding: var(--s3) 0; cursor: pointer;
+}
+.check input { width: 18px; height: 18px; min-height: 0; flex: none; margin: 0; accent-color: var(--ink); cursor: pointer; }
 
-/* --- Anmeldung --- */
+/* --- Anmeldung: ein Feld, ein Haken, ein Knopf. Sonst nichts. --- */
 .loginwrap { max-width: 380px; margin: 12vh auto 0; }
-.loginwrap h1 { margin-bottom: var(--s2); }
-.loginwrap > p { color: var(--stone); font-size: var(--t-small); margin-bottom: var(--s5); }
 .notice {
   border: 1px solid var(--rule); border-left: 3px solid var(--ink);
   border-radius: var(--r1); padding: var(--s3) var(--s4); font-size: var(--t-small);
@@ -161,33 +215,40 @@ input:focus, select:focus { border-color: var(--ink); outline: none; box-shadow:
 }
 .notice.bad { border-left-color: var(--stop); color: var(--stop); }
 
-/* --- Statussatz: eine Aussage, wie auf der Kunden-Übersicht --- */
-.status-line { font-size: var(--t-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.12; max-width: 20ch; }
+/* --- Statussatz: eine Aussage, wie auf der Kunden-Uebersicht (.status h1 in panel.css) --- */
+.status-line {
+  font-family: var(--serif, inherit); font-weight: 400; font-size: var(--t-display);
+  letter-spacing: var(--display-tracking, -.02em); line-height: 1.12; max-width: 24ch;
+}
 .status-line.problem { color: var(--stop); }
 .status-sub { color: var(--stone); font-size: var(--t-small); margin-top: var(--s3); }
 
-/* --- Zahlen: Schrift und Weißraum statt Kachelwand --- */
-.metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5) var(--s4); }
+/* --- Zahlen: Aufbau wie .stat im Kunden-Panel (Label oben, Zahl darunter) --- */
+.metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4) var(--s4); }
 @media (min-width: 640px) { .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (min-width: 1024px) { .metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-.metric .n { font-size: var(--t-h1); font-weight: 700; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.metric .l { font-size: var(--t-small); color: var(--stone); margin-top: var(--s1); }
+.metric .l { font-size: var(--t-small); color: var(--stone); }
+.metric .n { font-size: clamp(24px, 5vw, 34px); font-weight: 700; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .metric.warn .n { color: var(--stop); }
 
-/* --- Tabelle: Desktop Tabelle, Handy Karten --- */
+/* --- Tabelle: am Rechner Tabelle, am Handy Karten --- */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: var(--t-small); }
-th, td { text-align: left; padding: var(--s3); border-bottom: 1px solid var(--rule); vertical-align: top; }
-th { font-size: var(--t-small); color: var(--stone); font-weight: 500; white-space: nowrap; }
+th, td { text-align: left; padding: var(--zelle-y) var(--s3); border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { white-space: nowrap; padding-top: var(--s2); padding-bottom: var(--s2); }
 tbody tr:hover td { background: var(--wash); }
+tbody td:first-child, thead th:first-child { padding-left: 0; }
+tbody td:last-child, thead th:last-child { padding-right: 0; }
 .company-cell strong { display: block; font-size: var(--t-body); letter-spacing: -.01em; }
+/* Eine Zeile statt vier: Kontakt und Zusatzangaben durch Mittelpunkte getrennt. Vier eigene
+   Zeilen je Kunde waren der Hauptgrund, warum nur drei Konten auf den Schirm passten. */
 .company-cell .meta { color: var(--stone); font-size: var(--t-micro); display: block; margin-top: 2px; }
 
-/* --- Zustands-Chips: Umriss wie die Pipe, Farbe nur für Bedeutung --- */
+/* --- Zustands-Chips: Umriss wie im Kunden-Panel, Farbe nur fuer Bedeutung --- */
 .chip {
   display: inline-flex; align-items: center; gap: var(--s2);
   padding: 2px var(--s2); margin: 0 var(--s1) var(--s1) 0;
-  border: 1px solid var(--line-strong); border-radius: var(--r3);
+  border: 1px solid var(--line-strong); border-radius: var(--r-pill, var(--r3));
   font-size: var(--t-micro); font-weight: 500; white-space: nowrap;
 }
 .chip .dot { width: var(--node-s); height: var(--node-s); border: 1px solid currentColor; }
@@ -196,6 +257,35 @@ tbody tr:hover td { background: var(--wash); }
 .chip.warn { border-color: var(--warn-line); color: var(--warn-ink); }
 .chip.bad { border-color: var(--stop); color: var(--stop); }
 .chip.bad .dot { background: currentColor; }
+.chip.stark { border-color: var(--ink); color: var(--ink); }
+
+/* --- Zeilenaktionen ---
+   Drei Stufen, damit man sieht, was eine Handlung kostet, bevor man sie anfasst:
+   gefuellt-leise = folgenlos (Details), umrandet = wirkt sofort (Sperren),
+   rot = endgueltig (Loeschen). Die beiden letzten stehen in einer eigenen Gruppe mit dem
+   groessten Abstand der Seite dazwischen - "klar erkennbar, aber nicht versehentlich
+   druckbar" heisst hier: sichtbar anders UND raeumlich getrennt. Die Tippbestaetigung beim
+   Loeschen und die Rueckfrage beim Sperren bleiben unveraendert. */
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s5); }
+/* Ohne feste Breite teilt der Browser der Aktionsspalte so wenig zu, dass die Knoepfe in DREI
+   Zeilen umbrechen - jede Kundenzeile wird dadurch ueber 130px hoch und es passen drei Konten
+   auf den Schirm. Mit dieser Breite sind es zwei Zeilen (harmlos / folgenreich) und rund 95px.
+   Der Wert ist gemessen, nicht geraten: Details + 7 Tage + Unbefristet brauchen 301px. */
+@media (min-width: 1024px) {
+  th:last-child, td[data-label="Aktionen"] { width: 340px; }
+  td[data-label="Firma"] { min-width: 230px; }
+  td[data-label="Beiträge"] { min-width: 120px; }
+}
+.row-actions .gruppe { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.row-actions .btn-quiet { background: var(--wash); }
+.row-actions .btn-quiet:hover { background: var(--wash-2, #EDEDED); }
+
+.tool { border: 1px solid var(--rule); border-radius: var(--r2); padding: var(--s4); }
+.tool + .tool { margin-top: var(--s4); }
+.tool h2 { margin-bottom: var(--s2); }
+.tool-form { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: flex-end; margin-top: var(--s4); }
+.tool-form .field { margin: 0; }
+.loading { color: var(--stone); padding: var(--s8) 0; text-align: center; }
 
 /* --- Dialoge: einzige Ebene mit Schatten --- */
 .overlay {
@@ -230,32 +320,17 @@ tbody tr:hover td { background: var(--wash); }
 .confirm-dialog .field { margin: var(--s4) 0 0; }
 .confirm-actions { display: flex; gap: var(--s2); justify-content: flex-end; margin-top: var(--s5); }
 .confirm-actions button {
-  min-height: 44px; padding: var(--s3) var(--s5); border-radius: var(--r3);
+  min-height: var(--btn-h, 44px); padding: var(--s3) var(--s5); border-radius: var(--r-pill, var(--r3));
   border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
-  font: inherit; font-weight: 500; cursor: pointer;
+  font: inherit; font-weight: 500; letter-spacing: var(--btn-tracking, normal); cursor: pointer;
 }
 .confirm-ok { background: var(--ink); color: var(--paper); }
 .confirm-ok.danger { background: var(--stop); border-color: var(--stop); }
-/* Loeschen soll sich vom Rest der Zeilenaktionen abheben - es ist die einzige, die nicht
-   umkehrbar ist. Erst beim Zeigen voll eingefaerbt, damit die Zeile ruhig bleibt. */
-.btn.btn-quiet.danger { color: var(--stop); border-color: color-mix(in srgb, var(--stop) 35%, transparent); }
-.btn.btn-quiet.danger:hover { background: var(--stop); border-color: var(--stop); color: #fff; }
 .confirm-cancel { border-color: var(--line-strong); }
 @media (max-width: 480px) {
   .confirm-actions { flex-direction: column-reverse; }
   .confirm-actions button { width: 100%; }
 }
-
-.row-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
-/* Am Desktop bleiben die Aktionen in EINER Zeile - sonst umbricht jede Kundenzeile ein zweites Mal
-   und die Liste wirkt doppelt so unruhig, wie sie ist. Die Tabelle scrollt notfalls seitlich. */
-@media (min-width: 768px) { .row-actions { flex-wrap: nowrap; } .row-actions .btn-small { white-space: nowrap; } }
-.tool { border: 1px solid var(--rule); border-radius: var(--r2); padding: var(--s4); }
-.tool + .tool { margin-top: var(--s4); }
-.tool h2 { margin-bottom: var(--s2); }
-.tool-form { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: flex-end; margin-top: var(--s4); }
-.tool-form .field { margin: 0; }
-.loading { color: var(--stone); padding: var(--s8) 0; text-align: center; }
 
 @media (max-width: 767px) {
   table, thead, tbody, tr, th, td { display: block; }
@@ -264,19 +339,28 @@ tbody tr:hover td { background: var(--wash); }
   tbody tr:hover td { background: transparent; }
   /* Label links, Wert rechts in EINER Zeile: sonst ist jede Kundenkarte am Handy 12 Zeilen hoch. */
   td { border: 0; padding: var(--s2) 0; display: flex; gap: var(--s3); align-items: baseline; justify-content: space-between; }
-  td::before { content: attr(data-label); flex: 0 0 auto; font-size: var(--t-micro); font-weight: 500; color: var(--stone); }
-  td[data-label="Firma"], td[data-label="Aktionen"] { display: block; }
-  td[data-label="Firma"]::before, td[data-label="Aktionen"]::before { display: none; }
+  tbody td:first-child, tbody td:last-child { padding-left: 0; padding-right: 0; }
+  td::before {
+    content: attr(data-label); flex: 0 0 auto;
+    font-family: var(--kicker-family, var(--mono, ui-monospace, monospace));
+    font-size: var(--kicker-size, 11px); letter-spacing: var(--kicker-tracking, .12em);
+    text-transform: uppercase; color: var(--stone);
+  }
+  td[data-label="Firma"], td[data-label="Aktionen"], td[data-label="Gerät"] { display: block; }
+  td[data-label="Firma"]::before, td[data-label="Aktionen"]::before, td[data-label="Gerät"]::before { display: none; }
   td[data-label="Kanäle"] { flex-wrap: wrap; justify-content: flex-start; }
+  /* Am Handy ist jede Zeilenaktion ein eigener Treffer - volle Breite statt vier 38px-Knoepfe. */
+  .row-actions { gap: var(--s2); }
+  .row-actions .gruppe { flex: 1 1 100%; }
+  .row-actions .btn-small { flex: 1 1 140px; min-height: 44px; }
   .kv { grid-template-columns: 1fr; gap: 0 0; }
   .kv dt { margin-top: var(--s3); }
   .modal { padding: var(--s4); }
 }
 </style>
-<!-- Design-Tokens aus der echten Pipeflow-Website, siehe public/panel/panel-theme.css.
-     Nach dem obigen <style> geladen: ueberschreibt --paper/--ink/--rule/--wash usw. mit
-     den echten Website-Werten, damit Admin und Kunden-Panel dieselben Grundfarben
-     benutzen ("Admin darf schlichter bleiben, aber gleiche Tokens"). -->
+<!-- Die echten Werte: Farben, Schriften und Knopfform aus der Pipeflow-Website, dieselbe Datei
+     wie im Kunden-Panel (public/panel/panel-theme.css). Nach dem obigen <style> geladen, damit
+     sie die Rueckfallwerte dort ueberschreibt. -->
 <link rel="stylesheet" href="../panel-theme.css?v=20260918c">
 </head>
 <body>
@@ -284,14 +368,19 @@ tbody tr:hover td { background: var(--wash); }
 <a class="skip-link" href="#app">Zum Inhalt springen</a>
 
 <header class="top">
+  <!-- Dieselbe Wortmarke wie in der Kopfzeile des Kundenpanels (.brand in index.html):
+       dasselbe Pixelzeichen, dieselbe Display-Serif, derselbe Abstand. -->
   <div class="brand">
-    <svg width="20" height="20" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">
       <rect x="0" y="0" width="3" height="3"/><rect x="3" y="1" width="5" height="1"/><rect x="8" y="0" width="3" height="3"/>
       <rect x="9" y="3" width="1" height="5"/><rect x="8" y="8" width="3" height="3"/><rect x="3" y="9" width="5" height="1"/><rect x="0" y="8" width="3" height="3"/>
     </svg>
-    Pipeflow <span>Admin</span>
+    <span>Pipeflow</span>
   </div>
-  <button class="btn btn-quiet btn-small" id="logout" hidden>Abmelden</button>
+  <span class="kicker top-note">Admin</span>
+  <div class="top-actions">
+    <button class="btn btn-quiet btn-small" id="logout" hidden>Abmelden</button>
+  </div>
 </header>
 
 <main id="app" tabindex="-1"><p class="loading">Wird geladen …</p></main>
@@ -326,6 +415,19 @@ tbody tr:hover td { background: var(--wash); }
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
   const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
+  /* "vor 3 Minuten" statt eines Zeitstempels: bei "zuletzt aktiv" ist der Abstand die Aussage,
+     nicht die Uhrzeit. Ab einem Tag wieder das Datum - "vor 26 Tagen" rechnet niemand zurueck. */
+  const fmtVor = (iso) => {
+    if (!iso) return "–";
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms)) return "–";
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return "gerade eben";
+    if (min < 60) return `vor ${min} Min.`;
+    const std = Math.floor(min / 60);
+    if (std < 24) return `vor ${std} Std.`;
+    return fmtDateTime(iso);
+  };
 
   /* Pixel-Icons wie im Kunden-Panel: 11x11, crispEdges, currentColor - keine Emojis. */
   const ICON = {
@@ -429,16 +531,24 @@ tbody tr:hover td { background: var(--wash); }
   /* ---------------- Login ---------------- */
   function renderLogin() {
     $("#logout").hidden = true;
+    /* Bis zum 21.09.2026 stand hier ein Hinweissatz, der den Inhaber der Seite nannte und
+       verriet, wo das Passwort abgelegt ist. Auf einer Seite, die man ohne Anmeldung sieht, ist
+       das eine Auskunft an den Falschen - der Satz ist raus, und er wird hier auch nicht
+       wiederholt (auch dieser Quelltext ist lesbar, sobald jemand die Seite vor sich hat).
+       Was bleibt: ein Feld, ein Haken, ein Knopf. Die Fehlermeldung bleibt - sie ist die
+       einzige Rueckmeldung, die es hier gibt. */
     $("#app").innerHTML = `
       <div class="loginwrap">
-        <h1>Admin-Anmeldung</h1>
-        <p>Nur für Paul. Zugang über das Admin-Passwort aus der .env.</p>
         ${banner ? `<div class="notice ${banner.kind}" role="alert">${esc(banner.text)}</div>` : ""}
-        <form id="loginform">
+        <form id="loginform" aria-label="Anmeldung">
           <div class="field">
             <label for="pw">Passwort</label>
             <input id="pw" type="password" name="password" autocomplete="current-password" required autofocus>
           </div>
+          <label class="check" for="remember">
+            <input type="checkbox" id="remember" name="remember">
+            <span>Angemeldet bleiben (30 Tage)</span>
+          </label>
           <button class="btn btn-primary btn-block" type="submit">Anmelden</button>
         </form>
       </div>`;
@@ -447,7 +557,7 @@ tbody tr:hover td { background: var(--wash); }
       const btn = e.target.querySelector("button");
       btn.classList.add("busy");
       try {
-        await api("POST", "/api/login", { password: $("#pw").value });
+        await api("POST", "/api/login", { password: $("#pw").value, remember: $("#remember").checked });
         banner = null;
         boot();
       } catch (err) {
@@ -459,6 +569,7 @@ tbody tr:hover td { background: var(--wash); }
 
   /* ---------------- Dashboard ---------------- */
   let DATA = null;
+  let SESSIONS = null;
 
   /* Ein Satz statt vier Kennzahlen - dieselbe Priorisierung wie auf der Kunden-Übersicht:
      Problem zuerst, dann Hinweis, sonst Ruhe. */
@@ -504,7 +615,7 @@ tbody tr:hover td { background: var(--wash); }
       ["Handlungsbedarf", m.connectionsNeedingAction, m.connectionsNeedingAction > 0],
     ];
     return items.map(([l, n, warn]) =>
-      `<div class="metric${warn ? " warn" : ""}"><div class="n">${n}</div><div class="l">${esc(l)}</div></div>`
+      `<div class="metric${warn ? " warn" : ""}"><div class="l">${esc(l)}</div><div class="n">${n}</div></div>`
     ).join("");
   }
 
@@ -525,7 +636,7 @@ tbody tr:hover td { background: var(--wash); }
       <h2>KI-Kosten (letzte 30 Tage, geschätzt)</h2>
       <div class="table-wrap">
       <table>
-        <thead><tr><th>Funktion</th><th>Aufrufe</th><th>Geschätzte Kosten</th></tr></thead>
+        <thead><tr><th class="kicker">Funktion</th><th class="kicker">Aufrufe</th><th class="kicker">Geschätzte Kosten</th></tr></thead>
         <tbody>${rows.map((r) => `<tr>
           <td data-label="Funktion">${esc(FEATURE_LABEL[r.feature] ?? r.feature)}</td>
           <td data-label="Aufrufe" class="num">${r.count}</td>
@@ -540,17 +651,20 @@ tbody tr:hover td { background: var(--wash); }
   function rowHtml(c) {
     // Anmeldeweg: null bedeutet Anmeldeschluessel per E-Mail (es gab noch keinen Anbieter).
     const wege = { google: "Google", microsoft: "Microsoft", apple: "Apple" };
+    /* Bis zum 21.09.2026 stand jede dieser Angaben in einer EIGENEN Zeile - vier Zeilen je
+       Kunde, nur fuer Nebenangaben. Dieselben Angaben, eine Zeile: das ist der groesste
+       einzelne Gewinn an Konten je Bildschirm, ohne dass etwas fehlt. */
     const extras = [
       `Anmeldung: ${wege[c.authProvider] || "E-Mail"}`,
       c.notifyOnPublish ? "Mail bei Veröffentlichung: an" : "",
-      c.analyticsFollowers != null ? `Analytics: ${c.analyticsFollowers} Follower` : "",
-      c.commentAutomationEnabled ? `Kommentare (30 T): ${c.commentStats30d.answered} beantwortet, ${c.commentStats30d.skipped} übersprungen, ${c.commentStats30d.pendingApproval} wartend` : "",
+      c.analyticsFollowers != null ? `${c.analyticsFollowers} Follower` : "",
+      c.commentAutomationEnabled ? `Kommentare 30 T: ${c.commentStats30d.answered} beantwortet, ${c.commentStats30d.skipped} übersprungen, ${c.commentStats30d.pendingApproval} wartend` : "",
     ].filter(Boolean);
     return `<tr data-id="${esc(c.customerId)}">
       <td data-label="Firma"><div class="company-cell">
         <strong>${esc(c.company)}</strong>
         <span class="meta">${esc(c.contactName)} · ${esc(c.email)}</span>
-        ${extras.map((t) => `<span class="meta">${esc(t)}</span>`).join("")}
+        <span class="meta">${esc(extras.join(" · "))}</span>
       </div></td>
       <td data-label="Erstellt" class="num">${fmtDate(c.createdAt)}</td>
       <td data-label="Status">${c.status === "active"
@@ -558,14 +672,21 @@ tbody tr:hover td { background: var(--wash); }
         : `<span class="chip warn">gesperrt</span>`}</td>
       <td data-label="Testphase">${trialChip(c)}</td>
       <td data-label="Kanäle">${channelChips(c)}</td>
-      <td data-label="Beiträge"><span class="num">${c.postCount}</span>${c.lastPostAt ? `<span class="meta muted small"> · zuletzt ${fmtDate(c.lastPostAt)}</span>` : ""}<span class="meta muted small"> · ${c.plannedPostCount} geplant</span></td>
+      <td data-label="Beiträge"><div class="company-cell">
+        <span class="num">${c.postCount}</span>
+        <span class="meta">${c.lastPostAt ? `zuletzt ${fmtDate(c.lastPostAt)} · ` : ""}${c.plannedPostCount} geplant</span>
+      </div></td>
       <td data-label="Aktionen"><div class="row-actions">
-        <button class="btn btn-quiet btn-small" data-action="details" data-id="${esc(c.customerId)}">Details</button>
-        ${c.openPostRequests ? `<button class="btn btn-quiet btn-small" data-action="cancel-requests" data-id="${esc(c.customerId)}">${c.openPostRequests} offene Anfrage${c.openPostRequests === 1 ? "" : "n"} stornieren</button>` : ""}
-        <button class="btn btn-quiet btn-small" data-action="extend" data-id="${esc(c.customerId)}">+7 Tage</button>
-        ${!c.trial.unlimited ? `<button class="btn btn-quiet btn-small" data-action="unlimited" data-id="${esc(c.customerId)}">Unbefristet</button>` : ""}
-        <button class="btn btn-quiet btn-small" data-action="toggle-status" data-id="${esc(c.customerId)}" data-status="${c.status === "active" ? "paused" : "active"}">${c.status === "active" ? "Sperren" : "Entsperren"}</button>
-        <button class="btn btn-quiet btn-small danger" data-action="delete" data-id="${esc(c.customerId)}" data-company="${esc(c.company)}">Löschen</button>
+        <span class="gruppe">
+          <button class="btn btn-quiet btn-small" data-action="details" data-id="${esc(c.customerId)}">Details</button>
+          ${c.openPostRequests ? `<button class="btn btn-quiet btn-small" data-action="cancel-requests" data-id="${esc(c.customerId)}">${c.openPostRequests} offene Anfrage${c.openPostRequests === 1 ? "" : "n"} stornieren</button>` : ""}
+          <button class="btn btn-quiet btn-small" data-action="extend" data-id="${esc(c.customerId)}">+7 Tage</button>
+          ${!c.trial.unlimited ? `<button class="btn btn-quiet btn-small" data-action="unlimited" data-id="${esc(c.customerId)}">Unbefristet</button>` : ""}
+        </span>
+        <span class="gruppe">
+          <button class="btn btn-small" data-action="toggle-status" data-id="${esc(c.customerId)}" data-status="${c.status === "active" ? "paused" : "active"}">${c.status === "active" ? "Sperren" : "Entsperren"}</button>
+          <button class="btn btn-danger btn-small" data-action="delete" data-id="${esc(c.customerId)}" data-company="${esc(c.company)}">Löschen</button>
+        </span>
       </div></td>
     </tr>`;
   }
@@ -596,6 +717,32 @@ tbody tr:hover td { background: var(--wash); }
     </div>`;
   }
 
+  /* ---------------- Sitzungen ----------------
+     "Wo bin ich gerade angemeldet" - und jede einzelne Sitzung von hier aus beenden. Die
+     eigene ist markiert; sie abzumelden ist dasselbe wie oben rechts "Abmelden". */
+  function sessionsHtml(sessions) {
+    if (!sessions) return `<p class="muted small">Sitzungen konnten nicht geladen werden.</p>`;
+    const zeilen = sessions.map((s) => `<tr data-session="${esc(s.id)}">
+      <td data-label="Gerät"><div class="company-cell">
+        <strong>${esc(s.device)}</strong>
+        <span class="meta">${esc(s.ip || "IP unbekannt")}</span>
+      </div></td>
+      <td data-label="Art">${s.current ? `<span class="chip stark">dieses Gerät</span>` : ""}<span class="chip">${s.remember ? "30 Tage" : "12 Stunden"}</span></td>
+      <td data-label="Angemeldet" class="num">${fmtDateTime(s.createdAt)}</td>
+      <td data-label="Zuletzt aktiv" class="num">${esc(fmtVor(s.lastSeenAt))}</td>
+      <td data-label="Läuft ab" class="num">${fmtDateTime(s.expiresAt)}</td>
+      <td data-label="Aktionen"><div class="row-actions"><span class="gruppe">
+        <button class="btn btn-small" data-action="logout-session" data-session="${esc(s.id)}">Abmelden</button>
+      </span></div></td>
+    </tr>`).join("");
+    return `<div class="table-wrap">
+      <table>
+        <thead><tr><th class="kicker">Gerät</th><th class="kicker">Art</th><th class="kicker">Angemeldet</th><th class="kicker">Zuletzt aktiv</th><th class="kicker">Läuft ab</th><th class="kicker">Aktionen</th></tr></thead>
+        <tbody>${zeilen}</tbody>
+      </table>
+    </div>`;
+  }
+
   function renderDashboard() {
     $("#logout").hidden = false;
     $("#app").innerHTML = `
@@ -612,7 +759,7 @@ tbody tr:hover td { background: var(--wash); }
         <div class="section-head"><h2 id="h-kunden">Kunden</h2><span class="muted small num">${DATA.customers.length}</span></div>
         <div class="table-wrap">
         <table>
-          <thead><tr><th>Firma</th><th>Erstellt</th><th>Status</th><th>Testphase</th><th>Kanäle</th><th>Beiträge</th><th>Aktionen</th></tr></thead>
+          <thead><tr><th class="kicker">Firma</th><th class="kicker">Erstellt</th><th class="kicker">Status</th><th class="kicker">Testphase</th><th class="kicker">Kanäle</th><th class="kicker">Beiträge</th><th class="kicker">Aktionen</th></tr></thead>
           <tbody>${DATA.customers.length ? DATA.customers.map(rowHtml).join("") : `<tr><td colspan="7" class="muted" style="text-align:center;padding:var(--s7) 0">Noch keine Kunden.</td></tr>`}</tbody>
         </table>
         </div>
@@ -622,12 +769,27 @@ tbody tr:hover td { background: var(--wash); }
         <div class="section-head"><h2 id="h-werkzeuge">Werkzeuge</h2></div>
         ${testEmailSectionHtml()}
         ${usageCostsHtml(DATA.usageCosts)}
+      </section>
+
+      <section class="section" aria-labelledby="h-sitzungen">
+        <div class="section-head">
+          <h2 id="h-sitzungen">Meine Sitzungen</h2>
+          ${SESSIONS && SESSIONS.length > 1 ? `<button class="btn btn-quiet btn-small" data-action="logout-others">Alle anderen abmelden</button>` : ""}
+        </div>
+        ${sessionsHtml(SESSIONS)}
       </section>`;
   }
 
   async function loadOverview() {
     $("#app").innerHTML = `<p class="loading">Wird geladen …</p>`;
-    DATA = await api("GET", "/api/overview");
+    /* Beides gleichzeitig - die Sitzungsliste darf die Kundenliste nicht aufhalten. Faellt sie
+       aus, steht das in ihrem Abschnitt; die Uebersicht bleibt trotzdem da. */
+    const [uebersicht, sitzungen] = await Promise.all([
+      api("GET", "/api/overview"),
+      api("GET", "/api/sessions").catch(() => null),
+    ]);
+    DATA = uebersicht;
+    SESSIONS = sitzungen ? sitzungen.sessions : null;
     renderDashboard();
   }
 
@@ -697,6 +859,25 @@ tbody tr:hover td { background: var(--wash); }
     const action = btn.dataset.action;
     try {
       if (action === "details") return showDetails(id);
+      /* Eine einzelne Sitzung beenden. Keine Rueckfrage: der Schaden ist eine erneute
+         Anmeldung, und genau das ist ja der Zweck des Knopfes. Trifft es die eigene, ist man
+         danach abgemeldet - der Server raeumt dabei auch das Cookie weg. */
+      if (action === "logout-session") {
+        btn.classList.add("busy");
+        const antwort = await api("DELETE", `/api/sessions/${btn.dataset.session}`);
+        if (antwort.warEigene) return boot();
+        await loadOverview();
+      }
+      if (action === "logout-others") {
+        if (!(await showConfirm({
+          title: "Alle anderen Sitzungen abmelden?",
+          message: "Dieses Gerät bleibt angemeldet. Auf allen anderen ist eine neue Anmeldung nötig.",
+          confirmLabel: "Abmelden",
+        }))) return;
+        btn.classList.add("busy");
+        await api("DELETE", "/api/sessions/others");
+        await loadOverview();
+      }
       if (action === "cancel-requests") {
         if (!(await showConfirm({ title: "Offene Anfragen stornieren?", message: "Der Kanal ist danach wieder frei. Bereits veröffentlichte Beiträge bleiben bestehen.", confirmLabel: "Stornieren" }))) return;
         btn.classList.add("busy");

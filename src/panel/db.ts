@@ -699,6 +699,38 @@ migrateColumns("customers", [["login_link_token_hash", "TEXT"], ["login_link_exp
 migrateColumns("customers", [["auth_provider", "TEXT"], ["auth_subject", "TEXT"]]);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS customers_auth ON customers(auth_provider, auth_subject) WHERE auth_provider IS NOT NULL`);
 
+// 21.09.2026 - "Angemeldet bleiben". Eine Admin-Sitzung war bis hierher ein Token-Hash und ein
+// Ablauf, sonst nichts. Fuer die drei Punkte des Auftrags fehlten drei Sorten Angaben:
+//
+//   remember        Nur zur Anzeige ("30 Tage" statt "12 Stunden"). Verbindlich ist und bleibt
+//                   ALLEIN expires_at - die Spalte darf nie zur Grundlage einer Pruefung werden.
+//   pw_fingerprint  Bindet die Sitzung an genau das Adminpasswort, mit dem sie entstanden ist.
+//                   Wird PANEL_ADMIN_PASSWORD geaendert, passt keine bestehende Sitzung mehr und
+//                   alle sind ungueltig - ohne Aufraeumlauf, ohne Liste, die man vergessen kann.
+//                   Der Wert ist scrypt(Passwort), nicht das Passwort und bewusst kein blankes
+//                   sha256: wer diese Datei in die Haende bekaeme, soll daraus das Passwort nicht
+//                   zurueckrechnen koennen (siehe admin.ts passwortFingerabdruck).
+//   id, created_at, last_seen_at, user_agent, ip
+//                   Die Sitzungsliste im Adminbereich: welches Geraet, seit wann, zuletzt aktiv.
+//                   `id` ist eine eigene Zufallskennung - der Token-Hash bleibt damit im Server
+//                   und taucht in keiner Antwort und in keinem HTML auf.
+migrateColumns("admin_sessions", [
+  ["id", "TEXT"],
+  ["created_at", "TEXT"],
+  ["last_seen_at", "TEXT"],
+  ["remember", "INTEGER NOT NULL DEFAULT 0"],
+  ["user_agent", "TEXT"],
+  ["ip", "TEXT"],
+  ["pw_fingerprint", "TEXT"],
+]);
+// ALTER TABLE ADD COLUMN kann kein UNIQUE mitbringen - der Index danach kann es. Mehrere NULL
+// verletzen ein UNIQUE in SQLite nicht, Altzeilen (id IS NULL) stoeren also nicht.
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS admin_sessions_id ON admin_sessions(id)`);
+// Sitzungen von vor dieser Aenderung kennen ihr Passwort nicht und koennten die Zusage
+// "Passwortwechsel meldet ueberall ab" nicht halten. Sie fallen einmalig weg - Preis: eine
+// erneute Anmeldung nach dem Deploy, und zwar genau eine.
+db.prepare("DELETE FROM admin_sessions WHERE pw_fingerprint IS NULL").run();
+
 // Kurzlebiger Zustand eines laufenden Anmeldevorgangs. Eigene Tabelle statt oauth_states: dort
 // haengt ein Pflicht-Fremdschluessel auf customers, und beim Anmelden gibt es den Kunden noch
 // nicht (genau das ist der Unterschied zwischen "Kanal verbinden" und "Konto anlegen").

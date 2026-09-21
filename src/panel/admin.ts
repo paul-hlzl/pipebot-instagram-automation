@@ -7,6 +7,11 @@
  * Mounted inside the panel router (`router.use("/admin", createAdminRouter())`), so it
  * sits before the global MCP bearer-token gate in http-server.ts and gets the panel's
  * security headers / JSON body parser for free.
+ *
+ * 21.09.2026 - "Angemeldet bleiben": eine Sitzung haelt weiterhin 12 Stunden, mit Haken bei der
+ * Anmeldung 30 Tage. Dazu zwei Zusagen, die im Code und nicht in der Disziplin haengen:
+ * ein Wechsel des Adminpassworts macht JEDE bestehende Sitzung ungueltig (pw_fingerprint,
+ * siehe unten), und jede Sitzung ist einzeln abmeldbar (/api/sessions).
  */
 import express, { type Request, type Response, type NextFunction, type Router } from "express";
 import path from "node:path";
@@ -47,8 +52,81 @@ const cookiePathFor = (req: Request): string => {
  */
 export const ADMIN_SEGMENT = (process.env.PANEL_ADMIN_PATH ?? "admin").replace(/^\/+|\/+$/g, "") || "admin";
 
+/** Ohne Haken bei "Angemeldet bleiben" - unveraendert der Wert von vorher. */
 const SESSION_HOURS = 12;
+/** Mit Haken. Bewusst FEST ab Anmeldung, nicht gleitend: "30 Tage auf diesem Geraet" soll ein
+ *  Datum sein, das in der Sitzungsliste steht, und keine Zusage, die sich bei jedem Aufruf
+ *  selbst verlaengert und damit nie ablaeuft. */
+const REMEMBER_DAYS = 30;
 const STATUSES = ["active", "paused"] as const;
+
+/**
+ * Fingerabdruck des Adminpassworts. Jede Sitzung speichert den ihres Passworts; geprueft wird
+ * gegen den des GERADE geltenden. Aendert Paul PANEL_ADMIN_PASSWORD, stimmt kein gespeicherter
+ * Wert mehr ueberein und samtliche Sitzungen sind in derselben Sekunde ungueltig - ohne dass
+ * irgendwo eine Liste aufgeraeumt werden muss, die man vergessen koennte.
+ *
+ * scrypt statt sha256: der Wert steht in der Datenbank, das Passwort ist kurz und von Hand
+ * gewaehlt. Ein blanker Hash waere offline in Minuten durchprobiert, scrypt nicht. Die
+ * Ableitung kostet ~100 ms, deshalb liegt das Ergebnis im Prozess (fuer genau ein Passwort) -
+ * pro Anfrage wird nichts neu gerechnet.
+ *
+ * Grenze, die zum Auftrag gehoert: PANEL_ADMIN_PASSWORD wird beim Start aus der .env gelesen.
+ * Ein geaendertes Passwort gilt also ab dem Neustart, den es ohnehin braucht - und genau ab
+ * dann sind auch die Sitzungen weg. "Sofort" heisst hier: zum selben Zeitpunkt, zu dem das
+ * neue Passwort gilt, nicht spaeter.
+ */
+const FINGERABDRUCK_SALZ = "pipeflow-admin-sitzungsbindung-v1";
+let fingerabdruckCache: { passwort: string; wert: string } | null = null;
+function passwortFingerabdruck(passwort: string): string {
+  if (fingerabdruckCache?.passwort === passwort) return fingerabdruckCache.wert;
+  const wert = crypto.scryptSync(passwort, FINGERABDRUCK_SALZ, 32).toString("hex");
+  fingerabdruckCache = { passwort, wert };
+  return wert;
+}
+/** null = kein Adminpasswort gesetzt. Dann gibt es keine Anmeldung und auch keine Sitzung. */
+function aktuellerFingerabdruck(): string | null {
+  const passwort = process.env.PANEL_ADMIN_PASSWORD?.trim();
+  return passwort ? passwortFingerabdruck(passwort) : null;
+}
+
+interface AdminSessionRow {
+  token_hash: string;
+  expires_at: string;
+  id: string | null;
+  created_at: string | null;
+  last_seen_at: string | null;
+  remember: number;
+  user_agent: string | null;
+  ip: string | null;
+}
+
+/**
+ * Lesbarer Geraetename aus dem User-Agent - "Chrome auf Windows" statt 120 Zeichen Kauderwelsch.
+ * Bewusst grob und ohne Bibliothek: die Liste beantwortet die eine Frage, um die es geht ("bin
+ * ich das, oder ist das ein fremdes Geraet?"). Reihenfolge zaehlt - Edge und Opera nennen sich
+ * selbst auch "Chrome", Chrome nennt sich auch "Safari".
+ */
+function geraeteName(ua: string | null): string {
+  const s = ua ?? "";
+  if (!s.trim()) return "Unbekanntes Gerät";
+  const browser =
+    /\bEdgA?\//.test(s) ? "Edge" :
+    /\bOPR\/|\bOpera\//.test(s) ? "Opera" :
+    /\bFirefox\//.test(s) ? "Firefox" :
+    /\bChrome\//.test(s) ? "Chrome" :
+    /\bSafari\//.test(s) ? "Safari" :
+    "Browser";
+  const system =
+    /iPhone/.test(s) ? "iPhone" :
+    /iPad/.test(s) ? "iPad" :
+    /Android/.test(s) ? "Android" :
+    /Windows NT/.test(s) ? "Windows" :
+    /Mac OS X|Macintosh/.test(s) ? "macOS" :
+    /Linux/.test(s) ? "Linux" :
+    null;
+  return system ? `${browser} auf ${system}` : browser;
+}
 
 function readCookie(req: Request, name: string): string | undefined {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -80,30 +158,69 @@ function rateLimited(key: string, max: number, windowMs: number): boolean {
 const clientIp = (req: Request): string =>
   (String(req.headers["x-forwarded-for"] ?? "").split(",")[0] || req.socket.remoteAddress || "unknown").trim();
 
-function startAdminSession(res: Response, req: Request): void {
+function startAdminSession(res: Response, req: Request, angemeldetBleiben: boolean): void {
+  const fingerabdruck = aktuellerFingerabdruck();
+  // Kann hier nicht eintreten (ohne Passwort kommt niemand durch die Anmeldung) - aber eine
+  // Sitzung ohne Bindung waere eine, die ein Passwortwechsel nicht mehr erreicht.
+  if (!fingerabdruck) throw new Error("PANEL_ADMIN_PASSWORD fehlt - keine Sitzung ohne Passwort.");
+  const sekunden = angemeldetBleiben ? REMEMBER_DAYS * 86_400 : SESSION_HOURS * 3_600;
   const token = randomToken();
-  const expires = new Date(Date.now() + SESSION_HOURS * 3_600_000).toISOString();
-  db.prepare("INSERT INTO admin_sessions (token_hash, expires_at) VALUES (?, ?)").run(sha256(token), expires);
+  const jetzt = nowIso();
+  const expires = new Date(Date.now() + sekunden * 1000).toISOString();
+  // Sitzungen eines frueheren Passworts sind schon durch die Pruefung unten ungueltig; hier
+  // verschwinden sie auch aus der Tabelle, damit die Sitzungsliste keine Leichen zeigt.
+  // "IS NOT" statt "!=": NULL-sicher, sonst blieben genau die Altzeilen stehen.
+  db.prepare("DELETE FROM admin_sessions WHERE pw_fingerprint IS NOT ?").run(fingerabdruck);
+  db.prepare(
+    `INSERT INTO admin_sessions (token_hash, expires_at, id, created_at, last_seen_at, remember, user_agent, ip, pw_fingerprint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sha256(token),
+    expires,
+    randomToken(12),
+    jetzt,
+    jetzt,
+    angemeldetBleiben ? 1 : 0,
+    String(req.headers["user-agent"] ?? "").slice(0, 300),
+    clientIp(req),
+    fingerabdruck,
+  );
   res.setHeader(
     "Set-Cookie",
-    `${COOKIE}=${token}; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_HOURS * 3600}`,
+    `${COOKIE}=${token}; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=${sekunden}`,
   );
 }
 
-function hasAdminSession(req: Request): boolean {
+/** Die Sitzung hinter dem Cookie - oder null. Drei Bedingungen, alle drei in EINER Abfrage:
+ *  Token bekannt, noch nicht abgelaufen, und an das aktuell geltende Passwort gebunden. */
+function currentSession(req: Request): AdminSessionRow | null {
   const token = readCookie(req, COOKIE);
-  if (!token) return false;
+  if (!token) return null;
+  const fingerabdruck = aktuellerFingerabdruck();
+  if (!fingerabdruck) return null;
   const row = db
-    .prepare("SELECT 1 FROM admin_sessions WHERE token_hash = ? AND expires_at > ?")
-    .get(sha256(token), nowIso());
-  return Boolean(row);
+    .prepare("SELECT * FROM admin_sessions WHERE token_hash = ? AND expires_at > ? AND pw_fingerprint = ?")
+    .get(sha256(token), nowIso(), fingerabdruck) as AdminSessionRow | undefined;
+  return row ?? null;
+}
+
+const hasAdminSession = (req: Request): boolean => currentSession(req) !== null;
+
+/** "Zuletzt aktiv" in der Sitzungsliste. Hoechstens einmal je Minute geschrieben - sonst kostet
+ *  jede einzelne Anfrage der Oberflaeche einen Schreibzugriff, nur fuer eine Anzeige. */
+function beruehreSession(row: AdminSessionRow): void {
+  if (row.last_seen_at && Date.now() - new Date(row.last_seen_at).getTime() < 60_000) return;
+  db.prepare("UPDATE admin_sessions SET last_seen_at = ? WHERE token_hash = ?").run(nowIso(), row.token_hash);
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!hasAdminSession(req)) {
+  const session = currentSession(req);
+  if (!session) {
     res.status(401).json({ error: "Nicht angemeldet" });
     return;
   }
+  beruehreSession(session);
+  res.locals.adminSession = session;
   next();
 }
 
@@ -206,7 +323,9 @@ export function createAdminRouter(panelPublicDir?: string): Router {
         res.status(401).json({ error: "Falsches Passwort." });
         return;
       }
-      startAdminSession(res, req);
+      // Fehlender/ungueltiger Wert = nicht angehakt. Der kurze Ablauf ist der Standard, der
+      // lange muss ausdruecklich gewaehlt werden.
+      startAdminSession(res, req, req.body?.remember === true);
       res.json({ ok: true });
     }),
   );
@@ -237,6 +356,69 @@ export function createAdminRouter(panelPublicDir?: string): Router {
   });
 
   router.use(requireAdmin);
+
+  /**
+   * Sitzungen dieses Adminkontos - "wo bin ich gerade angemeldet".
+   *
+   * Der Token-Hash bleibt im Server; nach aussen geht nur die Zufallskennung `id`. Ein
+   * abgelaufener Eintrag taucht nicht auf: die Liste zeigt, was JETZT gilt, nicht was einmal war.
+   */
+  router.get(
+    "/api/sessions",
+    safe((req, res) => {
+      const eigener = res.locals.adminSession as AdminSessionRow;
+      const rows = db
+        .prepare("SELECT * FROM admin_sessions WHERE expires_at > ? ORDER BY created_at DESC")
+        .all(nowIso()) as AdminSessionRow[];
+      res.json({
+        sessions: rows.map((r) => ({
+          id: r.id,
+          current: r.token_hash === eigener.token_hash,
+          remember: Boolean(r.remember),
+          device: geraeteName(r.user_agent),
+          ip: r.ip,
+          createdAt: r.created_at,
+          lastSeenAt: r.last_seen_at,
+          expiresAt: r.expires_at,
+        })),
+      });
+    }),
+  );
+
+  /** Alle ausser der eigenen. Muss VOR "/api/sessions/:id" stehen, sonst waere "others" die id. */
+  router.delete(
+    "/api/sessions/others",
+    safe((req, res) => {
+      const eigener = res.locals.adminSession as AdminSessionRow;
+      const ergebnis = db
+        .prepare("DELETE FROM admin_sessions WHERE token_hash != ?")
+        .run(eigener.token_hash);
+      res.json({ ok: true, abgemeldet: ergebnis.changes });
+    }),
+  );
+
+  /** Eine einzelne Sitzung beenden. Trifft es die eigene, muss auch das Cookie weg - sonst
+   *  schickt der Browser weiter ein Token mit, zu dem es keine Zeile mehr gibt. */
+  router.delete(
+    "/api/sessions/:id",
+    safe((req, res) => {
+      const eigener = res.locals.adminSession as AdminSessionRow;
+      const id = String(req.params.id);
+      const row = db.prepare("SELECT token_hash FROM admin_sessions WHERE id = ?").get(id) as
+        | { token_hash: string }
+        | undefined;
+      if (!row) {
+        res.status(404).json({ error: "Sitzung nicht gefunden." });
+        return;
+      }
+      db.prepare("DELETE FROM admin_sessions WHERE id = ?").run(id);
+      const warEigene = row.token_hash === eigener.token_hash;
+      if (warEigene) {
+        res.setHeader("Set-Cookie", `${COOKIE}=; Path=${cookiePathFor(req)}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+      }
+      res.json({ ok: true, warEigene });
+    }),
+  );
 
   router.get(
     "/api/overview",

@@ -778,7 +778,23 @@ export function createPanelRouter(): Router {
   // "/start/" umgeleitet - hinter dem Sandbox-Proxy (der /sandbox abschneidet) zeigte diese
   // Umleitung auf den falschen Pfad.
   router.get(["/start", "/start/"], (_req, res) => res.sendFile(path.join(publicDir, "start/index.html")));
-  router.use(express.static(publicDir, { index: false, maxAge: "5m" }));
+  // admin.html liegt IM publicDir (damit deploy-panel.mjs sie mitliefert) - und express.static
+  // hat sie damit auch unter ${mount}/admin.html ausgeliefert: an jeden, ohne Passwort, HTTP 200,
+  // 40 KB Anmeldeseite. Das Verstecken des Adminbereichs hinter PANEL_ADMIN_PATH (20.09.2026) war
+  // an dieser einen Adresse ausgehebelt. Nicht die Daten - die API haengt weiter am geheimen
+  // Segment und an der Sitzung - aber die Existenz, und genau die sollte verborgen sein.
+  // Belegt am 21.09.2026 per curl: app.pipeflow.at/admin.html -> 200, 40078 Bytes, waehrend jeder
+  // erfundene Pfad mit 401 und 24 Bytes antwortet.
+  // Der Adminrouter liefert die Datei weiter selbst aus (er kennt dasselbe publicDir); hier faellt
+  // nur der oeffentliche Weg weg und endet im selben 401 wie jeder unbekannte Pfad.
+  const statischesPanel = express.static(publicDir, { index: false, maxAge: "5m" });
+  router.use((req, res, next) => {
+    if (req.path.toLowerCase() === "/admin.html") {
+      next();
+      return;
+    }
+    statischesPanel(req, res, next);
+  });
 
   // Easy Onboarding (19.09.2026): eigener Pfad ${mount}/start/ fuer die neue Oberflaeche. Wer ueber
   // den neuen Flow gekommen ist (ui_mode = 'easy'), landet auch bei "/" dort - bestehende Kunden
