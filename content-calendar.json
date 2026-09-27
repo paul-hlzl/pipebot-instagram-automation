@@ -1,39 +1,39 @@
 {
-  "week_start": "2026-09-21",
+  "week_start": "2026-09-28",
   "days": {
-    "2026-09-21": {
+    "2026-09-28": {
       "category": "Kundenservice/24-7-Support",
-      "topic": "How an AI chatbot keeps every customer interaction consistent in tone and accuracy, even on the business's busiest day of the year",
-      "status": "posted"
+      "topic": "How a chatbot handles a flood of Instagram DMs during a flash sale without leaving a single customer waiting",
+      "status": "planned"
     },
-    "2026-09-22": {
+    "2026-09-29": {
       "category": "Automatisierung/Effizienz",
-      "topic": "Automating appointment booking and confirmations so staff spend their time on sales conversations instead of scheduling admin",
-      "status": "posted"
+      "topic": "Automating repetitive replies about shipping times and return policies so the team only handles questions that need a human touch",
+      "status": "planned"
     },
-    "2026-09-23": {
+    "2026-09-30": {
       "category": "Chatbot/ROI",
-      "topic": "Comparing the monthly cost of a chatbot subscription to the salary of one extra support hire, and what the business gets back",
-      "status": "posted"
+      "topic": "How turning Instagram comments and DMs into tracked sales conversations reveals the real revenue a chatbot generates each month",
+      "status": "planned"
     },
-    "2026-09-24": {
+    "2026-10-01": {
       "category": "KI-Tools/Digitalisierung",
-      "topic": "The most common mistake small businesses make when picking their first AI tool, and how to avoid it",
-      "status": "posted"
+      "topic": "Three signs a small business is actually ready to add its first AI tool, and what to set up before flipping the switch",
+      "status": "planned"
     },
-    "2026-09-25": {
+    "2026-10-02": {
       "category": "Kundenservice/24-7-Support",
-      "topic": "How an AI chatbot serves customers across different time zones and languages without hiring a bigger support team",
+      "topic": "What happens to a customer's question at 11pm without 24/7 AI support, and what changes the moment it's added",
       "status": "planned"
     },
-    "2026-09-26": {
+    "2026-10-03": {
       "category": "Automatisierung/Effizienz",
-      "topic": "Automatically following up on abandoned carts and unanswered questions so no potential customer falls through the cracks",
+      "topic": "Automating the handoff from chatbot to a human team member for complex requests, so nothing feels like a dead end",
       "status": "planned"
     },
-    "2026-09-27": {
+    "2026-10-04": {
       "category": "Chatbot/ROI",
-      "topic": "Which three metrics actually prove a chatbot is paying for itself, and how to track them",
+      "topic": "Calculating the hidden cost of every missed message before a chatbot, and what changes once every inquiry gets answered",
       "status": "planned"
     }
   }
